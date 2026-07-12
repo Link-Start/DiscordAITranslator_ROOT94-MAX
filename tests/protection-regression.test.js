@@ -2,6 +2,28 @@
 const assert = require("node:assert/strict");
 const {createProtectionRegressionPluginInstance: createPluginInstance} = require("./helpers/createPluginInstance");
 
+test("live provider responses missing protected placeholders are rejected", async () => {
+	const plugin = createPluginInstance();
+	plugin.settings.choices.received = {input: "en", output: "zh-CN"};
+	plugin.getEffectivePrimaryEngine = () => "deepseek";
+	plugin.getEffectiveBackupEngine = () => "----";
+	plugin.validTranslator = key => key == "deepseek";
+	plugin.deepSeekTranslate = (_data, callback) => callback("你好");
+	plugin.isTranslationLikelyInTargetLanguage = () => true;
+
+	const result = await new Promise(resolve => {
+		plugin.translateText("hello <@123456789>", "received", translation => resolve(translation), null, {
+			auto: true,
+			forcePlainTranslation: true,
+			showToast: false,
+			showFailureToast: false,
+			channelId: "channel-protection"
+		});
+	});
+
+	assert.equal(result, "");
+});
+
 function runProtection(text, place = "sent") {
 	const plugin = createPluginInstance();
 	const [maskedText, protectedSegments, shouldTranslate] = plugin.removeExceptions(text, place);

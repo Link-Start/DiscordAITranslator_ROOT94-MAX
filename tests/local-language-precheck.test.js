@@ -150,6 +150,41 @@ test("isTranslationLikelyInTargetLanguage rejects an obvious wrong-script transl
 	assert.equal(plugin.isTranslationLikelyInTargetLanguage("你好朋友", "zh-CN"), true);
 });
 
+test("isTranslationLikelyInTargetLanguage rejects confident wrong Latin languages", () => {
+	const plugin = createPluginInstance();
+
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("hello there my friend, how are you doing today", "fr"), false);
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("je ne sais pas ce que tu veux dire avec ce mot", "en"), false);
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("no se que hacer porque esto es para todos los que estan aqui", "en"), false);
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("je ne sais pas ce que tu veux dire avec ce mot", "fr"), true);
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("ok hello", "fr"), true);
+});
+
+test("isTranslationLikelyInTargetLanguage rejects high-confidence wrong-language short Latin words", () => {
+	const plugin = createPluginInstance();
+	const mismatches = [
+		["oui", "en"],
+		["bonjour", "en"],
+		["hola", "en"],
+		["gracias", "en"],
+		["yes", "fr"],
+		["oui", "zh-CN"]
+	];
+	for (const [text, target] of mismatches) assert.equal(plugin.isTranslationLikelyInTargetLanguage(text, target), false, `${text} should not be accepted as ${target}`);
+
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("oui", "fr"), true);
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("hola", "es"), true);
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("yes", "en"), true);
+});
+
+test("isTranslationLikelyInTargetLanguage keeps ambiguous and unknown short Latin words", () => {
+	const plugin = createPluginInstance();
+
+	for (const text of ["ok", "no", "Rin", "Codex"]) {
+		assert.equal(plugin.isTranslationLikelyInTargetLanguage(text, "fr"), true, `${text} should remain conservative`);
+	}
+});
+
 test("detectLanguage: empty text short-circuits without calling Google", () => {
 	const plugin = createPluginInstance();
 	let requestCalls = 0;
@@ -191,6 +226,44 @@ test("detectLanguage: invalid Google JSON resolves null", () => {
 			resolve();
 		});
 	});
+});
+
+test("language detection local-first strategy avoids the network on confident text", async () => {
+	const plugin = createPluginInstance();
+	plugin.settings.filters.languageDetectionStrategy = "local_first";
+	plugin._testBdfdb.LibraryRequires.request = () => {
+		throw new Error("network should not be used for confident local detection");
+	};
+
+	const detected = await new Promise(resolve => plugin.detectLanguage("the quick brown fox and the small dog are here", resolve));
+	assert.equal(detected, "en");
+});
+
+test("language detection local-only strategy returns null when local evidence is uncertain", async () => {
+	const plugin = createPluginInstance();
+	plugin.settings.filters.languageDetectionStrategy = "local_only";
+	let requestCalls = 0;
+	plugin._testBdfdb.LibraryRequires.request = () => {
+		requestCalls++;
+	};
+
+	const detected = await new Promise(resolve => plugin.detectLanguage("bonjour", resolve));
+	assert.equal(detected, null);
+	assert.equal(requestCalls, 0);
+});
+
+test("language detection Google strategy bypasses a confident local result", async () => {
+	const plugin = createPluginInstance();
+	plugin.settings.filters.languageDetectionStrategy = "google_free";
+	let requestCalls = 0;
+	plugin._testBdfdb.LibraryRequires.request = (_url, _options, callback) => {
+		requestCalls++;
+		callback(null, {statusCode: 200}, JSON.stringify({src: "fr"}));
+	};
+
+	const detected = await new Promise(resolve => plugin.detectLanguage("the quick brown fox and the small dog are here", resolve));
+	assert.equal(detected, "fr");
+	assert.equal(requestCalls, 1);
 });
 
 test("isReceivedMessageForeignAsync: local fast-path returns true without calling Google", () => {

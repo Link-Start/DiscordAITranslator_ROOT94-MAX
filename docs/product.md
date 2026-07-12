@@ -2,15 +2,15 @@
 
 ## Purpose
 
-DiscordAITranslator translates sent messages, received messages, reply previews, and supported embedded message content while preserving Discord markup and the user's original text.
+DiscordAITranslator translates sent messages, received messages, reply previews, supported embedded content, and enabled forum/thread titles while preserving Discord markup and the user's original text.
 
 The primary user is not expected to understand provider APIs or repository internals. Common channel actions must be available next to the Discord message input; advanced defaults and credentials belong in BetterDiscord settings.
 
 ## Current Channel Interaction
 
 - Left-clicking the translator icon opens current-channel translation settings.
-- Right-clicking the translator icon toggles automatic translation only for the current channel.
-- Turning a channel off removes automatic received translations and pending work for that channel.
+- Right-clicking the translator icon toggles the automatic translation master switch only for the current channel.
+- Turning a channel off removes automatic sent/received work, automatic display state, and translated thread title for that channel.
 - Manual translations and translated sent messages are not removed by the channel toggle.
 - Channel state never changes another channel or the global backup provider.
 
@@ -51,6 +51,15 @@ The channel popout does not contain:
 - A professional term should remain untranslated when it has no accepted target-language translation; an official or widely accepted localized name may be used.
 - Translation output must contain translated text only, without explanations or commentary.
 
+## Live And Historical Messages
+
+- Live messages use an immediate queue and never wait for loaded-history work.
+- Loaded messages form one channel-scoped, ID-keyed job up to the configured limit.
+- A historical job may make several provider or repair requests, but valid terminal results become visible in one atomic rerender.
+- Missing, duplicate, malformed, empty, wrong-language, and placeholder-damaged batch results enter repair instead of disappearing.
+- Each pending message uses a fixed-size CSS loading indicator without timer-driven React rerenders.
+- Historical display commit waits for recent typing and scrolling to become idle.
+
 ## Message Lifecycle
 
 - Editing a translated sent message must open editable original text and save a correctly translated replacement.
@@ -58,12 +67,23 @@ The channel popout does not contain:
 - Stopping or uninstalling the plugin must restore original message, reply, and embed content.
 - Reloading the plugin must not reuse stale display state left by an earlier runtime session.
 
-## Planned Coverage
+## Providers And Detection
 
-- Automatic translation of Discord forum and thread titles
-- Official OpenAI provider
-- Native Gemini provider
-- Clear OpenAI-compatible provider for self-hosted and third-party APIs
-- Configurable language detection strategy
+- Official OpenAI uses the Responses API.
+- Gemini uses its native `generateContent` API.
+- Third-party and self-hosted services use the separate OpenAI-compatible provider and require an explicit endpoint and model.
+- Google Free remains keyless; official Google API keys belong to Google Cloud Translation.
+- Global language detection supports local-first with Google fallback, Google-only, and local-only strategies.
 
-These items remain incomplete until their roadmap tasks and regression tests pass.
+## Forum And Thread Titles
+
+- Title translation follows the current thread or forum-post channel configuration.
+- The plugin replaces only rendered title text and never mutates the Discord channel store object.
+- Edited titles invalidate stale translations.
+- Disabling the channel or stopping the plugin restores the original title and rejects late callbacks.
+
+## Remaining Engineering Work
+
+- Split the tested single-file implementation into source modules with deterministic build output.
+- Add provider and Discord render latency instrumentation.
+- Complete the remaining DiscordPTB smoke-test checklist before a version bump or release.

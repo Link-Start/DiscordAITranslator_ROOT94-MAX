@@ -4,8 +4,8 @@
 
 The shipped implementation is `DiscordAITranslator.plugin.js`:
 
-- Approximately 10,943 lines
-- Approximately 601 KB
+- Approximately 10,688 lines
+- Approximately 582 KB
 - BetterDiscord and BDFDB runtime
 - One generated or hand-maintained distribution file
 - Node.js built-in regression tests using a mocked BDFDB environment
@@ -20,10 +20,11 @@ The single file already contains several logical modules:
 - Channel enablement state
 - Channel primary provider overrides
 - Sent translation policy
-- Received translation policy and queue runtime
-- Historical AI batch translation
+- Received translation policy and live-only queue runtime
+- Channel-scoped `HistoricalTranslationJob` coordinator
 - Translation cache and reply-preview signatures
 - Translation display logic
+- Forum and thread title display logic
 - Text protection logic
 - BetterDiscord settings and channel popout UI
 
@@ -50,9 +51,9 @@ Persistent channel records must be normalized on load. Runtime queues and displa
 2. Extract original message and embed content.
 3. Build a signature from content, languages, protection policy, channel, primary provider, and backup provider.
 4. Reuse a valid cache entry or evaluate pre-translation skip rules.
-5. Queue live or historical work.
-6. Translate through the effective primary provider, then the global backup.
-7. Apply display data and rerender the affected message surface.
+5. Queue live work immediately or collect loaded messages into an immutable historical job.
+6. Translate through the effective primary provider, validate every returned ID and protected placeholder, and repair unresolved historical items.
+7. Apply live display data immediately; commit one historical job atomically after typing and scrolling are idle.
 
 ### Sent Messages
 
@@ -70,10 +71,10 @@ Manual translation is independent from the channel automatic translation switch.
 
 - The main file is too large for safe iteration.
 - UI rendering, persistence, provider dispatch, and runtime cleanup still share closure state.
-- Message display mutates Discord message objects and must always retain recoverable original data.
-- Plugin shutdown currently needs stronger original-content restoration guarantees.
-- Message edits, thread titles, and live versus historical rerenders require dedicated lifecycle adapters.
-- Provider capability checks can drift unless they use one shared contract.
+- Message display still adapts Discord message objects and must retain recoverable original data.
+- The coordinator, provider adapters, settings UI, and display code remain physically coupled in one file.
+- Thread-title patch points are covered by unit tests but still require DiscordPTB smoke validation against the current client build.
+- Provider latency is not yet instrumented by queue, network, validation, commit wait, and Discord render phase.
 
 ## Target Source Layout
 
