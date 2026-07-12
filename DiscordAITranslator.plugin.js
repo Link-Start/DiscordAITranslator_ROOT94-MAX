@@ -636,6 +636,167 @@ module.exports = (_ => {
 			SENT: "sent",
 		};
 		const AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__";
+		const HISTORICAL_TERMINAL_ITEM_STATES = new Set(["translated", "skipped", "failed", "cancelled"]);
+
+		class HistoricalTranslationJob {
+			constructor(config = {}) {
+				this.id = config.id || `historical-${Date.now()}`;
+				this.channelId = config.channelId || null;
+				this.generation = config.generation || 0;
+				this.dependencies = Object.assign({
+					prepare: item => ({status: "pending", prepared: item}),
+					translateBatch: () => Promise.resolve(null),
+					validate: (_item, translatedText) => translatedText == null ? {ok: false} : {ok: true, translation: translatedText},
+					repair: () => Promise.resolve({status: "failed", reason: "unresolved"}),
+					waitForCommit: () => Promise.resolve(),
+					isCurrent: () => true,
+					commit: () => {},
+					rerender: () => {},
+					onStateChange: () => {}
+				}, config.dependencies || {});
+				this.items = new Map();
+				this.state = "collecting";
+				this.cancelReason = null;
+				this.started = false;
+			}
+
+			add(item) {
+				if (this.state != "collecting") return false;
+				const source = item && item.message ? item : {message: item};
+				const messageId = source.message && source.message.id;
+				if (!messageId || this.items.has(String(messageId))) return false;
+				this.items.set(String(messageId), {
+					source,
+					prepared: null,
+					status: "pending",
+					translation: null,
+					reason: null
+				});
+				this.dependencies.onStateChange(this);
+				return true;
+			}
+
+			cancel(reason = "cancelled") {
+				if (this.state == "committed" || this.state == "cancelled") return false;
+				this.cancelReason = reason;
+				this.state = "cancelled";
+				for (const record of this.items.values()) if (!HISTORICAL_TERMINAL_ITEM_STATES.has(record.status)) record.status = "cancelled";
+				this.dependencies.onStateChange(this);
+				return true;
+			}
+
+			isMessagePending(messageId) {
+				const record = this.items.get(String(messageId));
+				return !!record && this.state != "cancelled" && !HISTORICAL_TERMINAL_ITEM_STATES.has(record.status);
+			}
+
+			setPreparedOutcome(record, outcome) {
+				outcome = outcome || {status: "failed", reason: "prepare_failed"};
+				if (outcome.status == "translated") {
+					record.status = "translated";
+					record.translation = outcome.translation;
+				}
+				else if (outcome.status == "skipped") {
+					record.status = "skipped";
+					record.reason = outcome.reason || "skipped";
+				}
+				else if (outcome.status == "failed") {
+					record.status = "failed";
+					record.reason = outcome.reason || "failed";
+				}
+				else {
+					record.status = "translating";
+					record.prepared = outcome.prepared || record.source;
+				}
+			}
+
+			createSummary() {
+				const summary = {jobId: this.id, channelId: this.channelId, generation: this.generation, translated: [], skipped: [], failed: []};
+				for (const record of this.items.values()) {
+					const item = Object.assign({}, record.source, {translation: record.translation, reason: record.reason});
+					if (record.status == "translated") summary.translated.push(item);
+					else if (record.status == "skipped") summary.skipped.push(item);
+					else if (record.status == "failed") summary.failed.push(item);
+				}
+				return summary;
+			}
+
+			async start() {
+				if (this.started) return this.runningPromise;
+				this.started = true;
+				this.state = "translating";
+				this.dependencies.onStateChange(this);
+				this.runningPromise = this.run();
+				return this.runningPromise;
+			}
+
+			async run() {
+				for (const record of this.items.values()) {
+					if (this.state == "cancelled") return this.createSummary();
+					try {
+						this.setPreparedOutcome(record, await this.dependencies.prepare(record.source, this));
+					}
+					catch (error) {
+						this.setPreparedOutcome(record, {status: "failed", reason: "prepare_failed"});
+					}
+				}
+
+				const translatingRecords = [...this.items.values()].filter(record => record.status == "translating");
+				if (translatingRecords.length && this.state != "cancelled") {
+					let resultMap = null;
+					try {
+						resultMap = await this.dependencies.translateBatch(translatingRecords.map(record => record.prepared), this);
+					}
+					catch (error) {}
+					if (this.state == "cancelled") return this.createSummary();
+					for (const record of translatingRecords) {
+						const messageId = String(record.source.message.id);
+						const rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null;
+						let validation = {ok: false};
+						try {validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || {ok: false};}
+						catch (error) {}
+						if (validation.ok) {
+							record.status = "translated";
+							record.translation = validation.translation;
+						}
+						else record.status = "repairing";
+					}
+				}
+
+				if (this.state == "cancelled") return this.createSummary();
+				this.state = "repairing";
+				this.dependencies.onStateChange(this);
+				for (const record of this.items.values()) {
+					if (record.status != "repairing") continue;
+					if (this.state == "cancelled") return this.createSummary();
+					let repairOutcome;
+					try {repairOutcome = await this.dependencies.repair(record.prepared || record.source, this);}
+					catch (error) {repairOutcome = {status: "failed", reason: "repair_failed"};}
+					this.setPreparedOutcome(record, repairOutcome);
+					if (!HISTORICAL_TERMINAL_ITEM_STATES.has(record.status)) {
+						record.status = "failed";
+						record.reason = "repair_failed";
+					}
+				}
+
+				if (this.state == "cancelled") return this.createSummary();
+				this.state = "ready";
+				this.dependencies.onStateChange(this);
+				await this.dependencies.waitForCommit(this);
+				if (this.state == "cancelled" || !this.dependencies.isCurrent(this)) {
+					this.cancel("stale_generation");
+					return this.createSummary();
+				}
+
+				const summary = this.createSummary();
+				await this.dependencies.commit(summary, this);
+				if (this.state == "cancelled") return this.createSummary();
+				this.dependencies.rerender(summary, this);
+				this.state = "committed";
+				this.dependencies.onStateChange(this);
+				return summary;
+			}
+		}
 
 		const protectionLogic = {
 			escapeRegExp(_plugin, string) {
@@ -2350,6 +2511,10 @@ module.exports = (_ => {
 		return class Translator extends Plugin {
 			getVersion () {
 				return normalizeSemverVersion(this.version);
+			}
+
+			createHistoricalTranslationJob (config = {}) {
+				return new HistoricalTranslationJob(config);
 			}
 
 			onLoad () {
