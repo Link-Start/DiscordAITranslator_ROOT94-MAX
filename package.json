@@ -1,0 +1,15 @@
+{
+  "name": "discord-ai-translator",
+  "version": "0.3.36",
+  "private": true,
+  "description": "BetterDiscord translation plugin with channel-aware automatic translation.",
+  "license": "GPL-2.0-only",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check DiscordAITranslator.plugin.js",
+    "test": "node --test",
+    "verify": "npm run check && npm test"
+  }
+}

@@ -1,60 +1,16 @@
-const test = require("node:test");
+﻿const test = require("node:test");
 const assert = require("node:assert/strict");
-const path = require("node:path");
-
-function createPluginInstance() {
-	class BasePlugin {}
-	const BDFDB = {
-		ArrayUtils: {
-			is: Array.isArray
-		}
-	};
-	global.BdApi = {
-		React: {
-			Component: class Component {}
-		}
-	};
-	global.window = {
-		BDFDB_Global: {
-			loaded: true,
-			started: true,
-			PluginUtils: {
-				buildPlugin: () => [BasePlugin, BDFDB]
-			}
-		}
-	};
-
-	const pluginPath = path.resolve(__dirname, "..", "DiscordAITranslator.plugin.js");
-	delete require.cache[pluginPath];
-	const PluginClass = require(pluginPath);
-	const plugin = new PluginClass();
-	plugin.settings = {
-		general: {
-			protectQuotedText: true,
-			usePerChatTranslation: true
-		},
-		exceptions: {
-			wordStart: ["!"],
-			protectedTerms: ["BUG team", "ChatGPT Plus"],
-			wrapperPairs: ['"|"', "“|”", "`|`"]
-		},
-		engines: {
-			translator: "googleapi",
-			backup: "----"
-		}
-	};
-	return plugin;
-}
+const {createProtectionRegressionPluginInstance: createPluginInstance} = require("./helpers/createPluginInstance");
 
 function runProtection(text, place = "sent") {
 	const plugin = createPluginInstance();
-	const [maskedText, excepts, shouldTranslate] = plugin.removeExceptions(text, place);
+	const [maskedText, protectedSegments, shouldTranslate] = plugin.removeExceptions(text, place);
 	return {
 		maskedText,
-		excepts,
-		protectedValues: Object.values(excepts),
+		protectedSegments,
+		protectedValues: Object.values(protectedSegments),
 		shouldTranslate,
-		restoredText: plugin.addExceptions(maskedText, excepts)
+		restoredText: plugin.addExceptions(maskedText, protectedSegments)
 	};
 }
 

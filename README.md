@@ -4,13 +4,13 @@
 
 [![Platform](https://img.shields.io/badge/Platform-Discord-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.com)
 [![Loader](https://img.shields.io/badge/Loader-BetterDiscord-4E5D94?style=flat-square)](https://betterdiscord.app)
-[![Version](https://img.shields.io/badge/Version-0.3.32-success?style=flat-square)](https://github.com/ROOT94-MAX/DiscordAITranslator/releases)
+[![Version](https://img.shields.io/badge/Version-0.3.36-success?style=flat-square)](https://github.com/ROOT94-MAX/DiscordAITranslator/releases)
 [![Downloads](https://img.shields.io/github/downloads/ROOT94-MAX/DiscordAITranslator/total?style=flat-square&color=yellow)](https://github.com/ROOT94-MAX/DiscordAITranslator/releases)
 [![License](https://img.shields.io/badge/License-GPL%20v2-blue?style=flat-square)](./LICENSE)
 
 一款专为 Discord 打造的智能翻译插件：发送前双语预审、接收消息自动翻译、历史消息智能补翻，内置文本保护规则与滚动稳定性保障。
 
-**当前版本：v0.3.32** ｜ **运行环境：BetterDiscord + BDFDB Library**
+**当前版本：v0.3.36** ｜ **运行环境：BetterDiscord + BDFDB Library**
 
 </div>
 
@@ -40,10 +40,6 @@
 
 ![译文截图](images/translation-effect.png)
 
-原文+译文截图：
-
-![原文+译文截图](images/translation-comparison.png)
-
 ---
 
 ## 核心特性
@@ -56,6 +52,7 @@
 
 ### 接收端：全自动流式翻译
 * **精细化控制**：支持频道级独立开关，可按特定频道或全局记录启用状态。
+* **频道主引擎覆盖**：左键打开输入框翻译面板，可为当前频道单独选择主服务商；未覆盖频道继续跟随后台全局默认，备用服务仍保持全局配置。
 * **轻量级预检测 (`useLocalLanguagePrecheck`)**：内置十几种常用语种的本地停用词表。无需网络请求即可秒级识别拉丁语系同语言消息（如英->英），高置信度时自动跳过。
 * **AI 决策安全网 (`autoTranslateDecisionMode=ai`)**：当 AI 误判“无需翻译”时，系统将通过本地书写系统快判 + Google 检测进行双重复核，确保外语消息 100% 被强制重翻。
 * **无感历史补翻**：支持“仅新消息”或“已加载消息”范围补翻。按队列排队执行，复用合法缓存，刷新后自动恢复视窗位置。
@@ -157,7 +154,7 @@ https://refact0r.github.io/system24/build/system24.css
 - A：按顺序排查：① 该频道的自动翻译开关是否打开；② 消息是否被"同语言跳过""源语言过滤""过短"等规则跳过（看译文位置的状态标签会注明原因，如 same-language / source-filter / too_similar）；③ 该消息是否在已加载消息补翻的范围之外。
 
 - **Q：自动翻译加载太慢，等了很久还没出现译文？**
-- A：这是有意为之的显示优化。前几个版本是秒刷新的，但每次翻译加载都会导致聊天界面频繁刷新重绘，造成打字卡顿甚至无法输入。所以改成了按批次后台完成翻译，译文不立即渲染到界面上。实际上所有消息都已经翻完了，你只需要点击一下**当前那条消息**，该消息的视图就会立即刷新，译文就会显示出来。不影响翻译结果，也不会再有界面卡顿的问题。
+- A：`0.3.33` 起，实时消息不会再被历史补翻批次阻塞，翻译完成后的界面刷新延迟也已缩短。`0.3.34` 起可在左键翻译面板为当前频道选择更快的主服务商。若仍需等待数秒，通常是当前翻译服务商本身的网络或模型响应时间；例如 DeepSeek 一般会比 Google 免费翻译接口慢。历史消息仍按批次刷新，以避免聊天列表频繁跳动。
 
 - **Q：译文和原文几乎一样就不显示了？**
 - A：这是 `dropSimilarTranslations`（相似度阈值默认 0.9）在起作用，判定为同语言改写时丢弃。可在设置里调高阈值或关闭该开关。
@@ -187,30 +184,44 @@ https://refact0r.github.io/system24/build/system24.css
 
 ```text
 discord翻译/
+├── AGENTS.md                        # 项目规则与文档权威顺序
+├── CONTRIBUTING.md                  # 开发、测试与部署流程
 ├── DiscordAITranslator.plugin.js   # 主插件文件 (BetterDiscord 入口)
+├── package.json                    # 统一检查与测试命令
 ├── CHANGELOG.md                    # 版本变更日志
 ├── README.md                       # 项目说明
-├── LICENSE                         # MIT 协议
+├── LICENSE                         # GPL-2.0 协议
 ├── docs/
-│   ├── architecture.md             # 架构基线：边界、状态流、已知缺陷
-│   └── config-conflicts.md         # 配置冲突矩阵：UI文案 -> 持久化键映射
+│   ├── README.md                    # 文档索引与权威规则
+│   ├── product.md                   # 已确认的产品行为
+│   ├── settings.md                  # 频道与全局设置边界
+│   ├── providers.md                 # 翻译与语言检测服务契约
+│   ├── architecture.md              # 当前架构与目标模块边界
+│   └── recovery-plan.md              # 唯一恢复与实施顺序
 └── tests/                          # 自动化回归测试套件
+    ├── helpers/
+    │   └── createPluginInstance.js
+    ├── channel-enablement-regression.test.js
+    ├── channel-primary-engine-regression.test.js
+    ├── popout-scope-regression.test.js
     ├── translation-regression.test.js
     ├── protection-regression.test.js
-    └── ...
+    ├── local-language-precheck.test.js
+    ├── auto-translate-precheck-regression.test.js
+    ├── ai-decision-allcaps-regression.test.js
+    ├── manual-translation-button-regression.test.js
+    └── typing-during-translation-regression.test.js
 ```
 
 ### 本地测试校验
 
-在本地对插件核心逻辑进行修改后，可通过以下命令快速跑通回归测试：
+安装 Node.js 20 或更高版本后，统一运行：
 
 ```powershell
-node --check .\DiscordAITranslator.plugin.js
-node tests\protection-regression.test.js
-node tests\translation-regression.test.js
-node tests\local-language-precheck.test.js
-node tests\ai-decision-allcaps-regression.test.js
+npm run verify
 ```
+
+只运行某一个回归文件时可以使用 `npm test -- tests/translation-regression.test.js`。
 
 完整版本历史见 [CHANGELOG.md](./CHANGELOG.md)，技术细节见 [docs/](./docs/)。
 

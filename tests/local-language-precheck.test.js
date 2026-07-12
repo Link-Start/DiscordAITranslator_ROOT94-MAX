@@ -1,70 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const path = require("node:path");
-
-function createPluginInstance() {
-	class BasePlugin {}
-	const BDFDB = {
-		ArrayUtils: {is: Array.isArray},
-		DataUtils: {load: () => ({}), save: () => {}},
-		DiscordObjects: {Message: class Message {constructor(d){Object.assign(this,d);}}},
-		ObjectUtils: {isEmpty: o => !o || !Object.keys(o).length},
-		TimeUtils: {
-			clear: handle => { if (handle) clearTimeout(handle); },
-			interval: (cb, ms) => setInterval(cb, ms),
-			timeout: (cb, ms) => setTimeout(cb, ms)
-		},
-		NotificationUtils: {toast: () => null},
-		LibraryStores: {ChannelStore: {getChannel: () => null}, SelectedChannelStore: {getChannelId: () => "channel-test"}},
-		UserUtils: {me: {id: "current-user"}},
-		LibraryRequires: {request: () => {}}
-	};
-	global.BdApi = {React: {Component: class Component {}}};
-	global.window = {BDFDB_Global: {loaded: true, started: true, PluginUtils: {buildPlugin: () => [BasePlugin, BDFDB]}}};
-
-	const pluginPath = path.resolve(__dirname, "..", "DiscordAITranslator.plugin.js");
-	delete require.cache[pluginPath];
-	const PluginClass = require(pluginPath);
-	const plugin = new PluginClass();
-	plugin.settings = {
-		general: {protectQuotedText: true, usePerChatTranslation: true},
-		exceptions: {wordStart: ["!"], protectedTerms: [], wrapperPairs: []},
-		engines: {translator: "googleapi", backup: "----"},
-		filters: {
-			minimumAutoTranslateLength: 6,
-			receivedAutoTranslateLoadedTimeWindow: "1h",
-			skipMixedReceivedMessages: true,
-			skipSameLanguageReceivedMessages: true,
-			useLocalLanguagePrecheck: true,
-			treatLanguageVariantsAsSame: true,
-			dropSimilarTranslations: true,
-			translationSimilarityThreshold: 0.9,
-			receivedAutoTranslateSourceLanguages: []
-		},
-		choices: {
-			received: {input: "auto", output: "en"},
-			sent: {input: "auto", output: "en"}
-		}
-	};
-	plugin.defaults = {
-		choices: {
-			received: {value: {input: "auto", output: "en"}},
-			sent: {value: {input: "auto", output: "en"}}
-		},
-		general: {}
-	};
-	plugin.isTranslationEnabled = () => true;
-	plugin.isReceivedAutoTranslationEnabled = () => true;
-	plugin.isOwnMessage = () => false;
-	plugin.getLanguageChoice = (direction, place) => {
-		if (place == "received" && direction == "output") return "en";
-		if (place == "received" && direction == "input") return "auto";
-		return "en";
-	};
-	// Expose the BDFDB mock so tests can patch LibraryRequires.request / TimeUtils.
-	plugin._testBdfdb = BDFDB;
-	return plugin;
-}
+const {createLocalLanguagePrecheckPluginInstance: createPluginInstance} = require("./helpers/createPluginInstance");
 
 test("identifyLatinLanguage detects English with high confidence", () => {
 	const plugin = createPluginInstance();
@@ -84,6 +20,20 @@ test("identifyLatinLanguage is not confident on short messages", () => {
 	const plugin = createPluginInstance();
 	const result = plugin.identifyLatinLanguage("ok hello");
 	assert.equal(result.confident, false);
+});
+
+test("detectMessageLanguageLocal identifies a confident Latin language only for Latin targets", () => {
+	const plugin = createPluginInstance();
+	const text = "je ne sais pas ce que tu veux dire avec ce mot";
+	const latinAnalysis = plugin.analyzeTextForAutoTranslate(text, "en");
+	const nonLatinAnalysis = plugin.analyzeTextForAutoTranslate(text, "zh-CN");
+	const latinResult = plugin.detectMessageLanguageLocal(text, latinAnalysis, "en");
+	const nonLatinResult = plugin.detectMessageLanguageLocal(text, nonLatinAnalysis, "zh-CN");
+
+	assert.equal(latinResult.languageId, "fr");
+	assert.equal(latinResult.confident, true);
+	assert.equal(nonLatinResult.languageId, null);
+	assert.equal(nonLatinResult.confident, false);
 });
 
 test("local precheck skips a same-language English message before requesting translation", () => {
@@ -194,12 +144,91 @@ test("isClearlyForeignLanguageMessage: Chinese with English proper noun is not c
 	assert.equal(plugin.isClearlyForeignLanguageMessage("我用 Dropbox 同步文件没问题", "zh-CN"), false);
 });
 
+test("isTranslationLikelyInTargetLanguage rejects an obvious wrong-script translation", () => {
+	const plugin = createPluginInstance();
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("hello there my friend", "zh-CN"), false);
+	assert.equal(plugin.isTranslationLikelyInTargetLanguage("你好朋友", "zh-CN"), true);
+});
+
+test("detectLanguage: empty text short-circuits without calling Google", () => {
+	const plugin = createPluginInstance();
+	let requestCalls = 0;
+	plugin._testBdfdb.LibraryRequires.request = () => { requestCalls++; };
+	return new Promise(resolve => {
+		plugin.detectLanguage("   ", languageId => {
+			assert.equal(languageId, null);
+			assert.equal(requestCalls, 0);
+			resolve();
+		});
+	});
+});
+
+test("detectLanguage: successful Google response returns src and uses trimmed encoded text", () => {
+	const plugin = createPluginInstance();
+	let seenUrl = null;
+	let seenQuery = null;
+	plugin._testBdfdb.LibraryRequires.request = (url, opts, cb) => {
+		seenUrl = url;
+		seenQuery = opts && opts.form && opts.form.q;
+		cb(null, {statusCode: 200}, JSON.stringify({src: "fr"}));
+	};
+	return new Promise(resolve => {
+		plugin.detectLanguage("  bonjour  ", languageId => {
+			assert.equal(seenUrl, "https://translate.googleapis.com/translate_a/single");
+			assert.equal(seenQuery, encodeURIComponent("bonjour"));
+			assert.equal(languageId, "fr");
+			resolve();
+		});
+	});
+});
+
+test("detectLanguage: invalid Google JSON resolves null", () => {
+	const plugin = createPluginInstance();
+	plugin._testBdfdb.LibraryRequires.request = (url, opts, cb) => cb(null, {statusCode: 200}, "{not-json");
+	return new Promise(resolve => {
+		plugin.detectLanguage("bonjour", languageId => {
+			assert.equal(languageId, null);
+			resolve();
+		});
+	});
+});
+
 test("isReceivedMessageForeignAsync: local fast-path returns true without calling Google", () => {
 	const plugin = createPluginInstance();
 	plugin._testBdfdb.LibraryRequires.request = () => { throw new Error("Google detect should not be called"); };
 	return new Promise(resolve => {
 		plugin.isReceivedMessageForeignAsync("hello there my friend how are you doing today", "zh-CN", isForeign => {
 			assert.equal(isForeign, true);
+			resolve();
+		});
+	});
+});
+
+test("isReceivedMessageForeignAsync: auto target short-circuits false without detectLanguage", () => {
+	const plugin = createPluginInstance();
+	let detectCalls = 0;
+	plugin.detectLanguage = () => { detectCalls++; };
+	return new Promise(resolve => {
+		plugin.isReceivedMessageForeignAsync("bonjour", "auto", isForeign => {
+			assert.equal(isForeign, false);
+			assert.equal(detectCalls, 0);
+			resolve();
+		});
+	});
+});
+
+test("isReceivedMessageForeignAsync: falls through the public detectLanguage seam when local check is inconclusive", () => {
+	const plugin = createPluginInstance();
+	let detectCalls = 0;
+	plugin.isClearlyForeignLanguageMessage = () => false;
+	plugin.detectLanguage = (_text, callback) => {
+		detectCalls++;
+		callback("fr");
+	};
+	return new Promise(resolve => {
+		plugin.isReceivedMessageForeignAsync("bonjour", "en", isForeign => {
+			assert.equal(isForeign, true);
+			assert.equal(detectCalls, 1);
 			resolve();
 		});
 	});
