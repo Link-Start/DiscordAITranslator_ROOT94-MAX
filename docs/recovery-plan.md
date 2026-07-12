@@ -100,6 +100,7 @@ src/providers/batch-response-validator.js
 
 - Date: 2026-07-12
 - Branch: `codex/two`
+- Baseline commit: `85ad579`
 - Source version: `0.3.36`
 - Installed version: `0.3.36`
 - Source and installed SHA-256: `BB7D28268101174CE791F2F9D4AD30A44A47AF63F1AE645A3049AF11C4D6829F`
@@ -107,7 +108,7 @@ src/providers/batch-response-validator.js
 
 ### Phase 0: Safe Baseline
 
-- [ ] Checkpoint the current repository and deployed plugin on the current recovery branch.
+- [x] Checkpoint the current repository and deployed plugin on the current recovery branch.
 - [x] Record the exact BetterDiscord file hash and installed version.
 - [x] Stop version bumps until a phase passes all gates.
 - [x] Add a manual Discord smoke-test checklist to this document.
