@@ -1,7 +1,7 @@
 /**
  * @name DiscordAITranslator
  * @author ROOT94
- * @version 0.3.32
+ * @version 0.3.36
  * @description Discord客户端的AI翻译插件
  * @source https://github.com/ROOT94-MAX/DiscordAITranslator
  * @license GPL-2.0
@@ -123,15 +123,59 @@ module.exports = (_ => {
 				};
 			}
 			filterLanguages(direction, place) {
-				let isOutput = direction == languageTypes.OUTPUT;
-				return BDFDB.ObjectUtils.toArray(BDFDB.ObjectUtils.map(isOutput ? BDFDB.ObjectUtils.filter(languages, lang => !lang.auto) : languages, (lang, id) => ({
-					value: id,
-					label: _this.getLanguageDisplayName(lang),
-					backup: this.isOnlyBackup(lang)
-				}))).filter(isOutput && this.isOnlyBackup(languages[_this.getLanguageChoice(languageTypes.INPUT, place, this.props.channelId)]) ? (n => n.backup) : (n => n));
+				const isOutput = direction == languageTypes.OUTPUT;
+				const currentInput = languages[_this.getLanguageChoice(languageTypes.INPUT, place, this.props.channelId)];
+				const currentOutput = languages[_this.getLanguageChoice(languageTypes.OUTPUT, place, this.props.channelId)];
+				return BDFDB.ObjectUtils.toArray(BDFDB.ObjectUtils.map(isOutput ? BDFDB.ObjectUtils.filter(languages, lang => !lang.auto) : languages, (lang, id) => {
+					const input = isOutput ? currentInput : lang;
+					const output = isOutput ? lang : currentOutput;
+					const primarySupported = _this.engineSupportsLanguagePair(_this.getEffectivePrimaryEngine(this.props.channelId), input, output);
+					const backupSupported = _this.engineSupportsLanguagePair(_this.getEffectiveBackupEngine(this.props.channelId), input, output);
+					return {
+						value: id,
+						label: _this.getLanguageDisplayName(lang),
+						backup: !primarySupported && backupSupported,
+						unsupported: !primarySupported && !backupSupported,
+						disabled: !primarySupported && !backupSupported
+					};
+				}));
 			}
-			isOnlyBackup(lang) {
-				return lang && (lang.auto && translationEngines[_this.settings.engines.translator] && !translationEngines[_this.settings.engines.translator].auto || !lang.auto && !lang.special && translationEngines[_this.settings.engines.translator] && !translationEngines[_this.settings.engines.translator].languages.includes(lang.id));
+			renderChannelPrimaryEngine() {
+				const channelId = this.props.channelId;
+				return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+					title: _this.getCustomText("channel_primary_engine_title"),
+					className: BDFDB.disCN.marginbottom8,
+					children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
+						align: BDFDB.LibraryComponents.Flex.Align.CENTER,
+						children: [
+							BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
+								grow: 1,
+								children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Select, {
+									value: _this.getEffectivePrimaryEngine(channelId),
+									options: Object.keys(translationEngines).map(engineKey => ({value: engineKey, label: _this.getEngineLabel(engineKey)})),
+									onChange: engineKey => {
+										_this.setChannelPrimaryEngine(channelId, engineKey);
+										_this.refreshChannelPrimaryEngineRuntime(channelId);
+										_this.setLanguages();
+										if (!_this.isEngineConfiguredForRuntime(engineKey)) BDFDB.NotificationUtils.toast(`${_this.getEngineLabel(engineKey)}: ${_this.getCustomText("channel_primary_engine_unconfigured_warning")}`, {type: "danger", position: "center"});
+										BDFDB.ReactUtils.forceUpdate(this);
+									}
+								})
+							}),
+							_this.hasChannelPrimaryEngineOverride(channelId) && BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
+								size: BDFDB.LibraryComponents.Button.Sizes.SMALL,
+								className: BDFDB.disCN.marginleft8,
+								onClick: _ => {
+									_this.clearChannelPrimaryEngineOverride(channelId);
+									_this.refreshChannelPrimaryEngineRuntime(channelId);
+									_this.setLanguages();
+									BDFDB.ReactUtils.forceUpdate(this);
+								},
+								children: _this.getCustomText("channel_primary_engine_restore")
+							})
+						].filter(Boolean)
+					})
+				});
 			}
 			async detectLanguageFromInput() {
 				const text = (this.state.detectorText || "").trim();
@@ -202,196 +246,9 @@ module.exports = (_ => {
 				});
 			}
 			render() {
-				const popoutGeneralSettings = Object.keys(_this.defaults.general).filter(key => _this.defaults.general[key].popout).map(key => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsSaveItem, {
-					type: "Switch",
-					plugin: _this,
-					keys: ["general", key],
-					className: "translator-settings-switch-row",
-					label: _this.labels[`general_${key}`] || _this.defaults.general[key].description,
-					tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-					value: _this.settings.general[key]
-				}));
-				const quickText = (zh, en, ru = null) => _this.isChineseUiLanguage() ? zh : _this.isRussianUiLanguage() ? (ru || en) : en;
-				const saveQuickFilterSetting = (key, value) => {
-					if (!_this.settings.filters) _this.settings.filters = {};
-					_this.settings.filters[key] = value;
-					BDFDB.DataUtils.save(value, _this, "filters", key);
-					_this.SettingsUpdated = true;
-				};
-				const blurQuickFocus = () => {
-					try {
-						_this._suppressQuickLimitFocusUntil = Date.now() + 450;
-						const activeElement = typeof document != "undefined" && document.activeElement;
-						if (activeElement && typeof activeElement.blur == "function") activeElement.blur();
-					}
-					catch (err) {}
-				};
-				const refreshQuickLoadedTranslation = (batched = true) => {
-					blurQuickFocus();
-					_this.resetAutoTranslationTracking(this.props.channelId);
-					_this.clearAutoTranslationQueue(this.props.channelId);
-					if (_this.getReceivedAutoTranslateScope() == "loaded_messages" && _this.isReceivedAutoTranslationEnabled(this.props.channelId)) {
-						_this.updateLoadedAutoTranslationStatus({active: true, collecting: true, done: false, channelId: this.props.channelId, batch: (loadedAutoTranslationBatchNumbers[this.props.channelId] || 0) + 1, total: 0, processed: 0, displayed: 0, skipped: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""});
-					}
-					// One scan render is allowed to collect the current loaded snapshot. After that,
-					// historical translations are deferred and flushed once per batch.
-					_this.scheduleTranslationRerender({batched, allowWhileSettings: true});
-					setTimeout(_ => _this.processAutoTranslationQueue(), 250);
-					BDFDB.ReactUtils.forceUpdate(this);
-				};
-				const createQuickSegment = (options, value, onChange, className = "") => BDFDB.ReactUtils.createElement("div", {
-					className: BDFDB.DOMUtils.formatClassName("translator-quick-segment", className),
-					children: options.map(option => BDFDB.ReactUtils.createElement("button", {
-						type: "button",
-						className: BDFDB.DOMUtils.formatClassName("translator-quick-segment-button", option.value == value && "translator-quick-segment-button-active"),
-						onMouseDown: blurQuickFocus,
-						onClick: _ => {
-							blurQuickFocus();
-							onChange(option.value);
-						},
-						children: option.label
-					}))
-				});
-				const isLoadedQuickScope = _this.getReceivedAutoTranslateScope() == "loaded_messages";
-				const applyQuickLoadedLimit = value => {
-					const nextValue = _this.normalizeLoadedAutoTranslateLimit(value);
-					saveQuickFilterSetting("receivedAutoTranslateLoadedLimit", String(nextValue));
-					refreshQuickLoadedTranslation(true);
-				};
-				const quickAutoTranslateControls = BDFDB.ReactUtils.createElement("div", {
-					className: "translator-popout-auto-panel",
-					children: [
-						BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
-							type: "Switch",
-							className: "translator-settings-switch-row translator-quick-channel-toggle",
-							label: _this.getChannelTranslationToggleLabel(),
-							tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-							value: _this.isReceivedAutoTranslationEnabled(this.props.channelId),
-							onMouseDown: blurQuickFocus,
-							onChange: value => {
-								blurQuickFocus();
-								_this.toggleReceivedAutoTranslation(this.props.channelId);
-								refreshQuickLoadedTranslation(_this.getReceivedAutoTranslateScope() == "loaded_messages");
-							}
-						}),
-						BDFDB.ReactUtils.createElement("div", {
-							className: "translator-quick-strategy-panel",
-							children: [
-								BDFDB.ReactUtils.createElement("div", {
-									className: "translator-quick-strategy-title",
-									children: quickText("自动翻译策略", "Auto-translate strategy", "Стратегия автоперевода")
-								}),
-								BDFDB.ReactUtils.createElement("div", {
-									className: "translator-quick-control-row",
-									children: [
-										BDFDB.ReactUtils.createElement("div", {
-											className: "translator-quick-control-label",
-											children: quickText("自动翻译范围", "Auto-translate range", "Диапазон автоперевода")
-										}),
-										BDFDB.ReactUtils.createElement("div", {
-											className: "translator-quick-control-component-wrapper",
-											children: createQuickSegment([
-												{value: "new_only", label: quickText("只翻译新消息", "New only", "Только новые")},
-												{value: "loaded_messages", label: quickText("已加载消息", "Loaded messages", "Загруженные")}
-											], _this.getReceivedAutoTranslateScope(), value => {
-												saveQuickFilterSetting("receivedAutoTranslateScope", value == "loaded_messages" ? "loaded_messages" : "new_only");
-												saveQuickFilterSetting("receivedAutoTranslateLoadedRangeMode", LOADED_AUTO_TRANSLATE_RANGE_MODES.COUNT);
-												refreshQuickLoadedTranslation(value == "loaded_messages");
-											})
-										})
-									]
-								}),
-								BDFDB.ReactUtils.createElement("div", {
-									className: BDFDB.DOMUtils.formatClassName("translator-quick-control-row", !isLoadedQuickScope && "translator-quick-control-row-muted"),
-									children: [
-										BDFDB.ReactUtils.createElement("div", {
-											className: "translator-quick-control-label",
-											children: quickText("历史处理", "History handling", "История")
-										}),
-										BDFDB.ReactUtils.createElement("div", {
-											className: "translator-quick-control-component-wrapper",
-											children: createQuickSegment([
-												{value: "current", label: quickText("仅当前已加载", "Current batch", "Текущая пачка")},
-												{value: "scroll", label: quickText("向上滚动继续", "Continue on scroll", "Продолжать")}
-											], _this.shouldContinueLoadedAutoTranslateOnScroll() ? "scroll" : "current", value => {
-												saveQuickFilterSetting("continueLoadedAutoTranslateOnScroll", value == "scroll");
-												refreshQuickLoadedTranslation(true);
-											}, "translator-quick-history-segment")
-										})
-									]
-								}),
-								BDFDB.ReactUtils.createElement("div", {
-									className: BDFDB.DOMUtils.formatClassName("translator-quick-control-row", "translator-quick-limit-row", !isLoadedQuickScope && "translator-quick-control-row-muted"),
-									children: [
-										BDFDB.ReactUtils.createElement("div", {
-											className: "translator-quick-control-label",
-											children: quickText("每批最多处理", "Per-batch limit", "Лимит пачки")
-										}),
-										BDFDB.ReactUtils.createElement("div", {
-											className: "translator-quick-control-component-wrapper",
-											children: BDFDB.ReactUtils.createElement("div", {
-												className: "translator-quick-limit-stepper",
-												children: [
-													BDFDB.ReactUtils.createElement("input", {
-														type: "text",
-														inputMode: "numeric",
-														pattern: "[0-9]*",
-														className: "translator-quick-limit-stepper-input",
-														placeholder: "50",
-														value: String(_this.getReceivedAutoTranslateLoadedLimit()),
-														autoFocus: false,
-														tabIndex: -1,
-														onFocus: event => {
-															if (_this._suppressQuickLimitFocusUntil && Date.now() < _this._suppressQuickLimitFocusUntil && event && event.target && typeof event.target.blur == "function") event.target.blur();
-														},
-														onChange: event => {
-															const rawValue = event && event.target ? event.target.value : event;
-															applyQuickLoadedLimit(rawValue);
-														}
-													}),
-													BDFDB.ReactUtils.createElement("div", {
-														className: "translator-quick-limit-stepper-buttons",
-														children: [
-															BDFDB.ReactUtils.createElement("button", {
-																type: "button",
-																className: "translator-quick-limit-stepper-button",
-																onClick: _ => applyQuickLoadedLimit(_this.getReceivedAutoTranslateLoadedLimit() + 1),
-																children: "▲"
-															}),
-															BDFDB.ReactUtils.createElement("button", {
-																type: "button",
-																className: "translator-quick-limit-stepper-button",
-																onClick: _ => applyQuickLoadedLimit(_this.getReceivedAutoTranslateLoadedLimit() - 1),
-																children: "▼"
-															})
-														]
-													})
-												]
-											})
-										})
-									]
-								}),
-								BDFDB.ReactUtils.createElement("div", {
-									className: "translator-quick-hint",
-									children: quickText("每批最多处理上方数量，最大 100；AI 会优先按这个数量整批请求，失败时自动拆包补翻。继续向上滚动时，会对新加载的历史消息再处理一批。", "The number is a per-batch cap, max 100. AI providers try this size first, then split/fallback on failure. When you scroll up, newly loaded history can be processed as a new batch.", "Лимит на пачку, максимум 100; AI сначала пробует этот размер, затем делит при ошибке. При прокрутке вверх новая история обрабатывается новой пачкой.")
-								})
-							]
-						})
-					].filter(Boolean)
-				});
 				// Keep the floating loaded-history status capsule mounted outside this settings surface.
 				return [
-					BDFDB.ArrayUtils.is(_this.settings.exceptions.wordStart) && _this.settings.exceptions.wordStart.length && [
-						BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
-							className: BDFDB.disCN.marginbottom8,
-							children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsLabel, {
-								label: _this.labels.exception_text.replace("{{var0}}", _this.settings.exceptions.wordStart.map(n => '"' + n + '"').join(", "))
-							})
-						}),
-						BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
-							className: BDFDB.disCN.marginbottom8
-						})
-					],
+					this.renderChannelPrimaryEngine(),
 					this.renderLanguageDetector(),
 					Object.keys(_this.defaults.choices).map(place => {
 						let isChannelSpecific = channelLanguages[this.props.channelId] && channelLanguages[this.props.channelId][place];
@@ -475,8 +332,8 @@ module.exports = (_ => {
 												grow: 1,
 												children: lang.label
 											}),
-											lang.backup && BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
-												text: _this.labels.backup_engine_warning,
+											(lang.backup || lang.unsupported) && BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
+												text: lang.unsupported ? _this.getCustomText("language_not_supported_by_channel_engines") : _this.labels.backup_engine_warning,
 												tooltipConfig: {
 													color: "red"
 												},
@@ -510,32 +367,6 @@ module.exports = (_ => {
 							})
 						]);
 					}),
-					Object.keys(_this.defaults.engines).map(key => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-						title: _this.labels[`${key}_engine`],
-						className: BDFDB.disCN.marginbottom8,
-						children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Select, {
-							menuShouldScrollIntoView: false,
-							menuShouldBlockScroll: false,
-							captureMenuScroll: false,
-							menuPosition: "fixed",
-							menuPlacement: "auto",
-							menuPortalTarget: typeof document != "undefined" ? document.body : undefined,
-							maxMenuHeight: typeof window != "undefined" ? Math.max(150, Math.min(240, Math.floor(window.innerHeight * 0.36))) : 220,
-							value: _this.settings.engines[key],
-							options: (key == "backup" ? ["----"] : []).concat(Object.keys(translationEngines)).filter(key == "backup" ? (n => n != _this.settings.engines.translator) : (n => n)).map(engineKey => ({value: engineKey, label: translationEngines[engineKey] ? translationEngines[engineKey].name : "----"})),
-							maxVisibleItems: 3,
-							onChange: value => {
-								_this.settings.engines[key] = value;
-								BDFDB.DataUtils.save(_this.settings.engines, _this, "engines");
-								_this.setLanguages();
-								BDFDB.ReactUtils.forceUpdate(this);
-							}
-						})
-					})),
-					BDFDB.ReactUtils.createElement("div", {
-						className: "translator-popout-toggle-group translator-settings-switch-group",
-						children: [...popoutGeneralSettings, quickAutoTranslateControls]
-					})
 				].flat(10).filter(n => n);
 			}
 		};
@@ -726,14 +557,15 @@ module.exports = (_ => {
 		var languages = {};
 		var favorites = [];
 		var authKeys = {};
-		var channelLanguages = {}, guildLanguages = {};
-		var translationEnabledStates = [], receivedAutoTranslationEnabledStates = [], isTranslating;
+		var channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {};
+		var translationEnabledStates = {globalDefault: false, channelOverrides: {}}, isTranslating;
 		var translatedMessages = {}, oldMessages = {};
 		var translationCache = {};
 		var autoTranslationQueue = [];
 		var queuedAutoTranslations = {};
 		var suppressedAutoTranslations = {};
-		var isBackgroundTranslating = false;
+		var isLiveAutoTranslating = false;
+		var isHistoricalAutoTranslating = false;
 		var translationCacheSaveTimer = null;
 		var translationRerenderTimer = null;
 		var deferredTextAreaRerenderTimer = null;
@@ -773,7 +605,7 @@ module.exports = (_ => {
 		var manualTranslationScrollAnchor = null;
 		var manualTranslationScrollLockTimer = null;
 		const MAX_TRANSLATION_CACHE_ENTRIES = 500;
-		const AUTO_TRANSLATION_RERENDER_DELAY = 650;
+		const AUTO_TRANSLATION_RERENDER_DELAY = 120;
 		const AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500;
 		const AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900;
 		const AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900;
@@ -804,7 +636,1717 @@ module.exports = (_ => {
 			SENT: "sent",
 		};
 		const AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__";
-	
+
+		const protectionLogic = {
+			escapeRegExp(_plugin, string) {
+				return (string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+			},
+			getExceptionScopeSetting(plugin, key, fallback = true) {
+				const exceptions = plugin.settings && plugin.settings.exceptions || {};
+				return exceptions[key] == null ? !!fallback : !!exceptions[key];
+			},
+			shouldProtectConfiguredTermsForPlace(plugin, place) {
+				return place == messageTypes.SENT ? protectionLogic.getExceptionScopeSetting(plugin, "protectedTermsForSent", true) : protectionLogic.getExceptionScopeSetting(plugin, "protectedTermsForReceived", true);
+			},
+			shouldProtectWrappedTextForPlace(plugin, place) {
+				return place == messageTypes.SENT ? protectionLogic.getExceptionScopeSetting(plugin, "wrapperPairsForSent", true) : protectionLogic.getExceptionScopeSetting(plugin, "wrapperPairsForReceived", true);
+			},
+			getProtectedTermsList(plugin) {
+				let protectedTerms = BDFDB.ArrayUtils.is(plugin.settings.exceptions.protectedTerms) ? plugin.settings.exceptions.protectedTerms : [];
+				return [...new Set(protectedTerms.map(term => (term || "").trim()).filter(Boolean))].sort((termA, termB) => termB.length - termA.length);
+			},
+			trimTrailingProtectedPunctuation(_plugin, text) {
+				if (!text) return {protectedText: text, trailingText: ""};
+				const trailingMatch = text.match(/([,.;:!?'"`)\]}>，。！？；：）】」》、]+)$/);
+				if (!trailingMatch || trailingMatch.index < 1) return {protectedText: text, trailingText: ""};
+				return {
+					protectedText: text.slice(0, trailingMatch.index),
+					trailingText: trailingMatch[0]
+				};
+			},
+			protectRegexMatches(plugin, string, regex, protectedSegments = {}, count = 0, options = {}) {
+				if (!string || !(regex instanceof RegExp)) return {string, protectedSegments, count};
+				regex.lastIndex = 0;
+				let lastIndex = 0, nextString = "", hasMatch = false, match;
+				while ((match = regex.exec(string))) {
+					let fullMatch = match[0];
+					if (!fullMatch) {
+						if (regex.global && regex.lastIndex === match.index) regex.lastIndex++;
+						continue;
+					}
+					let protectedText = fullMatch;
+					let trailingText = "";
+					if (typeof options.normalize == "function") {
+						let normalized = options.normalize(fullMatch, match, string) || {};
+						protectedText = normalized.protectedText != null ? normalized.protectedText : protectedText;
+						trailingText = normalized.trailingText || "";
+					}
+					if (!protectedText || !String(protectedText).trim()) continue;
+					hasMatch = true;
+					nextString += string.slice(lastIndex, match.index);
+					protectedSegments[count] = protectedText;
+					nextString += `${protectionLogic.createProtectionPlaceholder(plugin, count++)}${trailingText}`;
+					lastIndex = match.index + fullMatch.length;
+					if (!regex.global) break;
+				}
+				if (!hasMatch) return {string, protectedSegments, count};
+				nextString += string.slice(lastIndex);
+				return {string: nextString, protectedSegments, count};
+			},
+			protectCodeBlockSegments(plugin, string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectRegexMatches(plugin, string, /```[\s\S]*?```/g, protectedSegments, count);
+			},
+			protectAutoDetectedSegments(plugin, string, protectedSegments = {}, count = 0) {
+				let result = protectionLogic.protectRegexMatches(plugin, string, /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}\b/gi, protectedSegments, count);
+				string = result.string;
+				protectedSegments = result.protectedSegments;
+				count = result.count;
+
+				const trimTrailing = fullMatch => protectionLogic.trimTrailingProtectedPunctuation(plugin, fullMatch);
+				result = protectionLogic.protectRegexMatches(plugin, string, /\bhttps?:\/\/[^\s<>()\u3000]+/gi, protectedSegments, count, {normalize: trimTrailing});
+				string = result.string;
+				protectedSegments = result.protectedSegments;
+				count = result.count;
+
+				result = protectionLogic.protectRegexMatches(plugin, string, /\b(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?:\/[^\s<>()\u3000]*)?/gi, protectedSegments, count, {
+					normalize: fullMatch => {
+						const trimmed = trimTrailing(fullMatch);
+						if (!/[./]/.test(trimmed.protectedText || "")) return {protectedText: "", trailingText: fullMatch};
+						return trimmed;
+					}
+				});
+				string = result.string;
+				protectedSegments = result.protectedSegments;
+				count = result.count;
+
+				result = protectionLogic.protectRegexMatches(plugin, string, /\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b/g, protectedSegments, count);
+				string = result.string;
+				protectedSegments = result.protectedSegments;
+				count = result.count;
+
+				string = string.replace(/(^|\s)(\/[A-Za-z][A-Za-z0-9_-]{1,32})(?=\s|$)/g, (fullMatch, leading, command) => {
+					protectedSegments[count] = command;
+					return `${leading || ""}${protectionLogic.createProtectionPlaceholder(plugin, count++)}`;
+				});
+
+				return {string, protectedSegments, count};
+			},
+			protectDiscordMarkupSegments(plugin, string, protectedSegments = {}, count = 0) {
+				if (!string) return {string, protectedSegments, count};
+				return protectionLogic.protectRegexMatches(plugin, string, /<a?:[A-Za-z0-9_~]+:\d+>|<@[!&]?\d+>|<#\d+>|<@&\d+>|<t:\d+(?::[tTdDfFR])?>/g, protectedSegments, count);
+			},
+			protectQuotedTextSegments(plugin, string, protectedSegments = {}, count = 0) {
+				if (!plugin.settings.general.protectQuotedText || !string) return {string, protectedSegments, count};
+				const quotedRegex = /"([^"\r\n]+)"|“([^”\r\n]+)”/g;
+				string = string.replace(quotedRegex, fullMatch => {
+					if (!fullMatch || !fullMatch.slice(1, -1).trim()) return fullMatch;
+					protectedSegments[count] = fullMatch;
+					return protectionLogic.createProtectionPlaceholder(plugin, count++);
+				});
+				return {string, protectedSegments, count};
+			},
+			protectWrappedTextSegments(plugin, string, protectedSegments = {}, count = 0, place = null) {
+				if (!protectionLogic.shouldProtectWrappedTextForPlace(plugin, place) || !string) return {string, protectedSegments, count};
+				for (let rule of plugin.getProtectedWrapperRules()) {
+					let cursor = 0;
+					let nextString = "";
+					while (cursor < string.length) {
+						let startIndex = string.indexOf(rule.left, cursor);
+						if (startIndex < 0) {
+							nextString += string.slice(cursor);
+							break;
+						}
+						let contentStart = startIndex + rule.left.length;
+						let endIndex = string.indexOf(rule.right, contentStart);
+						if (endIndex < 0) {
+							nextString += string.slice(cursor);
+							break;
+						}
+						let fullText = string.slice(startIndex, endIndex + rule.right.length);
+						let innerText = string.slice(contentStart, endIndex);
+						nextString += string.slice(cursor, startIndex);
+						if (innerText.trim() && !/[\r\n]/.test(fullText)) {
+							protectedSegments[count] = fullText;
+							nextString += protectionLogic.createProtectionPlaceholder(plugin, count++);
+						}
+						else nextString += fullText;
+						cursor = endIndex + rule.right.length;
+					}
+					string = nextString;
+				}
+				return {string, protectedSegments, count};
+			},
+			protectConfiguredTerms(plugin, string, protectedSegments = {}, count = 0) {
+				let protectedTerms = protectionLogic.getProtectedTermsList(plugin);
+				const boundaryChars = "A-Za-z0-9_";
+				for (let term of protectedTerms) {
+					term = (term || "").trim();
+					if (!term) continue;
+					const startsWithWord = new RegExp(`^[${boundaryChars}]`).test(term);
+					const endsWithWord = new RegExp(`[${boundaryChars}]$`).test(term);
+					const termPattern = term.split(/\s+/).filter(Boolean).map(part => protectionLogic.escapeRegExp(plugin, part)).join("\\s*");
+					const regex = new RegExp(`${startsWithWord ? `(^|[^${boundaryChars}])` : `()`}(${termPattern})${endsWithWord ? `(?=$|[^${boundaryChars}])` : ""}`, "gi");
+					string = string.replace(regex, (match, leading, protectedTerm) => {
+						if (!protectedTerm) return match;
+						protectedSegments[count] = protectedTerm;
+						return `${leading || ""}${protectionLogic.createProtectionPlaceholder(plugin, count++)}`;
+					});
+				}
+				return {string, protectedSegments, count};
+			},
+			protectAutoTechnicalTerms(plugin, string, protectedSegments = {}, count = 0) {
+				if (!string) return {string, protectedSegments, count};
+				const protectToken = (fullMatch, offset, fullString) => {
+					if (!fullMatch || fullMatch.length < 2) return fullMatch;
+					const left = fullString[offset - 1] || "";
+					const right = fullString[offset + fullMatch.length] || "";
+					if (/[A-Za-z0-9_]/.test(left) || /[A-Za-z0-9_]/.test(right)) return fullMatch;
+					protectedSegments[count] = fullMatch;
+					return protectionLogic.createProtectionPlaceholder(plugin, count++);
+				};
+
+				string = string.replace(/\b[A-Za-z0-9_.-]{2,}\/[A-Za-z0-9_.-]{2,}(?:\/[A-Za-z0-9_.-]+)*\b/g, protectToken);
+				string = string.replace(/\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|json|yml|yaml|toml|env|py|java|go|rs|cpp|c|h|css|html|md|txt|zip|rar|7z|exe|dll|png|jpg|jpeg|webp|gif|mp4|mov|psd|fig)\b/gi, protectToken);
+				string = string.replace(/\bv\d+(?:\.\d+){1,4}(?:[-+][A-Za-z0-9.-]+)?\b|\b\d+(?:\.\d+){2,4}(?:[-+][A-Za-z0-9.-]+)?\b/gi, protectToken);
+				const originalForShoutCheck = String(string);
+				const isAllCapsLatinShouting = (() => {
+					const latinLetters = originalForShoutCheck.match(/[A-Za-z]/g) || [];
+					if (latinLetters.length < 4) return false;
+					const upperCount = latinLetters.reduce((n, c) => n + (c >= "A" && c <= "Z" ? 1 : 0), 0);
+					if (upperCount / latinLetters.length < 0.8) return false;
+					const nonLatin = (originalForShoutCheck.match(/[一-鿿぀-ヿ가-힯]/g) || []).length;
+					return nonLatin * 2 < latinLetters.length;
+				})();
+				if (!isAllCapsLatinShouting) {
+					string = string.replace(/\b[A-Z][A-Z0-9]{1,}(?:[-_/+.][A-Z0-9]+)*\b/g, protectToken);
+				}
+				string = string.replace(/\b[A-Za-z]+(?:[A-Z][a-z0-9]+){1,}[A-Za-z0-9]*\b/g, protectToken);
+				string = string.replace(/\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+){1,}\b/g, protectToken);
+				return {string, protectedSegments, count};
+			},
+			protectMixedLanguageLatinTokens(_plugin, string, protectedSegments = {}, count = 0) {
+				return {string, protectedSegments, count};
+			},
+			getUnicodeEmojiDetector() {
+				try {return new RegExp("[\\u200D\\uFE0E\\uFE0F\\u20E3]|\\p{Extended_Pictographic}|\\p{Regional_Indicator}", "u");}
+				catch (err) {return /[\u200D\uFE0E\uFE0F\u20E3\u2600-\u27BF]|[\uD83C-\uDBFF][\uDC00-\uDFFF]/;}
+			},
+			isUnicodeEmojiGrapheme(_plugin, segment) {
+				if (!segment || typeof segment != "string") return false;
+				if (/^(?:\d|#|\*)$/.test(segment)) return false;
+				const detector = protectionLogic.getUnicodeEmojiDetector();
+				return !!(detector && detector.test(segment));
+			},
+			getUnicodeEmojiRegex() {
+				try {
+					return new RegExp("(?:\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20E3|\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?(?:\\p{Emoji_Modifier})?(?:\\u200D\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?(?:\\p{Emoji_Modifier})?)*)", "gu");
+				}
+				catch (err) {
+					return /(?:[\u2600-\u27BF]\uFE0F?|[\uD83C-\uDBFF][\uDC00-\uDFFF](?:\uFE0F|\uFE0E)?(?:\u200D[\uD83C-\uDBFF][\uDC00-\uDFFF](?:\uFE0F|\uFE0E)?)*)/g;
+				}
+			},
+			protectUnicodeEmojiSegments(plugin, string, protectedSegments = {}, count = 0) {
+				if (!string) return {string, protectedSegments, count};
+				if (typeof Intl != "undefined" && Intl.Segmenter) {
+					const detector = protectionLogic.getUnicodeEmojiDetector();
+					const segmenter = new Intl.Segmenter(undefined, {granularity: "grapheme"});
+					let nextString = "";
+					for (const part of segmenter.segment(string)) {
+						const segment = part && part.segment || "";
+						if (segment && detector && protectionLogic.isUnicodeEmojiGrapheme(plugin, segment)) {
+							protectedSegments[count] = segment;
+							nextString += protectionLogic.createProtectionPlaceholder(plugin, count++);
+						}
+						else nextString += segment;
+					}
+					return {string: nextString, protectedSegments, count};
+				}
+				return protectionLogic.protectRegexMatches(plugin, string, protectionLogic.getUnicodeEmojiRegex(), protectedSegments, count);
+			},
+			createProtectionPlaceholder(_plugin, count) {
+				return `⟦${count}⟧`;
+			},
+			getProtectionPlaceholderRegex(_plugin, count) {
+				return new RegExp(`(?:⟦\\s*(?:DTA\\s*)?${count}\\s*⟧|【\\s*${count}\\s*】|\\[\\s*${count}\\s*\\]|<\\s*<\\s*<\\s*${count}\\s*>\\s*>\\s*>|[｛\\{]\\s*[｛\\{]\\s*${count}\\s*[｝\\}]\\s*[｝\\}])`, "g");
+			},
+			formatProtectedExceptionForDisplay(_plugin, exception) {
+				if (exception == null) return "";
+				exception = String(exception);
+				if (/^<a?:[A-Za-z0-9_~]+:\d+>$/.test(exception)) return exception;
+				if (/^<@!?\d+>$/.test(exception)) return exception;
+				if (/^<@&\d+>$/.test(exception)) return exception;
+				if (/^<#\d+>$/.test(exception)) return exception;
+				return exception;
+			},
+			addExceptions(plugin, string, protectedSegments) {
+				for (let count in protectedSegments) {
+					let exception = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) && plugin.settings.exceptions.wordStart.some(n => String(protectedSegments[count]).indexOf(n) == 0) ? String(protectedSegments[count]).slice(1) : String(protectedSegments[count]);
+					let replacement = protectionLogic.formatProtectedExceptionForDisplay(plugin, exception);
+					let newString = string.replace(protectionLogic.getProtectionPlaceholderRegex(plugin, count), replacement);
+					string = newString;
+				}
+				return string;
+			},
+			removeExceptions(plugin, string, place) {
+				let protectedSegments = {}, newString = [], count = 0;
+				let discordMarkupResult = protectionLogic.protectDiscordMarkupSegments(plugin, string, protectedSegments, count);
+				string = discordMarkupResult.string;
+				protectedSegments = discordMarkupResult.protectedSegments;
+				count = discordMarkupResult.count;
+				let codeBlockResult = protectionLogic.protectCodeBlockSegments(plugin, string, protectedSegments, count);
+				string = codeBlockResult.string;
+				protectedSegments = codeBlockResult.protectedSegments;
+				count = codeBlockResult.count;
+				let wrappedTextResult = protectionLogic.protectWrappedTextSegments(plugin, string, protectedSegments, count, place);
+				string = wrappedTextResult.string;
+				protectedSegments = wrappedTextResult.protectedSegments;
+				count = wrappedTextResult.count;
+				let autoProtectedResult = protectionLogic.protectAutoDetectedSegments(plugin, string, protectedSegments, count);
+				string = autoProtectedResult.string;
+				protectedSegments = autoProtectedResult.protectedSegments;
+				count = autoProtectedResult.count;
+				if (protectionLogic.shouldProtectConfiguredTermsForPlace(plugin, place)) {
+					let protectedTermsResult = protectionLogic.protectConfiguredTerms(plugin, string, protectedSegments, count);
+					string = protectedTermsResult.string;
+					protectedSegments = protectedTermsResult.protectedSegments;
+					count = protectedTermsResult.count;
+				}
+				let autoTechnicalTermsResult = protectionLogic.protectAutoTechnicalTerms(plugin, string, protectedSegments, count);
+				string = autoTechnicalTermsResult.string;
+				protectedSegments = autoTechnicalTermsResult.protectedSegments;
+				count = autoTechnicalTermsResult.count;
+				let emojiProtectedResult = protectionLogic.protectUnicodeEmojiSegments(plugin, string, protectedSegments, count);
+				string = emojiProtectedResult.string;
+				protectedSegments = emojiProtectedResult.protectedSegments;
+				count = emojiProtectedResult.count;
+
+				if (place == messageTypes.RECEIVED) {
+					newString.push(string);
+				}
+				else {
+					let usedExceptions = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) ? plugin.settings.exceptions.wordStart : [];
+					string.split(" ").forEach(word => {
+						if (word.indexOf("<@!") == 0 || word.indexOf("<#") == 0 || word.indexOf(":") == 0 || word.indexOf("<:") == 0 || word.indexOf("<a:") == 0 || word.indexOf("@") == 0 || word.indexOf("#") == 0 || usedExceptions.some(n => word.indexOf(n) == 0 && word.length > 1)) {
+							newString.push(protectionLogic.createProtectionPlaceholder(plugin, count));
+							protectedSegments[count] = word;
+							count++;
+						}
+						else newString.push(word);
+					});
+				}
+				const maskedString = newString.join(place == messageTypes.RECEIVED ? "" : " ");
+				const hasTranslatableContent = maskedString.replace(/(?:⟦\s*(?:DTA\s*)?\d+\s*⟧|【\s*\d+\s*】|\[\s*\d+\s*\]|<<<\s*\d+\s*>>>|\{\{\d+\}\})/g, "").trim().length > 0;
+				return [maskedString, protectedSegments, hasTranslatableContent];
+			}
+		};
+
+		const receivedTranslationRuntime = {
+			clearLoadedAttemptedMessages(channelId = null) {
+				if (!channelId) {
+					loadedAutoTranslationAttemptedMessages = {};
+					return;
+				}
+				for (const messageId of Object.keys(loadedAutoTranslationAttemptedMessages)) {
+					if (loadedAutoTranslationAttemptedMessages[messageId] == channelId) delete loadedAutoTranslationAttemptedMessages[messageId];
+				}
+			},
+			resetLoadedPassState(channelId = null) {
+				if (!channelId) {
+					loadedAutoTranslationPassCounts = {};
+					loadedAutoTranslationPassRequestCounts = {};
+					loadedAutoTranslationBatchNumbers = {};
+					loadedAutoTranslationPassScrollStamps = {};
+					return;
+				}
+				delete loadedAutoTranslationPassCounts[channelId];
+				delete loadedAutoTranslationPassRequestCounts[channelId];
+				delete loadedAutoTranslationBatchNumbers[channelId];
+				delete loadedAutoTranslationPassScrollStamps[channelId];
+			},
+			resetHistoricalBatchState(plugin, channelId = null) {
+				if (channelId) {
+					if (historicalAutoTranslationBatchChannelId == channelId) {
+						historicalAutoTranslationBatchActive = false;
+						historicalAutoTranslationBatchProcessedCount = 0;
+						historicalAutoTranslationBatchMessageIds = {};
+						historicalAutoTranslationBatchChannelId = null;
+						historicalAutoTranslationBatchTotal = 0;
+					}
+					plugin.clearHistoricalAutoTranslationStaging(channelId);
+					return;
+				}
+				historicalAutoTranslationBatchActive = false;
+				historicalAutoTranslationBatchProcessedCount = 0;
+				historicalAutoTranslationBatchMessageIds = {};
+				historicalAutoTranslationBatchChannelId = null;
+				historicalAutoTranslationBatchTotal = 0;
+				plugin.clearHistoricalAutoTranslationStaging();
+			},
+			resetGlobalQueueTimers() {
+				if (autoTranslationQueueRetryTimer) clearTimeout(autoTranslationQueueRetryTimer);
+				autoTranslationQueueRetryTimer = null;
+				if (historicalAutoTranslationStartTimer) clearTimeout(historicalAutoTranslationStartTimer);
+				historicalAutoTranslationStartTimer = null;
+				if (historicalAutoTranslationScrollScanTimer) clearTimeout(historicalAutoTranslationScrollScanTimer);
+				historicalAutoTranslationScrollScanTimer = null;
+				if (historicalAutoTranslationPostBatchScanTimer) clearTimeout(historicalAutoTranslationPostBatchScanTimer);
+				historicalAutoTranslationPostBatchScanTimer = null;
+			},
+			resetAutoTranslationTracking(plugin, channelId = null) {
+				if (channelId) {
+					delete autoTranslationChannelStates[channelId];
+					receivedTranslationRuntime.resetLoadedPassState(channelId);
+					receivedTranslationRuntime.clearLoadedAttemptedMessages(channelId);
+					receivedTranslationRuntime.resetHistoricalBatchState(plugin, channelId);
+				}
+				else {
+					autoTranslationChannelStates = {};
+					receivedTranslationRuntime.resetLoadedPassState();
+					receivedTranslationRuntime.clearLoadedAttemptedMessages();
+					receivedTranslationRuntime.resetHistoricalBatchState(plugin);
+				}
+				plugin.clearAutoTranslationEligibleReplyPreviewMessages(channelId);
+				if (!channelId || lastAutoTranslationChannelId == channelId) lastAutoTranslationChannelId = null;
+			},
+			getAutoTranslationChannelState(_plugin, channelId) {
+				if (!channelId) return null;
+				if (!autoTranslationChannelStates[channelId]) autoTranslationChannelStates[channelId] = {
+					initialized: false,
+					boundaryMessageId: null
+				};
+				return autoTranslationChannelStates[channelId];
+			},
+			prepareAutoTranslationChannelSession(plugin, channelId) {
+				if (!channelId || lastAutoTranslationChannelId == channelId) return;
+				lastAutoTranslationChannelId = channelId;
+				const channelState = receivedTranslationRuntime.getAutoTranslationChannelState(plugin, channelId);
+				channelState.initialized = false;
+				channelState.boundaryMessageId = null;
+				loadedAutoTranslationPassCounts[channelId] = 0;
+				loadedAutoTranslationPassRequestCounts[channelId] = 0;
+				loadedAutoTranslationBatchNumbers[channelId] = 0;
+				loadedAutoTranslationPassScrollStamps[channelId] = lastAutoTranslationUserScrollTime || 0;
+				receivedTranslationRuntime.clearLoadedAttemptedMessages(channelId);
+				plugin.clearAutoTranslationEligibleReplyPreviewMessages(channelId);
+				if (plugin.getReceivedAutoTranslateScope() == "new_only") plugin.clearDisplayedAutoTranslations(channelId);
+			},
+			clearAutoTranslationQueue(plugin, channelId = null) {
+				if (!channelId) {
+					autoTranslationQueue = [];
+					queuedAutoTranslations = {};
+					queuedReplyPreviewTranslations = {};
+					autoTranslationEligibleReplyPreviewMessages = {};
+					replyPreviewRenderMessageIds = {};
+					historicalAutoTranslationRerenderPending = false;
+					historicalAutoTranslationPendingCount = 0;
+					historicalAutoTranslationPausedUntil = 0;
+					receivedTranslationRuntime.resetHistoricalBatchState(plugin);
+					receivedTranslationRuntime.resetLoadedPassState();
+					receivedTranslationRuntime.clearLoadedAttemptedMessages();
+					receivedTranslationRuntime.resetGlobalQueueTimers();
+					plugin.clearLoadedAutoTranslationStatus();
+					return;
+				}
+				autoTranslationQueue = autoTranslationQueue.filter(queueItem => {
+					const shouldRemove = queueItem && queueItem.channel && queueItem.channel.id == channelId;
+					if (shouldRemove && queueItem.message && queueItem.message.id) delete queuedAutoTranslations[queueItem.message.id];
+					return !shouldRemove;
+				});
+				for (const messageId of Object.keys(queuedReplyPreviewTranslations)) {
+					if (queuedReplyPreviewTranslations[messageId] == channelId) delete queuedReplyPreviewTranslations[messageId];
+				}
+				delete autoTranslationEligibleReplyPreviewMessages[channelId];
+				receivedTranslationRuntime.clearLoadedAttemptedMessages(channelId);
+				receivedTranslationRuntime.resetHistoricalBatchState(plugin, channelId);
+				receivedTranslationRuntime.resetLoadedPassState(channelId);
+				if (!autoTranslationQueue.length && autoTranslationQueueRetryTimer) {
+					clearTimeout(autoTranslationQueueRetryTimer);
+					autoTranslationQueueRetryTimer = null;
+				}
+				if (loadedAutoTranslationStatus.channelId == channelId) plugin.clearLoadedAutoTranslationStatus();
+			},
+			shouldPauseHistoricalAutoTranslation(plugin) {
+				if (Date.now() < (historicalAutoTranslationPausedUntil || 0)) return true;
+				if (!plugin.shouldPauseLoadedAutoTranslateWhileScrolling()) return false;
+				plugin.attachAutoTranslationScrollWatcher();
+				return plugin.isUserActivelyScrollingMessages();
+			},
+			scheduleAutoTranslationQueueRetry(plugin) {
+				if (autoTranslationQueueRetryTimer) return;
+				autoTranslationQueueRetryTimer = setTimeout(_ => {
+					autoTranslationQueueRetryTimer = null;
+					plugin.processAutoTranslationQueue();
+				}, AUTO_TRANSLATION_QUEUE_RETRY_DELAY);
+			},
+			scheduleAutoTranslationBackoff(plugin, ms) {
+				if (!ms) return;
+				autoTranslationBackoffUntil = Math.max(autoTranslationBackoffUntil || 0, Date.now() + ms);
+				receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
+			},
+			scheduleHistoricalAutoTranslationStart(plugin) {
+				if (historicalAutoTranslationStartTimer) clearTimeout(historicalAutoTranslationStartTimer);
+				historicalAutoTranslationStartTimer = setTimeout(_ => {
+					historicalAutoTranslationStartTimer = null;
+					plugin.processAutoTranslationQueue();
+				}, HISTORICAL_AUTO_TRANSLATION_COLLECT_DELAY);
+			},
+			createQueueItem(plugin, message, channel, originalContentData = null, queueOptions = {}) {
+				return {
+					message,
+					channel,
+					originalContentData: originalContentData || plugin.extractOriginalContentData(message),
+					historicalLoad: !!queueOptions.historicalLoad,
+					deferWhileReading: !!queueOptions.deferWhileReading,
+					cachedTranslation: queueOptions.cachedTranslation || null
+				};
+			},
+			canQueueHistoricalItem(plugin, queueItem) {
+				const message = queueItem && queueItem.message;
+				const channelId = queueItem && queueItem.channel && queueItem.channel.id || "__global";
+				const cachedTranslation = queueItem && queueItem.cachedTranslation;
+				if (!plugin.isTranslationEnabled(channelId)) {
+					if (message && message.id) delete queuedAutoTranslations[message.id];
+					plugin.clearLoadedAutoTranslationStatus();
+					return false;
+				}
+				if (message && loadedAutoTranslationAttemptedMessages[message.id] && !cachedTranslation) {
+					delete queuedAutoTranslations[message.id];
+					return false;
+				}
+				if (!plugin.shouldContinueLoadedAutoTranslateOnScroll() && loadedAutoTranslationStatus.done && loadedAutoTranslationStatus.channelId == channelId) {
+					if (message && message.id) delete queuedAutoTranslations[message.id];
+					return false;
+				}
+				if (message && historicalAutoTranslationBatchActive && !plugin.isHistoricalAutoTranslationSnapshotMessage(message.id, channelId)) {
+					delete queuedAutoTranslations[message.id];
+					return false;
+				}
+				if (plugin.shouldContinueLoadedAutoTranslateOnScroll()) {
+					const currentScrollStamp = lastAutoTranslationUserScrollTime || 0;
+					if ((loadedAutoTranslationPassScrollStamps[channelId] || 0) < currentScrollStamp) {
+						loadedAutoTranslationPassCounts[channelId] = 0;
+						loadedAutoTranslationPassRequestCounts[channelId] = 0;
+						loadedAutoTranslationPassScrollStamps[channelId] = currentScrollStamp;
+					}
+				}
+				const countsTowardRequestLimit = !cachedTranslation;
+				const currentRequestCount = loadedAutoTranslationPassRequestCounts[channelId] || 0;
+				if (countsTowardRequestLimit && currentRequestCount >= plugin.getReceivedAutoTranslateLoadedLimit()) {
+					if (message && message.id) delete queuedAutoTranslations[message.id];
+					return false;
+				}
+				if (countsTowardRequestLimit) loadedAutoTranslationPassRequestCounts[channelId] = currentRequestCount + 1;
+				return true;
+			},
+			enqueueHistoricalItem(plugin, queueItem) {
+				const channelId = queueItem && queueItem.channel && queueItem.channel.id || "__global";
+				if (!receivedTranslationRuntime.canQueueHistoricalItem(plugin, queueItem)) return false;
+				const currentPassCount = loadedAutoTranslationPassCounts[channelId] || 0;
+				loadedAutoTranslationPassCounts[channelId] = currentPassCount + 1;
+				autoTranslationQueue.push(queueItem);
+				plugin.updateLoadedAutoTranslationStatus({
+					active: true,
+					collecting: true,
+					done: false,
+					channelId,
+					batch: (loadedAutoTranslationBatchNumbers[channelId] || 0) + 1,
+					total: loadedAutoTranslationPassCounts[channelId],
+					processed: historicalAutoTranslationBatchProcessedCount || 0
+				});
+				receivedTranslationRuntime.scheduleHistoricalAutoTranslationStart(plugin);
+				return true;
+			},
+			enqueueLiveItem(plugin, queueItem) {
+				autoTranslationQueue.unshift(queueItem);
+				plugin.processAutoTranslationQueue();
+				return true;
+			},
+			queueAutoTranslateMessage(plugin, message, channel, originalContentData = null, queueOptions = {}) {
+				const cachedTranslation = queueOptions.cachedTranslation || null;
+				if (!cachedTranslation && !plugin.shouldAutoTranslateReceivedMessage(message, channel, originalContentData)) return false;
+				if (queueOptions.historicalLoad && !plugin.isMessageWithinLoadedRange(message)) return false;
+				queuedAutoTranslations[message.id] = true;
+				const queueItem = receivedTranslationRuntime.createQueueItem(plugin, message, channel, originalContentData, queueOptions);
+				if (queueItem.historicalLoad) return receivedTranslationRuntime.enqueueHistoricalItem(plugin, queueItem);
+				return receivedTranslationRuntime.enqueueLiveItem(plugin, queueItem);
+			},
+			getQueueItemChannelId(queueItem) {
+				return queueItem && queueItem.channel && queueItem.channel.id || loadedAutoTranslationStatus.channelId || "__global";
+			},
+			beginQueueProcessing(plugin) {
+				if (historicalAutoTranslationStartTimer) {
+					clearTimeout(historicalAutoTranslationStartTimer);
+					historicalAutoTranslationStartTimer = null;
+				}
+				if (loadedAutoTranslationStatus.active && loadedAutoTranslationStatus.collecting) plugin.updateLoadedAutoTranslationStatus({collecting: false});
+				if (isTranslating) return false;
+				const hasPendingLiveItem = autoTranslationQueue.some(queueItem => queueItem && !queueItem.historicalLoad);
+				if (hasPendingLiveItem ? isLiveAutoTranslating : isLiveAutoTranslating || isHistoricalAutoTranslating) return false;
+				if (Date.now() < (autoTranslationBackoffUntil || 0)) {
+					receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
+					return false;
+				}
+				return true;
+			},
+			finishQueueIfEmpty(plugin) {
+				if (autoTranslationQueue.length) return false;
+				plugin.finishHistoricalAutoTranslationBatchIfDone();
+				if (!historicalAutoTranslationBatchActive && loadedAutoTranslationStatus && loadedAutoTranslationStatus.active && plugin.getReceivedAutoTranslateScope() == "loaded_messages") {
+					const channelId = loadedAutoTranslationStatus.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+					const total = Math.max(0, loadedAutoTranslationStatus.total || 0);
+					plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId, total, processed: Math.min(total, loadedAutoTranslationStatus.processed || 0)});
+				}
+				return true;
+			},
+			beginHistoricalBatchIfNeeded(plugin, queueItem) {
+				if (!queueItem || !queueItem.historicalLoad || historicalAutoTranslationBatchActive) return;
+				historicalAutoTranslationBatchActive = true;
+				historicalAutoTranslationBatchProcessedCount = 0;
+				const snapshot = plugin.createHistoricalAutoTranslationBatchSnapshot(queueItem);
+				const channelId = snapshot.channelId;
+				loadedAutoTranslationBatchNumbers[channelId] = (loadedAutoTranslationBatchNumbers[channelId] || 0) + 1;
+				plugin.updateLoadedAutoTranslationStatus({active: true, collecting: false, done: false, channelId, batch: loadedAutoTranslationBatchNumbers[channelId], total: snapshot.total || 1, processed: 0, displayed: 0, skipped: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""});
+			},
+			ensureHistoricalChannelActive(plugin, queueItem) {
+				if (!queueItem || !queueItem.historicalLoad) return true;
+				const channelId = receivedTranslationRuntime.getQueueItemChannelId(queueItem);
+				if (!plugin.isTranslationEnabled(channelId)) {
+					delete queuedAutoTranslations[queueItem.message.id];
+					plugin.clearLoadedAutoTranslationStatus();
+					isHistoricalAutoTranslating = false;
+					return false;
+				}
+				return true;
+			},
+			markHistoricalQueueItemProcessed(plugin, queueItem, outcome = {}) {
+				const channelId = receivedTranslationRuntime.getQueueItemChannelId(queueItem);
+				historicalAutoTranslationBatchProcessedCount++;
+				const update = {
+					active: true,
+					collecting: false,
+					done: false,
+					channelId,
+					batch: loadedAutoTranslationBatchNumbers[channelId] || loadedAutoTranslationStatus.batch || 1,
+					total: historicalAutoTranslationBatchTotal || loadedAutoTranslationStatus.total || historicalAutoTranslationBatchProcessedCount,
+					processed: historicalAutoTranslationBatchProcessedCount
+				};
+				if (outcome.displayed) update.displayed = (loadedAutoTranslationStatus.displayed || 0) + outcome.displayed;
+				if (outcome.skipped) update.skipped = (loadedAutoTranslationStatus.skipped || 0) + outcome.skipped;
+				if (outcome.aiDropped) update.aiDropped = (loadedAutoTranslationStatus.aiDropped || 0) + outcome.aiDropped;
+				if (outcome.lastSkipReason !== undefined) update.lastSkipReason = outcome.lastSkipReason;
+				if (outcome.lastSkipPreview !== undefined) update.lastSkipPreview = outcome.lastSkipPreview;
+				plugin.updateLoadedAutoTranslationStatus(update);
+			},
+			handleHistoricalOutOfRange(plugin, queueItem) {
+				if (!queueItem || !queueItem.historicalLoad || plugin.isMessageWithinLoadedRange(queueItem.message)) return false;
+				delete queuedAutoTranslations[queueItem.message.id];
+				receivedTranslationRuntime.markHistoricalQueueItemProcessed(plugin, queueItem, {
+					skipped: 1,
+					lastSkipReason: "out_of_range",
+					lastSkipPreview: plugin.getLoadedAutoTranslationPreviewText(plugin.buildTranslationRequestText(queueItem.originalContentData))
+				});
+				plugin.finishHistoricalAutoTranslationBatchIfDone();
+				return true;
+			},
+			handleHistoricalPauseOrBatch(plugin, queueItem) {
+				if (!queueItem || !queueItem.historicalLoad) return false;
+				if (plugin.shouldPauseHistoricalAutoTranslation()) {
+					autoTranslationQueue.unshift(queueItem);
+					receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
+					return true;
+				}
+				if (!queueItem.forceSingle && plugin.getHistoricalAiBatchEngineKey(receivedTranslationRuntime.getQueueItemChannelId(queueItem))) {
+					autoTranslationQueue.unshift(queueItem);
+					if (plugin.processHistoricalAutoTranslationBatchChunk()) return true;
+				}
+				return false;
+			},
+			handleCachedQueueItem(plugin, queueItem) {
+				if (!queueItem || !queueItem.cachedTranslation) return false;
+				const channelId = receivedTranslationRuntime.getQueueItemChannelId(queueItem);
+				const storedCachedTranslation = Object.assign({channelId, auto: true}, queueItem.cachedTranslation);
+				if (queueItem.historicalLoad) {
+					plugin.stageHistoricalAutoTranslationResult(queueItem.message, storedCachedTranslation, queueItem.originalContentData);
+					loadedAutoTranslationAttemptedMessages[queueItem.message.id] = channelId;
+					receivedTranslationRuntime.markHistoricalQueueItemProcessed(plugin, queueItem, {displayed: 1});
+				}
+				else plugin.applyStoredTranslationToMessage(queueItem.message, storedCachedTranslation, queueItem.originalContentData);
+				delete queuedAutoTranslations[queueItem.message.id];
+				plugin.finishHistoricalAutoTranslationBatchIfDone();
+				return true;
+			},
+			handleQueueItemGuardFailure(plugin, queueItem) {
+				if (!queueItem) return false;
+				if (plugin.shouldAutoTranslateReceivedMessage(queueItem.message, queueItem.channel, queueItem.originalContentData, true)) return false;
+				delete queuedAutoTranslations[queueItem.message.id];
+				if (queueItem.historicalLoad) {
+					loadedAutoTranslationAttemptedMessages[queueItem.message.id] = receivedTranslationRuntime.getQueueItemChannelId(queueItem);
+					receivedTranslationRuntime.markHistoricalQueueItemProcessed(plugin, queueItem, {
+						skipped: 1,
+						lastSkipReason: plugin.getReceivedAutoTranslateSkipReason(queueItem.originalContentData, receivedTranslationRuntime.getQueueItemChannelId(queueItem)) || "local_guard",
+						lastSkipPreview: plugin.getLoadedAutoTranslationPreviewText(plugin.buildTranslationRequestText(queueItem.originalContentData))
+					});
+				}
+				plugin.finishHistoricalAutoTranslationBatchIfDone();
+				return true;
+			},
+			retryHistoricalQueueItemIfTransient(plugin, queueItem) {
+				if (!queueItem || !queueItem.historicalLoad || !queueItem.message || queueItem.historicalRetryCount >= 1) return false;
+				const channelId = receivedTranslationRuntime.getQueueItemChannelId(queueItem);
+				if (plugin.getCachedReceivedSkipDecision(queueItem.message, channelId, queueItem.originalContentData)) return false;
+				queueItem.historicalRetryCount = (queueItem.historicalRetryCount || 0) + 1;
+				autoTranslationQueue.unshift(queueItem);
+				return true;
+			},
+			translateQueuedItem(plugin, queueItem) {
+				const isHistoricalItem = !!queueItem.historicalLoad;
+				if (isHistoricalItem) isHistoricalAutoTranslating = true;
+				else isLiveAutoTranslating = true;
+				plugin.translateMessage(queueItem.message, queueItem.channel, {
+					auto: true,
+					silent: true,
+					trackBusy: false,
+					forcePlainTranslation: !!queueItem.forcePlainTranslation,
+					historicalLoad: !!queueItem.historicalLoad,
+					deferRerender: !!queueItem.historicalLoad,
+					stageResult: !!queueItem.historicalLoad,
+					originalContentData: queueItem.originalContentData
+				}).then(result => {
+					if (isHistoricalItem && !result && receivedTranslationRuntime.retryHistoricalQueueItemIfTransient(plugin, queueItem)) {
+						isHistoricalAutoTranslating = false;
+						return plugin.processAutoTranslationQueue();
+					}
+					delete queuedAutoTranslations[queueItem.message.id];
+					if (queueItem.historicalLoad) {
+						const channelId = receivedTranslationRuntime.getQueueItemChannelId(queueItem);
+						if (result) loadedAutoTranslationAttemptedMessages[queueItem.message.id] = channelId;
+						receivedTranslationRuntime.markHistoricalQueueItemProcessed(plugin, queueItem, {
+							displayed: result ? 1 : 0,
+							skipped: result ? 0 : 1,
+							aiDropped: result ? 0 : 1,
+							lastSkipReason: result ? loadedAutoTranslationStatus.lastSkipReason : "local_guard",
+							lastSkipPreview: result ? loadedAutoTranslationStatus.lastSkipPreview : plugin.getLoadedAutoTranslationPreviewText(plugin.buildTranslationRequestText(queueItem.originalContentData))
+						});
+					}
+					if (isHistoricalItem) isHistoricalAutoTranslating = false;
+					else isLiveAutoTranslating = false;
+					plugin.finishHistoricalAutoTranslationBatchIfDone();
+					plugin.processAutoTranslationQueue();
+				}).catch(_ => {
+					if (isHistoricalItem && receivedTranslationRuntime.retryHistoricalQueueItemIfTransient(plugin, queueItem)) {
+						isHistoricalAutoTranslating = false;
+						return plugin.processAutoTranslationQueue();
+					}
+					delete queuedAutoTranslations[queueItem.message.id];
+					if (queueItem.historicalLoad) {
+						receivedTranslationRuntime.markHistoricalQueueItemProcessed(plugin, queueItem, {
+							skipped: 1,
+							aiDropped: 1,
+							lastSkipReason: "local_guard",
+							lastSkipPreview: plugin.getLoadedAutoTranslationPreviewText(plugin.buildTranslationRequestText(queueItem.originalContentData))
+						});
+					}
+					if (isHistoricalItem) isHistoricalAutoTranslating = false;
+					else isLiveAutoTranslating = false;
+					plugin.finishHistoricalAutoTranslationBatchIfDone();
+					plugin.processAutoTranslationQueue();
+				});
+			},
+			getHistoricalAiBatchContext(plugin) {
+				const channelId = historicalAutoTranslationBatchChannelId || loadedAutoTranslationStatus.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId() || "__global";
+				const engineKey = plugin.getHistoricalAiBatchEngineKey(channelId);
+				if (!engineKey) return null;
+				return {
+					channelId,
+					engineKey,
+					input: Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {}),
+					output: Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {})
+				};
+			},
+			selectHistoricalAiBatchItems(plugin, channelId, input, output) {
+				let requestItems = [], processedWithoutRequest = [], charCount = 0;
+				const remainingQueue = [];
+				let activeBatchItemLimit = plugin.getHistoricalAiBatchItemLimit(channelId);
+				for (const queueItem of autoTranslationQueue) {
+					const itemChannelId = plugin.getHistoricalQueueItemChannelId(queueItem, channelId);
+					const eligible = queueItem && queueItem.historicalLoad && !queueItem.forceSingle && itemChannelId == channelId && plugin.isHistoricalAutoTranslationSnapshotMessage(queueItem.message && queueItem.message.id, channelId);
+					if (eligible && queueItem.aiBatchSizeLimit) activeBatchItemLimit = Math.max(1, Math.min(activeBatchItemLimit, queueItem.aiBatchSizeLimit));
+					if (!eligible || requestItems.length >= activeBatchItemLimit) {
+						remainingQueue.push(queueItem);
+						continue;
+					}
+					const prepared = plugin.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
+					if (!prepared) {
+						remainingQueue.push(queueItem);
+						continue;
+					}
+					if (prepared.cachedTranslation || prepared.skipped) {
+						processedWithoutRequest.push(prepared);
+						continue;
+					}
+					const nextCharCount = charCount + prepared.protectedText.length;
+					if (requestItems.length && nextCharCount > HISTORICAL_AI_BATCH_CHAR_LIMIT) {
+						remainingQueue.push(queueItem);
+						continue;
+					}
+					charCount = nextCharCount;
+					requestItems.push(prepared);
+				}
+				autoTranslationQueue = remainingQueue;
+				return {requestItems, processedWithoutRequest};
+			},
+			processHistoricalPreparedItems(plugin, channelId, preparedItems) {
+				for (const prepared of preparedItems) {
+					if (prepared.cachedTranslation) {
+						const storedCachedTranslation = Object.assign({channelId, auto: true}, prepared.cachedTranslation);
+						plugin.stageHistoricalAutoTranslationResult(prepared.queueItem.message, storedCachedTranslation, prepared.queueItem.originalContentData);
+					}
+					loadedAutoTranslationAttemptedMessages[prepared.queueItem.message.id] = channelId;
+					receivedTranslationRuntime.markHistoricalQueueItemProcessed(plugin, prepared.queueItem, prepared.cachedTranslation ? {
+						displayed: 1
+					} : {
+						skipped: 1,
+						lastSkipReason: prepared.skipReason || "symbol_only",
+						lastSkipPreview: plugin.getLoadedAutoTranslationPreviewText(prepared.skipPreview || plugin.buildTranslationRequestText(prepared.queueItem.originalContentData || prepared.originalContentData || {}))
+					});
+				}
+			},
+			applyHistoricalAiBatchResultMap(plugin, channelId, requestItems, resultMap) {
+				const fallbackItems = [];
+				for (const item of requestItems) {
+					const messageId = String(item.message.id);
+					const hasReturnedId = Object.prototype.hasOwnProperty.call(resultMap, messageId);
+					const rawTranslation = hasReturnedId ? resultMap[messageId] : null;
+					if (!hasReturnedId || rawTranslation == null || String(rawTranslation).trim() === "") {
+						fallbackItems.push(item.queueItem);
+						continue;
+					}
+					if (plugin.isSkipTranslationSignal(rawTranslation)) {
+						fallbackItems.push(item.queueItem);
+						continue;
+					}
+					let translatedText = String(rawTranslation).replace(/\[NEWLINE\]/g, "\n").trim();
+					translatedText = plugin.addExceptions(translatedText, item.exceptions);
+					if (!plugin.isTranslationLikelyInTargetLanguage(translatedText, item.output && item.output.id)) {
+						fallbackItems.push(item.queueItem);
+						continue;
+					}
+					const storedTranslation = plugin.createStoredReceivedTranslationData(item.message, channelId, item.originalContentData, item.signature, translatedText, item.input, item.output, true);
+					if (storedTranslation && plugin.shouldKeepAutoTranslatedResult(storedTranslation, channelId) && !plugin.isTranslationResultTooSimilar(storedTranslation)) {
+						plugin.stageHistoricalAutoTranslationResult(item.message, storedTranslation, item.originalContentData);
+						plugin.persistTranslationCacheEntry(item.message.id, item.signature, storedTranslation);
+						loadedAutoTranslationAttemptedMessages[item.message.id] = channelId;
+						receivedTranslationRuntime.markHistoricalQueueItemProcessed(plugin, item.queueItem, {displayed: 1});
+					}
+					else if (storedTranslation) {
+						fallbackItems.push(item.queueItem);
+					}
+					else fallbackItems.push(item.queueItem);
+				}
+				return fallbackItems;
+			},
+			requestHistoricalAiBatch(plugin, channelId, requestItems, engineKey) {
+				isHistoricalAutoTranslating = true;
+				plugin.requestAiBatchTranslation(engineKey, requestItems).then(resultMap => {
+					if (!resultMap) {
+						plugin.requeueHistoricalAiBatchFallbackItems(requestItems);
+						isHistoricalAutoTranslating = false;
+						return plugin.processAutoTranslationQueue();
+					}
+					const fallbackItems = receivedTranslationRuntime.applyHistoricalAiBatchResultMap(plugin, channelId, requestItems, resultMap);
+					plugin.flushHistoricalAutoTranslationProgress(channelId);
+					plugin.requeueHistoricalAiBatchFallbackItems(fallbackItems, fallbackItems.length > 1 ? plugin.getNextHistoricalAiBatchFallbackLimit(fallbackItems.length) : 1);
+					isHistoricalAutoTranslating = false;
+					plugin.finishHistoricalAutoTranslationBatchIfDone();
+					plugin.processAutoTranslationQueue();
+				}).catch(_ => {
+					plugin.requeueHistoricalAiBatchFallbackItems(requestItems);
+					isHistoricalAutoTranslating = false;
+					plugin.processAutoTranslationQueue();
+				});
+			},
+			processHistoricalAutoTranslationBatchChunk(plugin) {
+				if (isLiveAutoTranslating || isHistoricalAutoTranslating || isTranslating) return false;
+				const context = receivedTranslationRuntime.getHistoricalAiBatchContext(plugin);
+				if (!context) return false;
+				const {requestItems, processedWithoutRequest} = receivedTranslationRuntime.selectHistoricalAiBatchItems(plugin, context.channelId, context.input, context.output);
+				receivedTranslationRuntime.processHistoricalPreparedItems(plugin, context.channelId, processedWithoutRequest);
+				if (!requestItems.length) {
+					plugin.finishHistoricalAutoTranslationBatchIfDone();
+					plugin.processAutoTranslationQueue();
+					return true;
+				}
+				receivedTranslationRuntime.requestHistoricalAiBatch(plugin, context.channelId, requestItems, context.engineKey);
+				return true;
+			},
+			createProcessMessagesContext(plugin, e) {
+				e.instance.props.channelStream = [].concat(e.instance.props.channelStream);
+				const channel = e.instance.props.channel;
+				const channelId = channel && channel.id;
+				plugin.prepareAutoTranslationChannelSession(channelId);
+				const channelState = plugin.getAutoTranslationChannelState(channelId);
+				const shouldInitializeAutoTranslation = !!(channelId && plugin.isTranslationEnabled(channelId) && channelState && !channelState.initialized);
+				const historicalLoadedPass = shouldInitializeAutoTranslation && plugin.getReceivedAutoTranslateScope() == "loaded_messages";
+				if (historicalLoadedPass) {
+					plugin.attachAutoTranslationScrollWatcher();
+					plugin.updateLoadedAutoTranslationStatus({active: true, collecting: true, done: false, channelId, batch: (loadedAutoTranslationBatchNumbers[channelId] || 0) + 1, total: 0, processed: 0, displayed: 0, skipped: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""});
+				}
+				return {
+					channel,
+					channelId,
+					channelState,
+					shouldInitializeAutoTranslation,
+					historicalLoadedPass,
+					skipInitialLoadedMessages: shouldInitializeAutoTranslation && plugin.shouldDeferInitialAutoTranslate(channelId),
+					autoTranslateBoundaryId: channelState ? channelState.boundaryMessageId : null,
+					highestMessageId: channelState ? channelState.boundaryMessageId : null
+				};
+			},
+			processChannelStreamEntry(plugin, entry, context) {
+				const message = entry && entry.content;
+				if (!message) return context.highestMessageId;
+				if (BDFDB.ArrayUtils.is(message.attachments)) {
+					context.highestMessageId = plugin.getNewestMessageId(context.highestMessageId, message.id);
+					plugin.checkMessage(entry, message, context.channel, {
+						skipAutoQueue: context.skipInitialLoadedMessages,
+						autoTranslateBoundaryId: context.autoTranslateBoundaryId,
+						historicalLoad: context.historicalLoadedPass
+					});
+					return context.highestMessageId;
+				}
+				if (BDFDB.ArrayUtils.is(message)) for (let index in message) {
+					const childMessage = message[index].content;
+					if (!childMessage || !BDFDB.ArrayUtils.is(childMessage.attachments)) continue;
+					context.highestMessageId = plugin.getNewestMessageId(context.highestMessageId, childMessage.id);
+					plugin.checkMessage(message[index], childMessage, context.channel, {
+						skipAutoQueue: context.skipInitialLoadedMessages,
+						autoTranslateBoundaryId: context.autoTranslateBoundaryId,
+						historicalLoad: context.historicalLoadedPass
+					});
+				}
+				return context.highestMessageId;
+			},
+			finishProcessMessages(plugin, context) {
+				if (context.channelState) {
+					context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, context.highestMessageId);
+					if (context.shouldInitializeAutoTranslation) context.channelState.initialized = true;
+				}
+				if (context.historicalLoadedPass) {
+					const hasQueuedHistoricalForChannel = autoTranslationQueue.some(queueItem => queueItem && queueItem.historicalLoad && plugin.getHistoricalQueueItemChannelId(queueItem, context.channelId) == context.channelId);
+					if (!hasQueuedHistoricalForChannel && !historicalAutoTranslationBatchActive) plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: context.channelId, batch: loadedAutoTranslationBatchNumbers[context.channelId] || loadedAutoTranslationStatus.batch || 1, total: loadedAutoTranslationPassCounts[context.channelId] || 0, processed: 0});
+				}
+			},
+			processMessages(plugin, e) {
+				const context = receivedTranslationRuntime.createProcessMessagesContext(plugin, e);
+				for (let index in e.instance.props.channelStream) {
+					receivedTranslationRuntime.processChannelStreamEntry(plugin, e.instance.props.channelStream[index], context);
+				}
+				receivedTranslationRuntime.finishProcessMessages(plugin, context);
+			},
+			createCheckMessageContext(plugin, message, channel, options = {}) {
+				const channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+				const originalContentData = plugin.extractOriginalContentData(message);
+				const channelState = plugin.getAutoTranslationChannelState(channelId);
+				const autoTranslateBoundaryId = options.autoTranslateBoundaryId != null ? options.autoTranslateBoundaryId : channelState && channelState.boundaryMessageId;
+				return {
+					channelId,
+					channelState,
+					originalContentData,
+					expectedSignature: plugin.createReceivedTranslationSignature(message, channelId, originalContentData),
+					skipAutoQueue: !!options.skipAutoQueue,
+					isNewerThanBoundary: plugin.isMessageIdNewer(message.id, autoTranslateBoundaryId),
+					historicalLoad: !!options.historicalLoad
+				};
+			},
+			resolveCheckMessageDisplay(plugin, stream, message, context) {
+				const hadDisplayedTranslation = !!translatedMessages[message.id];
+				let translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature);
+				let messageChanged = hadDisplayedTranslation && !translation;
+				const canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !suppressedAutoTranslations[message.id];
+				const canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary);
+				let cachedTranslation = null;
+				if (canAutoTranslateReplyPreviewForBase) plugin.markAutoTranslationEligibleReplyPreviewMessage(context.channelId, message.id);
+				if (!translation && canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad || messageChanged || context.isNewerThanBoundary)) {
+					cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData);
+					if (cachedTranslation && !context.historicalLoad) translation = plugin.applyStoredTranslationToMessage(message, Object.assign({channelId: context.channelId, auto: true}, cachedTranslation), context.originalContentData);
+				}
+				if (translation) {
+					plugin.refreshTranslationDisplay(translation);
+					stream.content.content = translation.content;
+				}
+				else if (oldMessages[message.id]) {
+					stream.content.content = oldMessages[message.id].content;
+					delete oldMessages[message.id];
+					messageChanged = true;
+				}
+				return {translation, messageChanged, cachedTranslation, canAutoTranslateMessage};
+			},
+			queueCheckMessageTranslation(plugin, message, channel, context, outcome) {
+				if (outcome.translation || context.skipAutoQueue || !outcome.canAutoTranslateMessage) return;
+				if (context.channelState) context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, message.id);
+				if (outcome.messageChanged || context.isNewerThanBoundary || context.historicalLoad) {
+					const liveMessage = !context.historicalLoad && (context.isNewerThanBoundary || plugin.isLikelyLiveAutoTranslateMessage(message, context.channelId));
+					plugin.queueAutoTranslateMessage(message, channel || {id: context.channelId}, context.originalContentData, {
+						historicalLoad: context.historicalLoad && !liveMessage,
+						deferWhileReading: false,
+						cachedTranslation: context.historicalLoad && !liveMessage ? outcome.cachedTranslation : null
+					});
+				}
+			},
+			checkMessage(plugin, stream, message, channel, options = {}) {
+				if (!message || !stream || !stream.content) return;
+				const context = receivedTranslationRuntime.createCheckMessageContext(plugin, message, channel, options);
+				const outcome = receivedTranslationRuntime.resolveCheckMessageDisplay(plugin, stream, message, context);
+				receivedTranslationRuntime.queueCheckMessageTranslation(plugin, message, channel, context, outcome);
+			},
+			processAutoTranslationQueue(plugin) {
+				if (!receivedTranslationRuntime.beginQueueProcessing(plugin)) return;
+				if (receivedTranslationRuntime.finishQueueIfEmpty(plugin)) return;
+				plugin.sortAutoTranslationQueueForStableOrder();
+				const nextItem = autoTranslationQueue.shift();
+				if (!nextItem || !nextItem.message) {
+					plugin.finishHistoricalAutoTranslationBatchIfDone();
+					return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+				}
+				if (!receivedTranslationRuntime.ensureHistoricalChannelActive(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+				receivedTranslationRuntime.beginHistoricalBatchIfNeeded(plugin, nextItem);
+				if (receivedTranslationRuntime.handleHistoricalOutOfRange(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+				if (receivedTranslationRuntime.handleHistoricalPauseOrBatch(plugin, nextItem)) return;
+				if (receivedTranslationRuntime.handleCachedQueueItem(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+				if (receivedTranslationRuntime.handleQueueItemGuardFailure(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+				return receivedTranslationRuntime.translateQueuedItem(plugin, nextItem);
+			}
+		};
+
+		const translationDisplayLogic = {
+			buildReceivedDisplayContent(plugin, translatedContent, originalContent, forceInlineOriginal = false) {
+				let content = (translatedContent || "").trim();
+				const shouldInlineOriginal = !!(originalContent && (forceInlineOriginal || plugin.settings.general.showOriginalMessage && !plugin.settings.general.showOriginalDirectly));
+				if (shouldInlineOriginal) content += plugin.formatOriginalTextForMessage(originalContent, plugin.shouldUseSpoilerInReceivedOriginal());
+				return content;
+			},
+			refreshTranslationDisplay(plugin, translation) {
+				if (!translation) return null;
+				translation = Object.assign(translation, plugin.normalizeStoredTranslationData(translation));
+				const inlineOriginalBySetting = !!(translation.originalContent && plugin.settings.general.showOriginalMessage && !plugin.settings.general.showOriginalDirectly);
+				translation.content = translationDisplayLogic.buildReceivedDisplayContent(plugin, translation.translatedContent || translation.content, translation.originalContent, false);
+				translation.contentIncludesOriginal = inlineOriginalBySetting;
+				return translation;
+			},
+			getReplyPreviewDisplayContent(plugin, translation) {
+				if (!translation) return "";
+				translation = plugin.normalizeStoredTranslationData(translation);
+				const originalContent = (translation.originalContent || "").trim();
+				const translatedContent = (translation.translatedContent || translation.content || "").trim();
+				return plugin.settings.general.showOriginalInReplyPreview ? (translatedContent || originalContent) : originalContent;
+			},
+			stripReplyPreviewOriginalSuffix(_plugin, content) {
+				content = (content || "").trim();
+				if (!content) return "";
+				if (/\n\|\|[\s\S]*\|\|$/.test(content)) return content.replace(/\n\|\|[\s\S]*\|\|$/, "").trim();
+				const lines = content.split("\n");
+				let boundaryIndex = lines.length;
+				while (boundaryIndex > 0 && /^\s*>\s?/.test(lines[boundaryIndex - 1])) boundaryIndex--;
+				if (boundaryIndex < lines.length) return lines.slice(0, boundaryIndex).join("\n").trim();
+				return content;
+			},
+			getStableReplyPreviewOriginalContent(plugin, message) {
+				if (!message) return "";
+				const currentContent = (message.content || "").trim();
+				const storedTranslations = [replyPreviewTranslations[message.id], translatedMessages[message.id]].filter(Boolean);
+				for (const storedTranslation of storedTranslations) {
+					const normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation);
+					const originalContent = (normalizedTranslation.originalContent || "").trim();
+					const translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
+					const displayContent = translationDisplayLogic.getReplyPreviewDisplayContent(plugin, normalizedTranslation).trim();
+					if (!originalContent) continue;
+					if (!currentContent || currentContent == originalContent || currentContent == translatedContent || currentContent == displayContent || currentContent == translationDisplayLogic.stripReplyPreviewOriginalSuffix(plugin, displayContent)) return originalContent;
+				}
+				return currentContent;
+			},
+			getStableReplyPreviewMessage(plugin, message) {
+				if (!message) return message;
+				const stableMessage = new BDFDB.DiscordObjects.Message(message);
+				stableMessage.content = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message);
+				return stableMessage;
+			},
+			getReplyPreviewFallbackContent(plugin, message) {
+				if (!message) return "";
+				return translationDisplayLogic.stripReplyPreviewOriginalSuffix(plugin, message.content || "");
+			},
+			getReplyPreviewDisplayContentForMessage(plugin, message, channelId = null) {
+				if (!message) return "";
+				const originalContent = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message) || (message.content || "").trim();
+				if (!plugin.settings.general.showOriginalInReplyPreview) return translationDisplayLogic.stripReplyPreviewOriginalSuffix(plugin, originalContent || "");
+				const storedTranslation = translatedMessages[message.id] || replyPreviewTranslations[message.id];
+				if (storedTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedTranslation, channelId || translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id))) {
+					const normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation);
+					const translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
+					return translatedContent || originalContent;
+				}
+				return originalContent;
+			},
+			applyStoredTranslationToMessage(plugin, message, translation, originalContentData = null) {
+				if (!message || !translation) return null;
+				const storedTranslation = translationDisplayLogic.refreshTranslationDisplay(plugin, Object.assign({
+					channelId: translation.channelId || message.channel_id || null,
+					auto: !!translation.auto
+				}, translation));
+				delete suppressedAutoTranslations[message.id];
+				oldMessages[message.id] = new BDFDB.DiscordObjects.Message(message);
+				oldMessages[message.id].originalContentData = originalContentData || plugin.extractOriginalContentData(message);
+				translatedMessages[message.id] = storedTranslation;
+				return storedTranslation;
+			},
+			clearDisplayedTranslationState(_plugin, messageId, options = {}) {
+				if (!messageId) return;
+				const config = Object.assign({
+					clearReplyPreview: false,
+					preserveSuppressed: false
+				}, options);
+				delete translatedMessages[messageId];
+				if (!config.preserveSuppressed) delete suppressedAutoTranslations[messageId];
+				if (config.clearReplyPreview) {
+					delete replyPreviewTranslations[messageId];
+					delete queuedReplyPreviewTranslations[messageId];
+				}
+			},
+			getStoredTranslationChannelId(_plugin, messageId, fallbackChannelId = null, translation = null) {
+				if (fallbackChannelId) return fallbackChannelId;
+				if (translation && translation.channelId) return translation.channelId;
+				const displayedTranslation = translatedMessages[messageId];
+				if (displayedTranslation && displayedTranslation.channelId) return displayedTranslation.channelId;
+				const replyPreviewTranslation = replyPreviewTranslations[messageId];
+				if (replyPreviewTranslation && replyPreviewTranslation.channelId) return replyPreviewTranslation.channelId;
+				return oldMessages[messageId] && oldMessages[messageId].channel_id || null;
+			},
+			shouldDisplayStoredTranslation(plugin, translation, channelId = null) {
+				if (!translation) return false;
+				const normalizedTranslation = plugin.normalizeStoredTranslationData(translation);
+				if (normalizedTranslation.manual && normalizedTranslation.independentOfTextAreaSwitch) return true;
+				const resolvedChannelId = channelId || normalizedTranslation.channelId || null;
+				if (normalizedTranslation.auto && resolvedChannelId && !plugin.isTranslationEnabled(resolvedChannelId)) return false;
+				return true;
+			},
+			getStoredTranslationOriginalContent(plugin, translation, fallbackContent = "") {
+				if (!translation) return fallbackContent;
+				const normalizedTranslation = plugin.normalizeStoredTranslationData(translation);
+				return normalizedTranslation.originalContent != null ? String(normalizedTranslation.originalContent) : fallbackContent;
+			},
+			getActiveMessageTranslation(plugin, message, channelId = null, expectedSignature = null) {
+				if (!message || !message.id) return null;
+				let translation = translatedMessages[message.id];
+				if (!translation) return null;
+				const resolvedChannelId = translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id, channelId, translation);
+				if (!translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, resolvedChannelId)) {
+					translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id);
+					return null;
+				}
+				if (expectedSignature && translation.signature && translation.signature != expectedSignature) {
+					translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id);
+					return null;
+				}
+				translation = translationDisplayLogic.refreshTranslationDisplay(plugin, translation);
+				if (translation.auto && plugin.isTranslationResultTooSimilar(translation)) {
+					translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id);
+					plugin.clearCachedTranslation(message.id);
+					return null;
+				}
+				translatedMessages[message.id] = translation;
+				return translation;
+			},
+			getActiveReplyPreviewTranslation(plugin, message, channelId) {
+				if (!message || !message.id) return null;
+				const translation = plugin.getReplyPreviewTranslation(message, channelId);
+				if (!translation) return null;
+				if (!translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, channelId)) {
+					delete replyPreviewTranslations[message.id];
+					delete queuedReplyPreviewTranslations[message.id];
+					return null;
+				}
+				return translation;
+			},
+			processMessageReply(plugin, e) {
+				if (!e.instance.props.referencedMessage || !e.instance.props.referencedMessage.message) return;
+				const referencedMessage = e.instance.props.referencedMessage.message;
+				const stableReferencedMessage = translationDisplayLogic.getStableReplyPreviewMessage(plugin, referencedMessage);
+				const channelId = plugin.getMessageChannelId(e.instance.props.baseMessage || stableReferencedMessage);
+				const fallbackContent = translationDisplayLogic.getReplyPreviewDisplayContentForMessage(plugin, stableReferencedMessage, channelId) || translationDisplayLogic.getReplyPreviewFallbackContent(plugin, stableReferencedMessage) || (stableReferencedMessage.content || "").trim();
+				e.instance.props.referencedMessage = Object.assign({}, e.instance.props.referencedMessage);
+				const previewMessage = new BDFDB.DiscordObjects.Message(stableReferencedMessage);
+				previewMessage.content = fallbackContent;
+				plugin.markReplyPreviewRenderMessage(previewMessage);
+				e.instance.props.referencedMessage.message = previewMessage;
+				if (e.returnvalue && e.returnvalue.props) {
+					e.returnvalue = plugin.wrapReplyPreviewJumpPause(plugin.stripTranslatorStylingFromReplyPreviewNode(e.returnvalue));
+				}
+			},
+			resolveLoadedMessageContentTranslation(plugin, message, channelId) {
+				let translation = null;
+				if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || queuedAutoTranslations[message.id]) return translation;
+				const originalContentData = plugin.extractOriginalContentData(message);
+				const cachedTranslation = plugin.getCachedReceivedTranslation(message, channelId, originalContentData);
+				const liveMessage = plugin.isLikelyLiveAutoTranslateMessage(message, channelId);
+				if (cachedTranslation && liveMessage) {
+					translation = translationDisplayLogic.applyStoredTranslationToMessage(plugin, message, Object.assign({channelId, auto: true}, cachedTranslation), originalContentData);
+				}
+				else if (cachedTranslation || plugin.shouldAutoTranslateReceivedMessage(message, {id: channelId}, originalContentData)) {
+					plugin.queueAutoTranslateMessage(message, {id: channelId}, originalContentData, {
+						historicalLoad: !liveMessage,
+						deferWhileReading: false,
+						cachedTranslation: !liveMessage ? cachedTranslation : null
+					});
+				}
+				return translation;
+			},
+			prepareMessageContentDisplay(plugin, e) {
+				const message = e.instance.props.message;
+				const channelId = plugin.getMessageChannelId(message);
+				const hadDisplayedTranslation = !!translatedMessages[message.id];
+				let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, message, channelId);
+				if (!translation && hadDisplayedTranslation) {
+					if (oldMessages[message.id]) {
+						e.instance.props.message = new BDFDB.DiscordObjects.Message(oldMessages[message.id]);
+						delete oldMessages[message.id];
+					}
+				}
+				if (!translation) translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId);
+				return {message, channelId, translation};
+			},
+			createTranslationWatermarkNode(plugin, translation, key) {
+				if (!translation || !translation.content) return null;
+				return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
+					key,
+					text: plugin.getTranslationTooltipText(translation.input, translation.output),
+					tooltipConfig: {style: "max-width: 400px"},
+					children: BDFDB.ReactUtils.createElement("span", {
+						className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.messagetimestamp, BDFDB.disCN.messagetimestampinline, BDFDB.disCN._translatortranslated),
+						children: BDFDB.ReactUtils.createElement("span", {
+							className: BDFDB.disCN.messageedited,
+							children: `(${plugin.labels.translated_watermark})`
+						})
+					})
+				});
+			},
+			applyMessageContentRenderDecorations(plugin, e, message, translation) {
+				let children = plugin.ensureElementChildrenArray(e.returnvalue);
+				plugin.cleanupInjectedMessageChildren(children);
+				const translationPlace = plugin.isOwnMessage(message) ? messageTypes.SENT : messageTypes.RECEIVED;
+				if (translation && plugin.shouldProtectWrappedTextForPlace(translationPlace)) {
+					e.returnvalue.props.children = plugin.highlightProtectedWrappedTextInNode(e.returnvalue.props.children, message.id);
+					children = plugin.ensureElementChildrenArray(e.returnvalue);
+				}
+				if (translation && plugin.settings.general.highlightTranslatedMessages) e.returnvalue.props.className = BDFDB.DOMUtils.formatClassName(e.returnvalue.props.className, "translator-translated-message");
+				if (translation) e.returnvalue.props.style = Object.assign({}, e.returnvalue.props.style, {
+					"--translator-accent-color": plugin.getTranslatedTextColor(),
+					"--translator-text-color": plugin.getTranslatedTextColor()
+				});
+				const watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(plugin, translation, "translator-translated-watermark");
+				if (watermarkNode) children.push(watermarkNode);
+				if (translation && translation.originalContent && plugin.settings.general.showOriginalMessage && plugin.settings.general.showOriginalDirectly && !translation.contentIncludesOriginal) children.push(plugin.createOriginalMessageBlock(translation.originalContent));
+			},
+			processEmbed(plugin, e) {
+				if (!e.instance.props.embed || !e.instance.props.embed.message_id) return;
+				let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, {id: e.instance.props.embed.message_id}, plugin.getDisplayedTranslationChannelId(e.instance.props.embed.message_id));
+				if (translation && Object.keys(translation.embeds).length) {
+					if (!e.returnvalue) e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
+						rawDescription: translation.embeds[e.instance.props.embed.id].description,
+						rawTitle: translation.embeds[e.instance.props.embed.id].title,
+						footer: Object.assign({}, e.instance.props.embed.footer || {}, {
+							text: translation.embeds[e.instance.props.embed.id].footerText || ""
+						}),
+						fields: translation.embeds[e.instance.props.embed.id].fields.map(n => ({rawName: n.name, rawValue: n.value})),
+						originalDescription: e.instance.props.embed.originalDescription || e.instance.props.embed.rawDescription,
+						originalTitle: e.instance.props.embed.originalTitle || e.instance.props.embed.rawTitle,
+						originalFields: e.instance.props.embed.originalFields || e.instance.props.embed.fields,
+						originalFooter: e.instance.props.embed.originalFooter || Object.assign({}, e.instance.props.embed.footer)
+					});
+					else {
+						let [children, index] = BDFDB.ReactUtils.findParent(e.returnvalue, {props: [["className", BDFDB.disCN.embeddescription]]});
+						if (index > -1) {
+							if (!Array.isArray(children[index].props.children)) {
+								children[index].props.children = [children[index].props.children];
+							}
+							plugin.cleanupInjectedMessageChildren(children[index].props.children);
+							const watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(plugin, translation, "translator-embed-watermark");
+							if (watermarkNode) children[index].props.children.push(watermarkNode);
+						}
+					}
+				}
+				else if (!e.returnvalue && e.instance.props.embed.originalDescription) {
+					e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
+						rawDescription: e.instance.props.embed.originalDescription,
+						rawTitle: e.instance.props.embed.originalTitle,
+						fields: e.instance.props.embed.originalFields,
+						footer: e.instance.props.embed.originalFooter
+					});
+					delete e.instance.props.embed.originalDescription;
+					delete e.instance.props.embed.originalTitle;
+					delete e.instance.props.embed.originalFields;
+					delete e.instance.props.embed.originalFooter;
+				}
+			}
+		};
+
+		const languagePolicy = {
+			getConcreteConfiguredLanguages(plugin, settingKey) {
+				const sourceLanguages = plugin.settings && plugin.settings.filters && plugin.settings.filters[settingKey];
+				const configuredLanguages = BDFDB.ArrayUtils.is(sourceLanguages) ? sourceLanguages : [];
+				return [...new Set(configuredLanguages.filter(languageId => {
+					const language = languages[languageId];
+					return language && !language.auto && !language.special;
+				}))];
+			},
+			normalizeLanguageId(_plugin, languageId) {
+				return (languageId || "").toLowerCase();
+			},
+			matchesConfiguredSourceLanguage(plugin, languageId, sourceLanguages = null) {
+				if (!languageId) return false;
+				const normalizedLanguageId = languagePolicy.normalizeLanguageId(plugin, languageId);
+				const resolvedSourceLanguages = sourceLanguages || plugin.getAutoTranslateSourceLanguages();
+				const normalizedSourceLanguages = resolvedSourceLanguages.map(sourceLanguage => languagePolicy.normalizeLanguageId(plugin, sourceLanguage));
+				return normalizedSourceLanguages.some(sourceLanguage => sourceLanguage == normalizedLanguageId || sourceLanguage.startsWith(`${normalizedLanguageId}-`) || normalizedLanguageId.startsWith(`${sourceLanguage}-`));
+			}
+		};
+
+		const loadedAutoTranslatePolicy = {
+			getFilterSettings(plugin) {
+				return plugin.settings && plugin.settings.filters || {};
+			},
+			getReceivedAutoTranslateScope(plugin) {
+				const scope = loadedAutoTranslatePolicy.getFilterSettings(plugin).receivedAutoTranslateScope;
+				return scope == "loaded_messages" ? "loaded_messages" : "new_only";
+			},
+			getReceivedAutoTranslateLoadedRangeMode(_plugin) {
+				return LOADED_AUTO_TRANSLATE_RANGE_MODES.COUNT;
+			},
+			getReceivedAutoTranslateLoadedTimeWindow(plugin) {
+				const value = loadedAutoTranslatePolicy.getFilterSettings(plugin).receivedAutoTranslateLoadedTimeWindow;
+				return ["15m", "1h", "6h", "24h", "all"].includes(value) ? value : "1h";
+			},
+			getReceivedAutoTranslateLoadedLimit(plugin) {
+				return plugin.normalizeLoadedAutoTranslateLimit(loadedAutoTranslatePolicy.getFilterSettings(plugin).receivedAutoTranslateLoadedLimit);
+			},
+			shouldPauseLoadedAutoTranslateWhileScrolling(plugin) {
+				return loadedAutoTranslatePolicy.getFilterSettings(plugin).pauseLoadedAutoTranslateWhileScrolling !== false;
+			},
+			shouldContinueLoadedAutoTranslateOnScroll(plugin) {
+				return loadedAutoTranslatePolicy.getFilterSettings(plugin).continueLoadedAutoTranslateOnScroll !== false;
+			},
+			getReceivedAutoTranslateLoadedTimeWindowMs(plugin) {
+				const window = loadedAutoTranslatePolicy.getReceivedAutoTranslateLoadedTimeWindow(plugin);
+				if (window == "15m") return 15 * 60 * 1000;
+				if (window == "1h") return 60 * 60 * 1000;
+				if (window == "6h") return 6 * 60 * 60 * 1000;
+				if (window == "24h") return 24 * 60 * 60 * 1000;
+				return 0;
+			}
+		};
+
+		const receivedSettingsPolicy = {
+			getFilterSettings(plugin) {
+				return plugin.settings && plugin.settings.filters || {};
+			},
+			getReceivedAutoTranslateSourceLanguages(plugin) {
+				return languagePolicy.getConcreteConfiguredLanguages(plugin, "receivedAutoTranslateSourceLanguages");
+			},
+			getMinimumAutoTranslateLength(_plugin) {
+				// Do not skip short chat text. Even one-character or two-character interjections can carry meaning.
+				return 0;
+			},
+			getAutoTranslateMinimumLengthForAnalysis(plugin, analysis = null) {
+				return receivedSettingsPolicy.getMinimumAutoTranslateLength(plugin);
+			},
+			getTranslationSimilarityThreshold(plugin) {
+				const value = receivedSettingsPolicy.getFilterSettings(plugin).translationSimilarityThreshold;
+				return Math.max(0.5, Math.min(0.99, parseFloat(value) || 0.9));
+			},
+			shouldTreatLanguageVariantsAsSame(plugin) {
+				return receivedSettingsPolicy.getFilterSettings(plugin).treatLanguageVariantsAsSame !== false;
+			},
+			shouldSkipMixedReceivedMessages(_plugin) {
+				return false;
+			},
+			shouldSkipSameLanguageReceivedMessages(plugin) {
+				return receivedSettingsPolicy.getFilterSettings(plugin).skipSameLanguageReceivedMessages !== false;
+			},
+			useLocalLanguagePrecheck(plugin) {
+				return receivedSettingsPolicy.getFilterSettings(plugin).useLocalLanguagePrecheck !== false;
+			},
+			shouldDropSimilarTranslations(plugin) {
+				return receivedSettingsPolicy.getFilterSettings(plugin).dropSimilarTranslations !== false;
+			}
+		};
+
+		const aiDecisionPolicy = {
+			getAutoTranslateDecisionMode(plugin) {
+				const mode = receivedSettingsPolicy.getFilterSettings(plugin).autoTranslateDecisionMode;
+				return mode == "ai" ? "ai" : "basic";
+			},
+			supportsAiAutoTranslateDecisionEngine(_plugin, engineKey) {
+				return ["deepseek", "oaicompat"].includes(engineKey);
+			},
+			isAiAutoTranslateDecisionAvailable(plugin, channelId = null) {
+				return aiDecisionPolicy.supportsAiAutoTranslateDecisionEngine(plugin, plugin.getEffectivePrimaryEngine(channelId)) || aiDecisionPolicy.supportsAiAutoTranslateDecisionEngine(plugin, plugin.getEffectiveBackupEngine(channelId));
+			},
+			shouldUseAiAutoTranslateDecision(plugin, channelId = null) {
+				return aiDecisionPolicy.getAutoTranslateDecisionMode(plugin) == "ai" && aiDecisionPolicy.isAiAutoTranslateDecisionAvailable(plugin, channelId);
+			}
+		};
+
+		const sentTranslationPolicy = {
+			shouldSkipSentTranslationForSameTarget(plugin, text, channelId, forcedOutputLanguage = null, callback) {
+				const targetLanguageId = forcedOutputLanguage || plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.SENT, channelId);
+				const targetLanguage = targetLanguageId && languages[targetLanguageId];
+				if (!targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special) return callback(false, null);
+				const configuredInputLanguage = plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.SENT, channelId);
+				if (configuredInputLanguage && configuredInputLanguage != "auto") return callback(plugin.isSameLanguageOrVariant(configuredInputLanguage, targetLanguageId), configuredInputLanguage);
+				const analysis = plugin.analyzeTextForAutoTranslate(text, targetLanguageId);
+				if (plugin.isMostlyTargetLanguageMessage(analysis, targetLanguageId)) return callback(true, targetLanguageId);
+				plugin.detectLanguage(text, detectedLanguage => callback(!!detectedLanguage && plugin.isSameLanguageOrVariant(detectedLanguage, targetLanguageId), detectedLanguage));
+			},
+			shouldAutoTranslateSentMessage(plugin, text, channelId, callback, forcedOutputLanguage = null) {
+				plugin.shouldSkipSentTranslationForSameTarget(text, channelId, forcedOutputLanguage, (sameLanguage, detectedLanguage) => {
+					if (sameLanguage) return callback(false);
+					const sourceLanguages = plugin.getAutoTranslateSourceLanguages();
+					if (!sourceLanguages.length) return callback(true);
+					const configuredInputLanguage = plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.SENT, channelId);
+					if (configuredInputLanguage && configuredInputLanguage != "auto") return callback(plugin.matchesConfiguredSourceLanguage(configuredInputLanguage, sourceLanguages));
+					if (detectedLanguage) return callback(plugin.matchesConfiguredSourceLanguage(detectedLanguage, sourceLanguages));
+					plugin.detectLanguage(text, detectedLanguageId => callback(plugin.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages)));
+				});
+			},
+			shouldSendOriginalInsteadOfSentTranslation(plugin, originalText, translation, input, output) {
+				if (!translation) return true;
+				if (input && output && input.id && output.id && plugin.isSameLanguageOrVariant(input.id, output.id)) return true;
+				return plugin.getTextSimilarityScore(originalText, translation) >= Math.max(0.94, plugin.getTranslationSimilarityThreshold());
+			},
+			buildSentTranslationMessageValue(plugin, originalText, translation, input, output) {
+				if (plugin.shouldSendOriginalInsteadOfSentTranslation(originalText, translation, input, output)) return originalText;
+				return plugin.settings.general.sendOriginalMessage ? (translation + plugin.formatOriginalTextForMessage(originalText)) : translation;
+			}
+		};
+
+		const languageDetectionRuntime = {
+			getDetectableLanguageText(plugin, text) {
+				let [newText, , translate] = plugin.removeExceptions((text || "").trim(), messageTypes.SENT);
+				return translate && newText ? newText : "";
+			},
+			parseDetectedLanguageResponse(_plugin, body) {
+				try {return (JSON.parse(body) || {}).src || null;}
+				catch (err) {return null;}
+			},
+			detectLanguage(plugin, text, callback) {
+				const detectableText = languageDetectionRuntime.getDetectableLanguageText(plugin, text);
+				if (!detectableText) return callback(null);
+				BDFDB.LibraryRequires.request("https://translate.googleapis.com/translate_a/single", {
+					form: {
+						"client": "gtx",
+						"dt": "t",
+						"dj": "1",
+						"source": "input",
+						"sl": "auto",
+						"tl": "en",
+						"q": encodeURIComponent(detectableText)
+					}
+				}, (error, response, body) => {
+					if (!error && body && response.statusCode == 200) return callback(languageDetectionRuntime.parseDetectedLanguageResponse(plugin, body));
+					callback(null);
+				});
+			}
+		};
+
+		const languageHeuristicsRuntime = {
+			getLatinStopwordTables(_plugin) {
+				// Compact stopword tables for common Latin-script languages. Used only to fill the
+				// gap that script-family analysis cannot: telling English/French/Spanish/etc. apart.
+				return {
+					en: "the,and,you,that,this,is,are,was,were,have,has,it,for,not,with,but,they,your,from,been,will,just,like,can,what,there,their",
+					es: "que,de,no,es,en,un,una,por,con,se,los,las,su,para,como,mas,pero,le,al,lo,ella,este,eso",
+					fr: "le,la,les,de,et,un,une,que,pas,pour,qui,dans,sur,ne,se,au,est,son,il,elle,avec,nous,vous",
+					de: "der,die,das,und,ist,nicht,ein,eine,den,von,mit,sich,auf,fur,sie,dem,es,auch,wir,aber,hat",
+					pt: "que,de,nao,um,uma,para,com,os,as,se,por,como,mas,mais,eu,voce,sua,seu,ja,esta,isto",
+					it: "che,di,non,un,una,per,si,la,il,le,con,come,ma,piu,gli,sono,questo,quella,anche,stato",
+					nl: "de,het,een,en,van,is,niet,te,dat,die,in,op,voor,met,zijn,haar,maar,wat,heb,wij,zij",
+					pl: "nie,sie,to,na,jest,do,ze,jak,ale,co,dla,moze,tego,tym,byc,lub,oraz,takze,ich,jesli",
+					ro: "sa,de,nu,in,ca,pe,un,o,cu,este,la,ai,mai,dar,sunt,pentru,fata,asta,ori,sau,aceasta",
+					tr: "ve,bir,bu,icin,ile,ben,sen,degil,ama,daha,cok,var,yok,benim,senin,bana,sana,onlar,gibi,kadar",
+					sv: "och,att,det,som,en,den,for,ar,inte,med,har,jag,du,han,hon,ett,kan,sa,men,om,alla",
+					da: "og,at,det,som,en,den,er,ikke,med,har,jag,du,han,hun,et,kan,sa,men,om,vi,der",
+					no: "og,at,det,som,en,den,er,ikke,med,har,jag,du,han,hun,et,kan,sa,men,om,vi,der",
+					cs: "a,se,na,je,to,v,ze,si,pro,ale,jak,tak,ktery,byt,nebo,tento,jejich,coz,vice,ktere",
+					hu: "es,egy,nem,hogy,az,is,volt,meg,lehet,csak,de,mint,mar,ott,majd,igen,mert,azzal,ilyen,olyan",
+					id: "yang,dan,di,ini,itu,untuk,dengan,tidak,saya,anda,akan,ke,pada,dari,juga,karena,bisa,ada,mereka,sebagai",
+					vi: "va,cua,la,mot,cac,trong,khong,co,nay,do,da,duoc,nguoi,cho,voi,den,tu,roi,ra,cung",
+					tl: "ang,ng,mga,sa,ay,na,at,ni,si,naman,dahil,hindi,para,kung,ngunit,siya,ako,ikaw,nila,kapag"
+				};
+			},
+			identifyLatinLanguage(plugin, text) {
+				if (!plugin._latinStopwordIndex) {
+					const tables = languageHeuristicsRuntime.getLatinStopwordTables(plugin);
+					const index = Object.create(null);
+					for (const lang in tables) {
+						for (const word of tables[lang].split(",")) {
+							if (!index[word]) index[word] = [];
+							index[word].push(lang);
+						}
+					}
+					plugin._latinStopwordIndex = index;
+				}
+				const words = (text || "").toLowerCase().match(/[a-zà-ÿ]+(?:['’][a-zà-ÿ]+)*/g) || [];
+				if (words.length < 5) return {languageId: null, confident: false, tokenCount: words.length};
+				const scores = Object.create(null);
+				const seen = Object.create(null);
+				for (const word of words) {
+					const langs = plugin._latinStopwordIndex[word];
+					if (!langs) continue;
+					for (const lang of langs) {
+						const key = lang + "|" + word;
+						if (seen[key]) continue;
+						seen[key] = 1;
+						scores[lang] = (scores[lang] || 0) + 1;
+					}
+				}
+				let best = null, bestScore = 0, runnerUp = 0;
+				for (const lang in scores) {
+					const score = scores[lang];
+					if (score > bestScore) { runnerUp = bestScore; bestScore = score; best = lang; }
+					else if (score > runnerUp) runnerUp = score;
+				}
+				// Conservative: only trust the call when one language clearly dominates.
+				// Uncertain cases fall through to translation so we never silently drop a real foreign message.
+				const confident = !!(best && bestScore >= 3 && bestScore >= 2 * runnerUp);
+				return {languageId: best, score: bestScore, runnerUp, tokenCount: words.length, confident};
+			},
+			detectMessageLanguageLocal(plugin, text, analysis, targetLanguageId) {
+				if (!analysis || !analysis.totalLetters) return {languageId: null, confident: false};
+				// Non-Latin scripts are already handled by script-family checks upstream; the local
+				// identifier only fills the Latin-vs-Latin gap where those checks bail out.
+				const targetFamilies = analysis.targetFamilies || plugin.getLanguageScriptFamilies(targetLanguageId);
+				if (!targetFamilies.length || targetFamilies[0] != "latin") return {languageId: null, confident: false};
+				if (analysis.dominantFamily != "latin") return {languageId: null, confident: false};
+				// Run on the raw masked text, not analysis.cleanedText: the sanitizer strips 1-3
+				// letter tokens, which are exactly the stopwords we score on.
+				return languageHeuristicsRuntime.identifyLatinLanguage(plugin, text);
+			},
+			isClearlyForeignLanguageMessage(plugin, text, targetLanguageId) {
+				if (!text || !targetLanguageId || targetLanguageId == "auto") return false;
+				const targetLanguage = languages[targetLanguageId];
+				if (targetLanguage && targetLanguage.special) return false;
+				const targetFamilies = plugin.getLanguageScriptFamilies(targetLanguageId);
+				if (!targetFamilies.length) return false;
+				const targetFamily = targetFamilies[0];
+				const analysis = plugin.analyzeTextForAutoTranslate(text, targetLanguageId);
+				if (!analysis || !analysis.totalLetters) return false;
+				const dominant = analysis.dominantFamily;
+				if (!dominant) return false;
+				// Different script from the target with enough non-target letters = clearly foreign.
+				if (dominant != targetFamily && analysis.nonTargetLetterCount >= 6) return true;
+				// Same script (latin-vs-latin): confirm a different language via the stopword identifier.
+				if (targetFamily == "latin" && dominant == "latin") {
+					const detected = languageHeuristicsRuntime.identifyLatinLanguage(plugin, text);
+					if (detected.confident && detected.languageId && !plugin.isSameLanguageOrVariant(detected.languageId, targetLanguageId)) return true;
+				}
+				return false;
+			},
+			isHanTargetMessageWithLatinTerms(plugin, analysis, targetLanguageId) {
+				if (!analysis || !analysis.totalLetters) return false;
+				const targetFamilies = analysis.targetFamilies || plugin.getLanguageScriptFamilies(targetLanguageId);
+				if (!targetFamilies.includes("han")) return false;
+				if (analysis.targetLetterCount < 2 || analysis.hanRunCount < 1) return false;
+				const latinCount = analysis.counts && analysis.counts.latin || 0;
+				const nonTargetNonLatinLetterCount = Math.max(0, analysis.nonTargetLetterCount - latinCount);
+				if (nonTargetNonLatinLetterCount > 0) return false;
+				if (!latinCount) return true;
+				if (analysis.latinWordCount > 3) return false;
+				return analysis.targetShare >= 0.18;
+			},
+			isMostlyTargetLanguageMessage(plugin, analysis, targetLanguageId) {
+				if (!analysis || !analysis.totalLetters) return false;
+				const targetFamilies = analysis.targetFamilies || plugin.getLanguageScriptFamilies(targetLanguageId);
+				// Latin-script languages share the same script, so local script heuristics cannot safely
+				// tell English/French/Spanish apart. Let the translator or AI decision handle those.
+				if (!targetFamilies.length || targetFamilies[0] == "latin") return false;
+				if (languageHeuristicsRuntime.isHanTargetMessageWithLatinTerms(plugin, analysis, targetLanguageId)) return true;
+				if (analysis.targetLetterCount >= 6 && analysis.targetShare >= 0.55) return true;
+				if (analysis.targetLetterCount >= 12 && analysis.targetShare >= 0.45 && analysis.nonTargetLetterCount <= Math.max(8, analysis.targetLetterCount * 0.8)) return true;
+				return !!analysis.strongTargetScriptMatch;
+			},
+			isClearlyTargetLanguageMessage(plugin, analysis, targetLanguageId) {
+				if (!analysis || !analysis.totalLetters) return false;
+				const targetFamilies = analysis.targetFamilies || plugin.getLanguageScriptFamilies(targetLanguageId);
+				if (!targetFamilies.length || targetFamilies[0] == "latin") return false;
+				// Hard pre-check before sending received messages to a translator. This is intentionally
+				// stricter than the post-check but stronger than the old heuristic for CJK/Cyrillic/etc.
+				// It prevents target-language chat from being sent to AI and rewritten in the same language.
+				if (languageHeuristicsRuntime.isHanTargetMessageWithLatinTerms(plugin, analysis, targetLanguageId)) return true;
+				if (analysis.targetLetterCount >= 3 && analysis.targetShare >= 0.82) return true;
+				if (analysis.targetLetterCount >= 6 && analysis.targetShare >= 0.68 && analysis.nonTargetLetterCount <= Math.max(3, Math.floor(analysis.targetLetterCount * 0.25))) return true;
+				if (analysis.targetLetterCount >= 12 && analysis.targetShare >= 0.6 && analysis.nonTargetLetterCount <= Math.max(6, Math.floor(analysis.targetLetterCount * 0.35))) return true;
+				return false;
+			},
+			isTranslationLikelyInTargetLanguage(plugin, text, targetLanguageId) {
+				targetLanguageId = plugin.normalizeLanguageId(targetLanguageId);
+				if (!text || !targetLanguageId || targetLanguageId == "auto") return true;
+				const targetLanguage = languages[targetLanguageId];
+				if (targetLanguage && targetLanguage.special) return true;
+				const targetFamilies = plugin.getLanguageScriptFamilies(targetLanguageId);
+				// Latin-script languages cannot be reliably distinguished by local script checks.
+				// Keep validation conservative and only block obvious non-Latin target mismatches.
+				if (!targetFamilies.length || targetFamilies[0] == "latin") return true;
+				const analysis = plugin.analyzeTextForAutoTranslate(text, targetLanguageId);
+				if (!analysis || !analysis.totalLetters) return true;
+				if (analysis.totalLetters < 4) return true;
+				if (analysis.targetLetterCount == 0 && analysis.nonTargetLetterCount >= 4) return false;
+				if (analysis.targetLetterCount >= 2 && analysis.targetShare >= 0.2) return true;
+				return analysis.targetLetterCount >= 4 || analysis.targetShare >= 0.35;
+			}
+		};
+
+		const textSimilarityRuntime = {
+			normalizeComparisonText(_plugin, text) {
+				text = (text || "").toLowerCase();
+				if (typeof text.normalize == "function") text = text.normalize("NFKC");
+				return text
+					.replace(/https?:\/\/\S+/gi, "")
+					.replace(/[`~!@#$%^&*()\-_=+\[\]{}\\|;:'",.<>/?，。！？；：“”‘’（）【】《》、…·]/g, "")
+					.replace(/\s+/g, "");
+			},
+			getTextSimilarityScore(plugin, textA, textB) {
+				const normalizedA = textSimilarityRuntime.normalizeComparisonText(plugin, textA);
+				const normalizedB = textSimilarityRuntime.normalizeComparisonText(plugin, textB);
+				if (!normalizedA || !normalizedB) return 0;
+				if (normalizedA == normalizedB) return 1;
+				if (normalizedA.length < 2 || normalizedB.length < 2) return normalizedA == normalizedB ? 1 : 0;
+				const createBigrams = value => {
+					const bigrams = new Map();
+					for (let index = 0; index < value.length - 1; index++) {
+						const bigram = value.slice(index, index + 2);
+						bigrams.set(bigram, (bigrams.get(bigram) || 0) + 1);
+					}
+					return bigrams;
+				};
+				const bigramsA = createBigrams(normalizedA);
+				const bigramsB = createBigrams(normalizedB);
+				let overlap = 0;
+				for (const [bigram, count] of bigramsA.entries()) if (bigramsB.has(bigram)) overlap += Math.min(count, bigramsB.get(bigram));
+				return (2 * overlap) / (Math.max(1, normalizedA.length - 1) + Math.max(1, normalizedB.length - 1));
+			}
+		};
+
+		const foreignLanguageDecisionRuntime = {
+			isDetectedLanguageForeign(plugin, detectedLanguageId, targetLanguageId) {
+				return !!detectedLanguageId && !plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId);
+			},
+			isReceivedMessageForeignAsync(plugin, text, targetLanguageId, callback) {
+				if (plugin.isClearlyForeignLanguageMessage(text, targetLanguageId)) return callback(true);
+				if (!text || !targetLanguageId || targetLanguageId == "auto") return callback(false);
+				plugin.detectLanguage(text, detectedLanguageId => callback(foreignLanguageDecisionRuntime.isDetectedLanguageForeign(plugin, detectedLanguageId, targetLanguageId)));
+			}
+		};
+
+		const receivedMessageFilterRuntime = {
+			isTranslationResultTooSimilar(plugin, translation) {
+				if (!translation) return false;
+				const normalizedTranslation = plugin.normalizeStoredTranslationData(translation);
+				const originalContent = (normalizedTranslation.originalContent || "").trim();
+				const translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
+				if (!originalContent || !translatedContent) return false;
+				const normalizedOriginal = plugin.normalizeComparisonText(originalContent);
+				const normalizedTranslated = plugin.normalizeComparisonText(translatedContent);
+				if (!normalizedOriginal || !normalizedTranslated) return false;
+				if (normalizedOriginal == normalizedTranslated) return true;
+				return plugin.getTextSimilarityScore(originalContent, translatedContent) >= Math.max(0.92, plugin.getTranslationSimilarityThreshold());
+			},
+			getAutoTranslatedResultRejectReason(plugin, translation, channelId) {
+				if (!translation || !translation.translatedContent) return "local_guard";
+				if (receivedMessageFilterRuntime.isTranslationResultTooSimilar(plugin, translation)) return "too_similar";
+				const detectedLanguageId = translation.input && translation.input.id;
+				const targetLanguageId = translation.output && translation.output.id || plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId);
+				if (plugin.shouldSkipSameLanguageReceivedMessages() && detectedLanguageId && plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId)) return "same_language";
+				const sourceLanguages = plugin.getReceivedAutoTranslateSourceLanguages();
+				if (sourceLanguages.length && detectedLanguageId && !plugin.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages)) return "source_filter";
+				if (plugin.shouldDropSimilarTranslations() && plugin.getTextSimilarityScore(translation.originalContent, translation.translatedContent) >= plugin.getTranslationSimilarityThreshold()) return "too_similar";
+				return null;
+			},
+			shouldKeepAutoTranslatedResult(plugin, translation, channelId) {
+				return !receivedMessageFilterRuntime.getAutoTranslatedResultRejectReason(plugin, translation, channelId);
+			},
+			buildAutoTranslateAnalysisText(plugin, originalContentData) {
+				const rawText = plugin.buildTranslationRequestText(originalContentData);
+				const [maskedText, , hasUnprotectedContent] = plugin.removeExceptions(rawText, messageTypes.RECEIVED);
+				return {text: maskedText || "", hasUnprotectedContent};
+			},
+			isLinkOnlyReceivedContent(plugin, originalContentData) {
+				if (!originalContentData) return false;
+				const content = (originalContentData.content || "").trim();
+				if (!content) return false;
+				const [maskedContent, , hasUnprotectedContent] = plugin.removeExceptions(content, messageTypes.RECEIVED);
+				if (hasUnprotectedContent) return false;
+				const counts = plugin.countScriptFamilies(maskedContent);
+				return !!maskedContent && Object.keys(counts).every(family => !counts[family]);
+			},
+			buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId) {
+				if (!originalContentData || !channelId) return null;
+				const targetLanguageId = plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId);
+				const analysisSource = receivedMessageFilterRuntime.buildAutoTranslateAnalysisText(plugin, originalContentData);
+				const analysis = plugin.analyzeTextForAutoTranslate(analysisSource.text, targetLanguageId);
+				return {targetLanguageId, analysisSource, analysis};
+			},
+			getReceivedAutoTranslateSkipReason(plugin, originalContentData, channelId) {
+				if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, originalContentData)) return "link_only";
+				if (!plugin.hasTranslatableMessageContent(originalContentData)) return "symbol_only";
+				const receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId);
+				if (!receivedAnalysis || !receivedAnalysis.analysisSource.hasUnprotectedContent) return "symbol_only";
+				const {targetLanguageId, analysis} = receivedAnalysis;
+				if (!analysis.totalLetters) return "symbol_only";
+				if (plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId)) return "same_language";
+				if (plugin.shouldSkipSameLanguageReceivedMessages() && plugin.isMostlyTargetLanguageMessage(analysis, targetLanguageId)) return "same_language";
+				return null;
+			},
+			shouldSkipReceivedTranslationBeforeRequest(plugin, originalContentData, channelId) {
+				if (!originalContentData || !channelId) return false;
+				if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, originalContentData)) return true;
+				const receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId);
+				if (!receivedAnalysis) return false;
+				const {targetLanguageId, analysisSource, analysis} = receivedAnalysis;
+				const targetLanguage = languages[targetLanguageId];
+				if (!targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special) return false;
+				if (!analysisSource || !analysisSource.hasUnprotectedContent) return false;
+				return plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId);
+			},
+			shouldSkipByLocalLanguagePrecheck(plugin, text, analysis, targetLanguageId) {
+				if (!plugin.useLocalLanguagePrecheck()) return false;
+				// Latin-vs-Latin same-language and source-filter checks that script-family
+				// analysis cannot resolve locally, so we avoid a wasteful AI request. Only
+				// acts on high-confidence detections; uncertain text still goes to translation.
+				const localDetection = plugin.detectMessageLanguageLocal(text, analysis, targetLanguageId);
+				if (!localDetection.confident || !localDetection.languageId) return false;
+				if (plugin.isSameLanguageOrVariant(localDetection.languageId, targetLanguageId)) return true;
+				const sourceLanguages = plugin.getReceivedAutoTranslateSourceLanguages();
+				return sourceLanguages.length && !plugin.matchesConfiguredSourceLanguage(localDetection.languageId, sourceLanguages);
+			},
+			shouldAutoTranslateReceivedMessage(plugin, message, channel, originalContentData = null, ignoreQueued = false) {
+				if (!channel || !channel.id || !message || !message.id) return false;
+				if (!plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message)) return false;
+				if (suppressedAutoTranslations[message.id]) return false;
+				if (translatedMessages[message.id] || !ignoreQueued && queuedAutoTranslations[message.id]) return false;
+				const sourceData = originalContentData || plugin.extractOriginalContentData(message);
+				if (plugin.getCachedReceivedSkipDecision(message, channel.id, sourceData)) return false;
+				if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, sourceData)) return false;
+				if (!plugin.hasTranslatableMessageContent(sourceData)) return false;
+				const receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, sourceData, channel.id);
+				if (!receivedAnalysis || !receivedAnalysis.analysisSource.hasUnprotectedContent) return false;
+				const {analysisSource, targetLanguageId, analysis} = receivedAnalysis;
+				if (!analysis.totalLetters) return false;
+				if (analysis.totalLetters < plugin.getAutoTranslateMinimumLengthForAnalysis(analysis)) return false;
+				if (plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId)) return false;
+				if (plugin.shouldSkipSameLanguageReceivedMessages() && plugin.isMostlyTargetLanguageMessage(analysis, targetLanguageId)) return false;
+				if (receivedMessageFilterRuntime.shouldSkipByLocalLanguagePrecheck(plugin, analysisSource.text, analysis, targetLanguageId)) return false;
+				return true;
+			}
+		};
+
 		return class Translator extends Plugin {
 			getVersion () {
 				return normalizeSemverVersion(this.version);
@@ -812,15 +2354,11 @@ module.exports = (_ => {
 
 			onLoad () {
 				_this = this;
-				
 				this.defaults = {
 					general: {
-						addTranslateButton:		{value: true, 	popout: false},
-						addQuickTranslateButton:	{value: true, 	popout: false},
-						usePerChatTranslation:		{value: true, 	popout: false},
 						interfaceLanguage:		{value: "system", 	popout: false},
-						sendOriginalMessage:		{value: false, 	popout: true},
-						showOriginalMessage:		{value: false, 	popout: true},
+						sendOriginalMessage:		{value: false, 	popout: false},
+						showOriginalMessage:		{value: false, 	popout: false},
 						showOriginalDirectly:		{value: true, 	popout: false},
 						showOriginalInReplyPreview:	{value: false, 	popout: false},
 						useSpoilerInSentOriginal:	{value: false, 	popout: false},
@@ -874,7 +2412,6 @@ module.exports = (_ => {
 					}
 				};
 				for (let m in messageTypes) this.defaults.choices[messageTypes[m]] = {value: Object.keys(languageTypes).reduce((newObj, l) => (newObj[languageTypes[l]] = defaultLanguages[l], newObj), {})};
-			
 				this.modulePatches = {
 					before: [
 						"ChannelTextAreaContainer",
@@ -1744,203 +3281,6 @@ module.exports = (_ => {
 						background: color-mix(in srgb, var(--brand-500, var(--text-link)) 18%, transparent) !important;
 						border-color: var(--brand-500, var(--text-link)) !important;
 						color: var(--header-primary) !important;
-					}
-					.translator-preset-summary {
-						margin-bottom: 10px;
-						padding: 10px 12px;
-						border-radius: 8px;
-						background: var(--background-secondary-alt);
-						border: 1px solid var(--background-modifier-accent);
-					}
-					.translator-preset-summary-title {
-						font-size: 13px;
-						font-weight: 600;
-						margin-bottom: 4px;
-					}
-					.translator-preset-summary-text {
-						font-size: 13px;
-						line-height: 1.5;
-						opacity: 0.85;
-					}
-					.translator-popout-toggle-group {
-						margin-top: 10px;
-						padding-top: 6px;
-					}
-					.translator-popout-auto-panel {
-						margin-top: 12px;
-						padding-top: 0;
-					}
-					.translator-popout-auto-panel .translator-quick-channel-toggle {
-						margin: 0 0 12px !important;
-					}
-					.translator-quick-strategy-panel {
-						margin-top: 10px;
-						padding: 12px 14px;
-						border: 1px solid rgba(255, 255, 255, 0.055);
-						border-radius: 8px;
-						background: #202124;
-						background: color-mix(in srgb, var(--background-secondary, #2b2d31) 78%, black 22%);
-						box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-						box-sizing: border-box;
-					}
-					.translator-quick-strategy-panel .translator-quick-strategy-title {
-						display: flex;
-						align-items: center;
-						min-height: 22px;
-						margin: 0 0 9px;
-						padding: 0 0 8px;
-						border-bottom: 1px solid rgba(255, 255, 255, 0.075);
-						font-size: 14px !important;
-						font-weight: 700;
-						line-height: 22px;
-						color: var(--header-primary, #ffffff);
-					}
-					.translator-quick-strategy-panel .translator-quick-control-row {
-						display: grid;
-						grid-template-columns: 132px minmax(0, 1fr);
-						column-gap: 16px;
-						align-items: center;
-						min-height: 36px;
-						margin: 6px 0;
-					}
-					.translator-quick-strategy-panel .translator-quick-control-row-muted {
-						opacity: 0.48 !important;
-					}
-					.translator-quick-strategy-panel .translator-quick-control-label {
-						font-size: 14px !important;
-						font-weight: 600 !important;
-						line-height: 22px !important;
-						color: var(--text-normal, #dbdee1);
-					}
-					.translator-quick-strategy-panel .translator-quick-control-component-wrapper {
-						width: 100%;
-						max-width: none;
-						justify-self: stretch;
-						display: flex;
-						align-items: center;
-					}
-					.translator-quick-strategy-panel .translator-quick-segment {
-						display: grid;
-						grid-template-columns: 1fr 1fr;
-						gap: 2px;
-						width: 100%;
-						height: 34px;
-						padding: 2px;
-						border: 1px solid rgba(255, 255, 255, 0.035);
-						border-radius: 7px;
-						background: #18191c;
-						background: color-mix(in srgb, var(--background-tertiary, #1e1f22) 86%, black 14%);
-						box-sizing: border-box;
-					}
-					.translator-quick-strategy-panel .translator-quick-segment-button {
-						appearance: none;
-						display: inline-flex;
-						align-items: center;
-						justify-content: center;
-						height: 100%;
-						padding: 0 12px;
-						border: 0;
-						border-radius: 5px;
-						background: transparent;
-						box-shadow: none;
-						color: var(--text-muted, #949ba4);
-						cursor: pointer;
-						font: inherit;
-						font-size: 13px !important;
-						font-weight: 600 !important;
-						line-height: 1;
-						white-space: nowrap;
-						transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
-					}
-					.translator-quick-strategy-panel .translator-quick-segment-button:hover {
-						background: var(--background-modifier-hover, rgba(255, 255, 255, 0.04));
-						color: var(--text-normal, #dbdee1);
-					}
-					.translator-quick-strategy-panel .translator-quick-segment-button-active {
-						background: var(--brand-500, #5865f2) !important;
-						color: var(--white-500, #ffffff) !important;
-						font-weight: 700 !important;
-						box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-					}
-					.translator-quick-strategy-panel .translator-quick-limit-row .translator-quick-control-component-wrapper {
-						justify-content: flex-end;
-					}
-					.translator-quick-strategy-panel .translator-quick-limit-stepper {
-						width: 112px;
-						height: 34px;
-						flex: 0 0 112px;
-						display: grid;
-						grid-template-columns: minmax(0, 1fr) 22px;
-						align-items: stretch;
-						overflow: hidden;
-						border: 1px solid rgba(255, 255, 255, 0.035);
-						border-radius: 7px;
-						background: #18191c;
-						background: color-mix(in srgb, var(--background-tertiary, #1e1f22) 86%, black 14%);
-						box-sizing: border-box;
-					}
-					.translator-quick-strategy-panel .translator-quick-limit-stepper:focus-within {
-						border-color: var(--brand-500, #5865f2);
-						box-shadow: 0 0 0 1px rgba(88, 101, 242, 0.28);
-					}
-					.translator-quick-strategy-panel .translator-quick-limit-stepper-input {
-						width: 100%;
-						height: 32px;
-						min-height: 32px;
-						padding: 0 4px 0 10px;
-						border: 0;
-						outline: none;
-						background: transparent;
-						color: var(--text-normal, #dbdee1);
-						text-align: center;
-						font-size: 14px;
-						font-weight: 600;
-						line-height: 32px;
-						box-sizing: border-box;
-					}
-					.translator-quick-strategy-panel .translator-quick-limit-stepper-buttons {
-						display: grid;
-						grid-template-rows: 1fr 1fr;
-						border-left: 1px solid rgba(255, 255, 255, 0.04);
-						background: rgba(255, 255, 255, 0.018);
-					}
-					.translator-quick-strategy-panel .translator-quick-limit-stepper-button {
-						appearance: none;
-						display: flex;
-						align-items: center;
-						justify-content: center;
-						width: 22px;
-						height: 16px;
-						padding: 0;
-						border: 0;
-						background: transparent;
-						color: var(--text-muted, #949ba4);
-						cursor: pointer;
-						font: inherit;
-						font-size: 8px;
-						font-weight: 700;
-						line-height: 1;
-					}
-					.translator-quick-strategy-panel .translator-quick-limit-stepper-button:hover {
-						background: rgba(255, 255, 255, 0.055);
-						color: var(--text-normal, #dbdee1);
-					}
-					.translator-quick-strategy-panel .translator-quick-limit-stepper-button + .translator-quick-limit-stepper-button {
-						border-top: 1px solid rgba(255, 255, 255, 0.035);
-					}
-					.translator-quick-strategy-panel .translator-quick-hint {
-						margin-top: 10px;
-						padding-top: 8px;
-						border-top: 1px solid rgba(255, 255, 255, 0.06);
-						font-size: 12px;
-						line-height: 1.45;
-						color: var(--text-muted, #80848e);
-					}
-					.translator-popout-channel-toggle {
-						margin-top: 0;
-						padding-top: 0;
-						padding-bottom: 0;
-						border-top: 0;
 					}
 					`;
 			}
@@ -3296,12 +4636,6 @@ module.exports = (_ => {
 								createSpaciousDivider(),
 								createTranslatedTextColorInput(),
 								createSpaciousDivider(),
-								createSubsectionTitle(this.getCustomText("section_display_ui_title")),
-								createGeneralSwitchGroup([
-									"addTranslateButton",
-									"addQuickTranslateButton",
-									"usePerChatTranslation"
-								]),
 								createUiLanguageSelector()
 							]
 						}));
@@ -3769,12 +5103,15 @@ module.exports = (_ => {
 					translated_text_color_invalid: "Некорректный код цвета. Укажите корректный HEX- или CSS-цвет."
 				});
 				Object.assign(texts, {
+					channel_primary_engine_title: texts.channel_primary_engine_title || (isChinese ? "当前频道主服务商" : isRussian ? "Основной сервис текущего канала" : "Current Channel Primary Provider"),
+					channel_primary_engine_restore: texts.channel_primary_engine_restore || (isChinese ? "恢复全局默认" : isRussian ? "Вернуть глобальный" : "Use Global Default"),
+					channel_primary_engine_unconfigured_warning: texts.channel_primary_engine_unconfigured_warning || (isChinese ? "尚未完成 API 配置，翻译时会沿用现有失败处理并尝试备用服务。" : isRussian ? "API ещё не настроен; при ошибке будет использован резервный сервис." : "API setup is incomplete; failures will keep using the existing backup behavior."),
+					language_not_supported_by_channel_engines: texts.language_not_supported_by_channel_engines || (isChinese ? "当前频道主服务和全局备用服务都不支持这个语言组合" : isRussian ? "Текущая основная и глобальная резервная службы не поддерживают эту языковую пару" : "Neither the channel primary nor global backup provider supports this language pair"),
 					primary_engine_section_title: texts.primary_engine_section_title || (isChinese ? "主服务商设置" : isRussian ? "Настройки основного сервиса" : "Primary Provider Settings"),
 					section_message_language_title: texts.section_message_language_title || (isChinese ? "发送与接收语言" : isRussian ? "Языки отправки и получения" : "Sent and Received Languages"),
 					section_sent_language_title: texts.section_sent_language_title || (isChinese ? "发送消息" : isRussian ? "Исходящие сообщения" : "Sent Messages"),
 					section_received_language_title: texts.section_received_language_title || (isChinese ? "收到消息" : isRussian ? "Входящие сообщения" : "Received Messages"),
 					section_display_message_title: texts.section_display_message_title || (isChinese ? "消息显示" : isRussian ? "Отображение сообщений" : "Message Display"),
-					section_display_ui_title: texts.section_display_ui_title || (isChinese ? "界面与按钮" : isRussian ? "Интерфейс и кнопки" : "Interface and Buttons"),
 					protection_section_title: texts.protection_section_title || (isChinese ? "保护规则" : isRussian ? "Правила защиты" : "Protection Rules"),
 					received_auto_translate_scope_title: texts.received_auto_translate_scope_title || (isChinese ? "自动翻译模式" : isRussian ? "Диапазон автоперевода" : "Auto-translate range"),
 					received_auto_translate_scope_hint: texts.received_auto_translate_scope_hint || (isChinese ? "只翻译新消息，或连当前已加载消息一起翻译。" : isRussian ? "Выберите: переводить только новые сообщения или также уже загруженные на экран." : "Translate only new messages, or include the messages already loaded on screen."),
@@ -3806,16 +5143,10 @@ module.exports = (_ => {
 				const isChinese = this.isChineseUiLanguage();
 				const isRussian = this.isRussianUiLanguage();
 				const labels = isChinese ? {
-					addTranslateButton: "在输入框旁显示翻译按钮",
-					addQuickTranslateButton: "在消息操作栏显示快捷翻译按钮",
-					usePerChatTranslation: "每个频道单独记录翻译开关（建议开启）",
 					sendOriginalMessage: "发送译文时同时附带原文",
 					showOriginalMessage: "查看收到的译文时同时显示原文",
 					useSpoilerInOriginal: "原文使用剧透样式显示"
 				} : {
-					addTranslateButton: "Show translate button near the input box",
-					addQuickTranslateButton: "Show quick translate button in message actions",
-					usePerChatTranslation: "Remember translate toggle separately for each channel (recommended)",
 					sendOriginalMessage: "Also send the original text with translated outgoing messages",
 					showOriginalMessage: "Also show the original text with translated incoming messages",
 					useSpoilerInOriginal: "Show original text as spoiler blocks"
@@ -3852,9 +5183,6 @@ module.exports = (_ => {
 					useSpoilerInReceivedOriginal: "Show received original text as spoiler (scratch-off) blocks"
 				});
 				if (isRussian) Object.assign(labels, {
-					addTranslateButton: "Показывать кнопку перевода возле поля ввода",
-					addQuickTranslateButton: "Показывать быструю кнопку перевода в действиях сообщения",
-					usePerChatTranslation: "Запоминать переключатель перевода отдельно для каждого канала",
 					interfaceLanguage: "Язык интерфейса плагина",
 					sendOriginalMessage: "Добавлять оригинал к переведённым исходящим сообщениям",
 					showOriginalMessage: "Показывать оригинал рядом с переведёнными входящими сообщениями",
@@ -3893,12 +5221,11 @@ module.exports = (_ => {
 
 			getTranslateButtonTooltipText (channelId) {
 				const enabled = this.isTranslationEnabled(channelId);
-				const isPerChat = this.settings.general.usePerChatTranslation;
 				if (!enabled) {
-					if (this.isChineseUiLanguage()) return isPerChat ? "左键打开设置，右键开启当前频道的翻译插件总开关" : "左键打开设置，右键开启全局翻译插件总开关";
-					return isPerChat ? "Left click for settings, right click to enable the translator master switch in this channel" : "Left click for settings, right click to enable the global translator master switch";
+					if (this.isChineseUiLanguage()) return "左键打开设置，右键开启当前频道的翻译插件总开关";
+					return "Left click for settings, right click to enable the translator master switch in this channel";
 				}
-				const statusText = this.isChineseUiLanguage() ? (isPerChat ? "当前频道翻译插件总开关已开启" : "全局翻译插件总开关已开启") : (isPerChat ? "Translator master switch is enabled in this channel" : "Global translator master switch is enabled");
+				const statusText = this.isChineseUiLanguage() ? "当前频道翻译插件总开关已开启" : "Translator master switch is enabled in this channel";
 				return `${statusText} | ${this.getTranslationTooltipText(this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId), this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId))}`;
 			}
 
@@ -4393,33 +5720,25 @@ module.exports = (_ => {
 			}
 
 			buildReceivedDisplayContent (translatedContent, originalContent, forceInlineOriginal = false) {
-				let content = (translatedContent || "").trim();
-				const shouldInlineOriginal = !!(originalContent && (forceInlineOriginal || this.settings.general.showOriginalMessage && !this.settings.general.showOriginalDirectly));
-				if (shouldInlineOriginal) content += this.formatOriginalTextForMessage(originalContent, this.shouldUseSpoilerInReceivedOriginal());
-				return content;
+				return translationDisplayLogic.buildReceivedDisplayContent(this, translatedContent, originalContent, forceInlineOriginal);
 			}
 
 			refreshTranslationDisplay (translation) {
-				if (!translation) return null;
-				translation = Object.assign(translation, this.normalizeStoredTranslationData(translation));
-				const inlineOriginalBySetting = !!(translation.originalContent && this.settings.general.showOriginalMessage && !this.settings.general.showOriginalDirectly);
-				translation.content = this.buildReceivedDisplayContent(translation.translatedContent || translation.content, translation.originalContent, false);
-				translation.contentIncludesOriginal = inlineOriginalBySetting;
-				return translation;
+				return translationDisplayLogic.refreshTranslationDisplay(this, translation);
 			}
 
 			createReceivedTranslationSignature (message, channelId, originalContentData = null) {
 				const sourceData = originalContentData || this.extractOriginalContentData(message);
 				return JSON.stringify({
 					protectionVersion: translationProtectionSignatureVersion,
-					channelId: this.settings.general.usePerChatTranslation ? channelId : "global",
+					channelId: channelId || null,
 					input: this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId),
 					output: this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId),
 					wrapperPairsForReceived: this.getExceptionScopeSetting("wrapperPairsForReceived", true),
 					wrapperPairs: this.getProtectedWrapperRules().map(rule => rule.raw),
 					protectedTerms: this.getProtectedTermsList().map(term => term.toLowerCase()),
-					translator: this.settings.engines.translator,
-					backup: this.settings.engines.backup,
+					translator: this.getEffectivePrimaryEngine(channelId),
+					backup: this.getEffectiveBackupEngine(channelId),
 					content: sourceData.content || "",
 					embeds: sourceData.embeds || []
 				});
@@ -4529,14 +5848,14 @@ module.exports = (_ => {
 			createReplyPreviewSignature (message, channelId, originalContent = null) {
 				return JSON.stringify({
 					protectionVersion: translationProtectionSignatureVersion,
-					channelId: this.settings.general.usePerChatTranslation ? channelId : "global",
+					channelId: channelId || null,
 					input: this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId),
 					output: this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId),
 					wrapperPairsForReceived: this.getExceptionScopeSetting("wrapperPairsForReceived", true),
 					wrapperPairs: this.getProtectedWrapperRules().map(rule => rule.raw),
 					protectedTerms: this.getProtectedTermsList().map(term => term.toLowerCase()),
-					translator: this.settings.engines.translator,
-					backup: this.settings.engines.backup,
+					translator: this.getEffectivePrimaryEngine(channelId),
+					backup: this.getEffectiveBackupEngine(channelId),
 					content: originalContent != null ? originalContent : message && message.content || ""
 				});
 			}
@@ -4571,61 +5890,26 @@ module.exports = (_ => {
 			}
 
 			getReplyPreviewDisplayContent (translation) {
-				if (!translation) return "";
-				translation = this.normalizeStoredTranslationData(translation);
-				const originalContent = (translation.originalContent || "").trim();
-				const translatedContent = (translation.translatedContent || translation.content || "").trim();
-				return this.settings.general.showOriginalInReplyPreview ? (translatedContent || originalContent) : originalContent;
+				return translationDisplayLogic.getReplyPreviewDisplayContent(this, translation);
 			}
 
 			stripReplyPreviewOriginalSuffix (content) {
-				content = (content || "").trim();
-				if (!content) return "";
-				if (/\n\|\|[\s\S]*\|\|$/.test(content)) return content.replace(/\n\|\|[\s\S]*\|\|$/, "").trim();
-				const lines = content.split("\n");
-				let boundaryIndex = lines.length;
-				while (boundaryIndex > 0 && /^\s*>\s?/.test(lines[boundaryIndex - 1])) boundaryIndex--;
-				if (boundaryIndex < lines.length) return lines.slice(0, boundaryIndex).join("\n").trim();
-				return content;
+				return translationDisplayLogic.stripReplyPreviewOriginalSuffix(this, content);
 			}
 
 			getStableReplyPreviewOriginalContent (message) {
-				if (!message) return "";
-				const currentContent = (message.content || "").trim();
-				const storedTranslations = [replyPreviewTranslations[message.id], translatedMessages[message.id]].filter(Boolean);
-				for (const storedTranslation of storedTranslations) {
-					const normalizedTranslation = this.normalizeStoredTranslationData(storedTranslation);
-					const originalContent = (normalizedTranslation.originalContent || "").trim();
-					const translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
-					const displayContent = this.getReplyPreviewDisplayContent(normalizedTranslation).trim();
-					if (!originalContent) continue;
-					if (!currentContent || currentContent == originalContent || currentContent == translatedContent || currentContent == displayContent || currentContent == this.stripReplyPreviewOriginalSuffix(displayContent)) return originalContent;
-				}
-				return currentContent;
+				return translationDisplayLogic.getStableReplyPreviewOriginalContent(this, message);
 			}
 
 			getStableReplyPreviewMessage (message) {
-				if (!message) return message;
-				const stableMessage = new BDFDB.DiscordObjects.Message(message);
-				stableMessage.content = this.getStableReplyPreviewOriginalContent(message);
-				return stableMessage;
+				return translationDisplayLogic.getStableReplyPreviewMessage(this, message);
 			}
 
 			getReplyPreviewFallbackContent (message) {
-				if (!message) return "";
-				return this.stripReplyPreviewOriginalSuffix(message.content || "");
+				return translationDisplayLogic.getReplyPreviewFallbackContent(this, message);
 			}
 			getReplyPreviewDisplayContentForMessage (message, channelId = null) {
-				if (!message) return "";
-				const originalContent = this.getStableReplyPreviewOriginalContent(message) || (message.content || "").trim();
-				if (!this.settings.general.showOriginalInReplyPreview) return this.stripReplyPreviewOriginalSuffix(originalContent || "");
-				const storedTranslation = translatedMessages[message.id] || replyPreviewTranslations[message.id];
-				if (storedTranslation && this.shouldDisplayStoredTranslation(storedTranslation, channelId || this.getStoredTranslationChannelId(message.id))) {
-					const normalizedTranslation = this.normalizeStoredTranslationData(storedTranslation);
-					const translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
-					return translatedContent || originalContent;
-				}
-				return originalContent;
+				return translationDisplayLogic.getReplyPreviewDisplayContentForMessage(this, message, channelId);
 			}
 
 			tagReplyPreviewRenderNode (node) {
@@ -4664,7 +5948,7 @@ module.exports = (_ => {
 				const baseMessage = contextOptions.baseMessage || null;
 				if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId)) return;
 				if (suppressedAutoTranslations[message.id]) return;
-				if (!this.isTranslationEnabled(channelId) || !this.isReceivedAutoTranslationEnabled(channelId) || this.isOwnMessage(message)) return;
+				if (!this.isTranslationEnabled(channelId) || this.isOwnMessage(message)) return;
 				const originalContent = (message.content || "").trim();
 				if (!originalContent) return;
 				const signature = this.createReplyPreviewSignature(message, channelId, originalContent);
@@ -4680,7 +5964,7 @@ module.exports = (_ => {
 				this.translateText(originalContent, messageTypes.RECEIVED, (translation, input, output) => {
 					delete queuedReplyPreviewTranslations[message.id];
 					if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId)) return;
-					if (!this.isTranslationEnabled(channelId) || !this.isReceivedAutoTranslationEnabled(channelId)) return;
+					if (!this.isTranslationEnabled(channelId)) return;
 					if (translation) {
 						replyPreviewTranslations[message.id] = {
 							signature,
@@ -4702,60 +5986,15 @@ module.exports = (_ => {
 			}
 
 			resetAutoTranslationTracking (channelId = null) {
-				if (channelId) {
-					delete autoTranslationChannelStates[channelId];
-					delete loadedAutoTranslationPassCounts[channelId];
-					delete loadedAutoTranslationPassRequestCounts[channelId];
-					delete loadedAutoTranslationBatchNumbers[channelId];
-					delete loadedAutoTranslationPassScrollStamps[channelId];
-					for (const messageId of Object.keys(loadedAutoTranslationAttemptedMessages)) if (loadedAutoTranslationAttemptedMessages[messageId] == channelId) delete loadedAutoTranslationAttemptedMessages[messageId];
-					if (historicalAutoTranslationBatchChannelId == channelId) {
-						historicalAutoTranslationBatchActive = false;
-						historicalAutoTranslationBatchProcessedCount = 0;
-						historicalAutoTranslationBatchMessageIds = {};
-						historicalAutoTranslationBatchChannelId = null;
-						historicalAutoTranslationBatchTotal = 0;
-					}
-				}
-				else {
-					autoTranslationChannelStates = {};
-					loadedAutoTranslationPassCounts = {};
-					loadedAutoTranslationPassRequestCounts = {};
-					loadedAutoTranslationBatchNumbers = {};
-					loadedAutoTranslationPassScrollStamps = {};
-					loadedAutoTranslationAttemptedMessages = {};
-					historicalAutoTranslationBatchActive = false;
-					historicalAutoTranslationBatchProcessedCount = 0;
-					historicalAutoTranslationBatchMessageIds = {};
-					historicalAutoTranslationBatchChannelId = null;
-					historicalAutoTranslationBatchTotal = 0;
-				}
-				this.clearAutoTranslationEligibleReplyPreviewMessages(channelId);
-				if (!channelId || lastAutoTranslationChannelId == channelId) lastAutoTranslationChannelId = null;
+				return receivedTranslationRuntime.resetAutoTranslationTracking(this, channelId);
 			}
 
 			getAutoTranslationChannelState (channelId) {
-				if (!channelId) return null;
-				if (!autoTranslationChannelStates[channelId]) autoTranslationChannelStates[channelId] = {
-					initialized: false,
-					boundaryMessageId: null
-				};
-				return autoTranslationChannelStates[channelId];
+				return receivedTranslationRuntime.getAutoTranslationChannelState(this, channelId);
 			}
 
 			prepareAutoTranslationChannelSession (channelId) {
-				if (!channelId || lastAutoTranslationChannelId == channelId) return;
-				lastAutoTranslationChannelId = channelId;
-				const channelState = this.getAutoTranslationChannelState(channelId);
-				channelState.initialized = false;
-				channelState.boundaryMessageId = null;
-				loadedAutoTranslationPassCounts[channelId] = 0;
-				loadedAutoTranslationPassRequestCounts[channelId] = 0;
-				loadedAutoTranslationBatchNumbers[channelId] = 0;
-				loadedAutoTranslationPassScrollStamps[channelId] = lastAutoTranslationUserScrollTime || 0;
-				for (const messageId of Object.keys(loadedAutoTranslationAttemptedMessages)) if (loadedAutoTranslationAttemptedMessages[messageId] == channelId) delete loadedAutoTranslationAttemptedMessages[messageId];
-				this.clearAutoTranslationEligibleReplyPreviewMessages(channelId);
-				if (this.getReceivedAutoTranslateScope() == "new_only") this.clearDisplayedAutoTranslations(channelId);
+				return receivedTranslationRuntime.prepareAutoTranslationChannelSession(this, channelId);
 			}
 
 			compareMessageIds (messageIdA, messageIdB) {
@@ -4884,7 +6123,7 @@ module.exports = (_ => {
 			shouldAutoTranslateReplyPreview (baseMessage, referencedMessage, channelId) {
 				if (!this.settings.general.showOriginalInReplyPreview) return false;
 				if (!channelId || !baseMessage || !baseMessage.id || !referencedMessage || !referencedMessage.id) return false;
-				if (!this.isTranslationEnabled(channelId) || !this.isReceivedAutoTranslationEnabled(channelId)) return false;
+				if (!this.isTranslationEnabled(channelId)) return false;
 				if (this.isOwnMessage(baseMessage) || this.isOwnMessage(referencedMessage)) return false;
 				if (suppressedAutoTranslations[referencedMessage.id]) return false;
 				if (this.getReceivedAutoTranslateScope() == "loaded_messages") return this.isMessageWithinLoadedRange(baseMessage);
@@ -5108,28 +6347,11 @@ module.exports = (_ => {
 			}
 
 			getAutoTranslatedResultRejectReason (translation, channelId) {
-				if (!translation || !translation.translatedContent) return "local_guard";
-				if (this.isTranslationResultTooSimilar(translation)) return "too_similar";
-				const detectedLanguageId = translation.input && translation.input.id;
-				const targetLanguageId = translation.output && translation.output.id || this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId);
-				if (this.shouldSkipSameLanguageReceivedMessages() && detectedLanguageId && this.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId)) return "same_language";
-				const sourceLanguages = this.getReceivedAutoTranslateSourceLanguages();
-				if (sourceLanguages.length && detectedLanguageId && !this.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages)) return "source_filter";
-				if (this.shouldDropSimilarTranslations() && this.getTextSimilarityScore(translation.originalContent, translation.translatedContent) >= this.getTranslationSimilarityThreshold()) return "too_similar";
-				return null;
+				return receivedMessageFilterRuntime.getAutoTranslatedResultRejectReason(this, translation, channelId);
 			}
 
 			getReceivedAutoTranslateSkipReason (originalContentData, channelId) {
-				if (this.isLinkOnlyReceivedContent(originalContentData)) return "link_only";
-				if (!this.hasTranslatableMessageContent(originalContentData)) return "symbol_only";
-				const analysisSource = this.buildAutoTranslateAnalysisText(originalContentData);
-				if (!analysisSource.hasUnprotectedContent) return "symbol_only";
-				const targetLanguageId = this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId);
-				const analysis = this.analyzeTextForAutoTranslate(analysisSource.text, targetLanguageId);
-				if (!analysis.totalLetters) return "symbol_only";
-				if (this.isClearlyTargetLanguageMessage(analysis, targetLanguageId)) return "same_language";
-				if (this.shouldSkipSameLanguageReceivedMessages() && this.isMostlyTargetLanguageMessage(analysis, targetLanguageId)) return "same_language";
-				return null;
+				return receivedMessageFilterRuntime.getReceivedAutoTranslateSkipReason(this, originalContentData, channelId);
 			}
 
 			getLoadedAutoTranslationInlineStatusText (channelId = null) {
@@ -5301,7 +6523,7 @@ module.exports = (_ => {
 				try {
 					// Only this plugin's own settings/quick panels should hide the floating status.
 					// Generic Discord settings containers can remain in the DOM after closing and were hiding the capsule.
-					return !!document.querySelector(".translator-popout-auto-panel, .translator-settings-panel-root");
+					return !!document.querySelector(".translator-settings-panel-root");
 				}
 				catch (err) {return false;}
 			}
@@ -5318,7 +6540,7 @@ module.exports = (_ => {
 				const statusChannelId = status.channelId && status.channelId != "__global" ? status.channelId : selectedChannelId;
 				if (!statusChannelId || !selectedChannelId || statusChannelId != selectedChannelId) return false;
 				if (this.getReceivedAutoTranslateScope() != "loaded_messages") return false;
-				return this.isTranslationEnabled(statusChannelId) && this.isReceivedAutoTranslationEnabled(statusChannelId);
+				return this.isTranslationEnabled(statusChannelId);
 			}
 
 			updateLoadedAutoTranslationStatus (updates = {}) {
@@ -5488,6 +6710,8 @@ module.exports = (_ => {
 					originalContentData: originalContentData || this.extractOriginalContentData(message),
 					channelId
 				};
+				historicalAutoTranslationRerenderPending = true;
+				historicalAutoTranslationPendingCount++;
 				return true;
 			}
 
@@ -5501,6 +6725,16 @@ module.exports = (_ => {
 					delete historicalAutoTranslationStaging[item.message.id];
 				}
 				return stagedItems.length;
+			}
+
+			flushHistoricalAutoTranslationProgress (channelId = null) {
+				const appliedCount = this.applyHistoricalAutoTranslationStaging(channelId);
+				if (!appliedCount) return 0;
+				historicalAutoTranslationRerenderPending = false;
+				historicalAutoTranslationPendingCount = 0;
+				historicalAutoTranslationLastFlushTime = Date.now();
+				this.scheduleTranslationRerender({batched: true, allowWhileTyping: true});
+				return appliedCount;
 			}
 
 			clearHistoricalAutoTranslationStaging (channelId = null) {
@@ -5547,57 +6781,7 @@ module.exports = (_ => {
 			}
 
 			clearAutoTranslationQueue (channelId = null) {
-				if (!channelId) {
-					autoTranslationQueue = [];
-					queuedAutoTranslations = {};
-					queuedReplyPreviewTranslations = {};
-					autoTranslationEligibleReplyPreviewMessages = {};
-					replyPreviewRenderMessageIds = {};
-					historicalAutoTranslationRerenderPending = false;
-					historicalAutoTranslationPendingCount = 0;
-					historicalAutoTranslationPausedUntil = 0;
-					historicalAutoTranslationBatchActive = false;
-					historicalAutoTranslationBatchProcessedCount = 0;
-					this.clearHistoricalAutoTranslationStaging();
-					loadedAutoTranslationPassCounts = {};
-					loadedAutoTranslationPassRequestCounts = {};
-					loadedAutoTranslationPassScrollStamps = {};
-					loadedAutoTranslationAttemptedMessages = {};
-					if (autoTranslationQueueRetryTimer) clearTimeout(autoTranslationQueueRetryTimer);
-					autoTranslationQueueRetryTimer = null;
-					if (historicalAutoTranslationStartTimer) clearTimeout(historicalAutoTranslationStartTimer);
-					historicalAutoTranslationStartTimer = null;
-					if (historicalAutoTranslationScrollScanTimer) clearTimeout(historicalAutoTranslationScrollScanTimer);
-					historicalAutoTranslationScrollScanTimer = null;
-					if (historicalAutoTranslationPostBatchScanTimer) clearTimeout(historicalAutoTranslationPostBatchScanTimer);
-					historicalAutoTranslationPostBatchScanTimer = null;
-					this.clearLoadedAutoTranslationStatus();
-					return;
-				}
-				autoTranslationQueue = autoTranslationQueue.filter(queueItem => {
-					const shouldRemove = queueItem && queueItem.channel && queueItem.channel.id == channelId;
-					if (shouldRemove && queueItem.message && queueItem.message.id) delete queuedAutoTranslations[queueItem.message.id];
-					return !shouldRemove;
-				});
-				for (const messageId of Object.keys(queuedReplyPreviewTranslations)) if (queuedReplyPreviewTranslations[messageId] == channelId) delete queuedReplyPreviewTranslations[messageId];
-				delete autoTranslationEligibleReplyPreviewMessages[channelId];
-				for (const messageId of Object.keys(loadedAutoTranslationAttemptedMessages)) if (loadedAutoTranslationAttemptedMessages[messageId] == channelId) delete loadedAutoTranslationAttemptedMessages[messageId];
-				if (historicalAutoTranslationBatchChannelId == channelId) {
-					historicalAutoTranslationBatchActive = false;
-					historicalAutoTranslationBatchProcessedCount = 0;
-					historicalAutoTranslationBatchMessageIds = {};
-					historicalAutoTranslationBatchChannelId = null;
-					historicalAutoTranslationBatchTotal = 0;
-				}
-				this.clearHistoricalAutoTranslationStaging(channelId);
-				delete loadedAutoTranslationPassCounts[channelId];
-				delete loadedAutoTranslationPassRequestCounts[channelId];
-				delete loadedAutoTranslationPassScrollStamps[channelId];
-				if (!autoTranslationQueue.length && autoTranslationQueueRetryTimer) {
-					clearTimeout(autoTranslationQueueRetryTimer);
-					autoTranslationQueueRetryTimer = null;
-				}
-				if (loadedAutoTranslationStatus.channelId == channelId) this.clearLoadedAutoTranslationStatus();
+				return receivedTranslationRuntime.clearAutoTranslationQueue(this, channelId);
 			}
 
 			clearDisplayedTranslations (channelId = null) {
@@ -5629,16 +6813,7 @@ module.exports = (_ => {
 			}
 
 			applyStoredTranslationToMessage (message, translation, originalContentData = null) {
-				if (!message || !translation) return null;
-				const storedTranslation = this.refreshTranslationDisplay(Object.assign({
-					channelId: translation.channelId || message.channel_id || null,
-					auto: !!translation.auto
-				}, translation));
-				delete suppressedAutoTranslations[message.id];
-				oldMessages[message.id] = new BDFDB.DiscordObjects.Message(message);
-				oldMessages[message.id].originalContentData = originalContentData || this.extractOriginalContentData(message);
-				translatedMessages[message.id] = storedTranslation;
-				return storedTranslation;
+				return translationDisplayLogic.applyStoredTranslationToMessage(this, message, translation, originalContentData);
 			}
 
 			getMentionDisplayName (userId, message = null) {
@@ -5665,107 +6840,55 @@ module.exports = (_ => {
 			}
 
 			clearDisplayedTranslationState (messageId, options = {}) {
-				if (!messageId) return;
-				const config = Object.assign({
-					clearReplyPreview: false,
-					preserveSuppressed: false
-				}, options);
-				delete translatedMessages[messageId];
-				if (!config.preserveSuppressed) delete suppressedAutoTranslations[messageId];
-				if (config.clearReplyPreview) {
-					delete replyPreviewTranslations[messageId];
-					delete queuedReplyPreviewTranslations[messageId];
-				}
+				return translationDisplayLogic.clearDisplayedTranslationState(this, messageId, options);
 			}
 
 			getStoredTranslationChannelId (messageId, fallbackChannelId = null, translation = null) {
-				if (fallbackChannelId) return fallbackChannelId;
-				if (translation && translation.channelId) return translation.channelId;
-				const displayedTranslation = translatedMessages[messageId];
-				if (displayedTranslation && displayedTranslation.channelId) return displayedTranslation.channelId;
-				const replyPreviewTranslation = replyPreviewTranslations[messageId];
-				if (replyPreviewTranslation && replyPreviewTranslation.channelId) return replyPreviewTranslation.channelId;
-				return oldMessages[messageId] && oldMessages[messageId].channel_id || null;
+				return translationDisplayLogic.getStoredTranslationChannelId(this, messageId, fallbackChannelId, translation);
 			}
 
 			shouldDisplayStoredTranslation (translation, channelId = null) {
-				if (!translation) return false;
-				const normalizedTranslation = this.normalizeStoredTranslationData(translation);
-				if (normalizedTranslation.manual && normalizedTranslation.independentOfTextAreaSwitch) return true;
-				const resolvedChannelId = channelId || normalizedTranslation.channelId || null;
-				if (normalizedTranslation.auto && resolvedChannelId && (!this.isTranslationEnabled(resolvedChannelId) || !this.isReceivedAutoTranslationEnabled(resolvedChannelId))) return false;
-				return true;
+				return translationDisplayLogic.shouldDisplayStoredTranslation(this, translation, channelId);
 			}
 
 			getStoredTranslationOriginalContent (translation, fallbackContent = "") {
-				if (!translation) return fallbackContent;
-				const normalizedTranslation = this.normalizeStoredTranslationData(translation);
-				return normalizedTranslation.originalContent != null ? String(normalizedTranslation.originalContent) : fallbackContent;
+				return translationDisplayLogic.getStoredTranslationOriginalContent(this, translation, fallbackContent);
 			}
 
 			getActiveMessageTranslation (message, channelId = null, expectedSignature = null) {
-				if (!message || !message.id) return null;
-				let translation = translatedMessages[message.id];
-				if (!translation) return null;
-				const resolvedChannelId = this.getStoredTranslationChannelId(message.id, channelId, translation);
-				if (!this.shouldDisplayStoredTranslation(translation, resolvedChannelId)) {
-					this.clearDisplayedTranslationState(message.id);
-					return null;
-				}
-				if (expectedSignature && translation.signature && translation.signature != expectedSignature) {
-					this.clearDisplayedTranslationState(message.id);
-					return null;
-				}
-				translation = this.refreshTranslationDisplay(translation);
-				translatedMessages[message.id] = translation;
-				return translation;
+				return translationDisplayLogic.getActiveMessageTranslation(this, message, channelId, expectedSignature);
 			}
 
 			getActiveReplyPreviewTranslation (message, channelId) {
-				if (!message || !message.id) return null;
-				const translation = this.getReplyPreviewTranslation(message, channelId);
-				if (!translation) return null;
-				if (!this.shouldDisplayStoredTranslation(translation, channelId)) {
-					delete replyPreviewTranslations[message.id];
-					delete queuedReplyPreviewTranslations[message.id];
-					return null;
-				}
-				return translation;
+				return translationDisplayLogic.getActiveReplyPreviewTranslation(this, message, channelId);
 			}
 
 			getReceivedAutoTranslateScope () {
-				const scope = this.settings.filters && this.settings.filters.receivedAutoTranslateScope;
-				return scope == "loaded_messages" ? "loaded_messages" : "new_only";
+				return loadedAutoTranslatePolicy.getReceivedAutoTranslateScope(this);
 			}
 
 			getReceivedAutoTranslateLoadedRangeMode () {
-				return LOADED_AUTO_TRANSLATE_RANGE_MODES.COUNT;
+				return loadedAutoTranslatePolicy.getReceivedAutoTranslateLoadedRangeMode(this);
 			}
 
 			getReceivedAutoTranslateLoadedTimeWindow () {
-				const value = this.settings.filters && this.settings.filters.receivedAutoTranslateLoadedTimeWindow;
-				return ["15m", "1h", "6h", "24h", "all"].includes(value) ? value : "1h";
+				return loadedAutoTranslatePolicy.getReceivedAutoTranslateLoadedTimeWindow(this);
 			}
 
 			getReceivedAutoTranslateLoadedLimit () {
-				return this.normalizeLoadedAutoTranslateLimit(this.settings.filters && this.settings.filters.receivedAutoTranslateLoadedLimit);
+				return loadedAutoTranslatePolicy.getReceivedAutoTranslateLoadedLimit(this);
 			}
 
 			shouldPauseLoadedAutoTranslateWhileScrolling () {
-				return !(this.settings.filters && this.settings.filters.pauseLoadedAutoTranslateWhileScrolling === false);
+				return loadedAutoTranslatePolicy.shouldPauseLoadedAutoTranslateWhileScrolling(this);
 			}
 
 			shouldContinueLoadedAutoTranslateOnScroll () {
-				return !(this.settings.filters && this.settings.filters.continueLoadedAutoTranslateOnScroll === false);
+				return loadedAutoTranslatePolicy.shouldContinueLoadedAutoTranslateOnScroll(this);
 			}
 
 			getReceivedAutoTranslateLoadedTimeWindowMs () {
-				const window = this.getReceivedAutoTranslateLoadedTimeWindow();
-				if (window == "15m") return 15 * 60 * 1000;
-				if (window == "1h") return 60 * 60 * 1000;
-				if (window == "6h") return 6 * 60 * 60 * 1000;
-				if (window == "24h") return 24 * 60 * 60 * 1000;
-				return 0;
+				return loadedAutoTranslatePolicy.getReceivedAutoTranslateLoadedTimeWindowMs(this);
 			}
 
 			getMessageTimestampMs (message) {
@@ -5837,13 +6960,13 @@ module.exports = (_ => {
 			scheduleLoadedAutoTranslationScrollRescan () {
 				if (this.getReceivedAutoTranslateScope() != "loaded_messages" || !this.shouldContinueLoadedAutoTranslateOnScroll()) return;
 				const channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-				if (!channelId || !this.isTranslationEnabled(channelId) || !this.isReceivedAutoTranslationEnabled(channelId)) return;
+				if (!channelId || !this.isTranslationEnabled(channelId)) return;
 				if (historicalAutoTranslationScrollScanTimer) clearTimeout(historicalAutoTranslationScrollScanTimer);
 				historicalAutoTranslationScrollScanTimer = setTimeout(_ => {
 					historicalAutoTranslationScrollScanTimer = null;
 					if (this.getReceivedAutoTranslateScope() != "loaded_messages" || !this.shouldContinueLoadedAutoTranslateOnScroll()) return;
 					const selectedChannelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-					if (!selectedChannelId || !this.isTranslationEnabled(selectedChannelId) || !this.isReceivedAutoTranslationEnabled(selectedChannelId)) return;
+					if (!selectedChannelId || !this.isTranslationEnabled(selectedChannelId)) return;
 					loadedAutoTranslationPassCounts[selectedChannelId] = 0;
 					loadedAutoTranslationPassRequestCounts[selectedChannelId] = 0;
 					loadedAutoTranslationPassScrollStamps[selectedChannelId] = lastAutoTranslationUserScrollTime || Date.now();
@@ -5856,11 +6979,11 @@ module.exports = (_ => {
 
 			scheduleLoadedAutoTranslationPostBatchRescan (channelId = null) {
 				channelId = channelId || loadedAutoTranslationStatus.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-				if (!channelId || this.getReceivedAutoTranslateScope() != "loaded_messages" || !this.isTranslationEnabled(channelId) || !this.isReceivedAutoTranslationEnabled(channelId)) return;
+				if (!channelId || this.getReceivedAutoTranslateScope() != "loaded_messages" || !this.isTranslationEnabled(channelId)) return;
 				if (historicalAutoTranslationPostBatchScanTimer) clearTimeout(historicalAutoTranslationPostBatchScanTimer);
 				historicalAutoTranslationPostBatchScanTimer = setTimeout(_ => {
 					historicalAutoTranslationPostBatchScanTimer = null;
-					if (this.getReceivedAutoTranslateScope() != "loaded_messages" || !this.isTranslationEnabled(channelId) || !this.isReceivedAutoTranslationEnabled(channelId)) return;
+					if (this.getReceivedAutoTranslateScope() != "loaded_messages" || !this.isTranslationEnabled(channelId)) return;
 					loadedAutoTranslationPassCounts[channelId] = 0;
 					loadedAutoTranslationPassRequestCounts[channelId] = 0;
 					for (const messageId of Object.keys(loadedAutoTranslationAttemptedMessages)) if (loadedAutoTranslationAttemptedMessages[messageId] == channelId) delete loadedAutoTranslationAttemptedMessages[messageId];
@@ -5880,26 +7003,15 @@ module.exports = (_ => {
 			}
 
 			shouldPauseHistoricalAutoTranslation () {
-				if (Date.now() < (historicalAutoTranslationPausedUntil || 0)) return true;
-				if (!this.shouldPauseLoadedAutoTranslateWhileScrolling()) return false;
-				this.attachAutoTranslationScrollWatcher();
-				return this.isUserActivelyScrollingMessages();
+				return receivedTranslationRuntime.shouldPauseHistoricalAutoTranslation(this);
 			}
 
 			scheduleAutoTranslationQueueRetry () {
-				if (autoTranslationQueueRetryTimer) return;
-				autoTranslationQueueRetryTimer = setTimeout(_ => {
-					autoTranslationQueueRetryTimer = null;
-					this.processAutoTranslationQueue();
-				}, AUTO_TRANSLATION_QUEUE_RETRY_DELAY);
+				return receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(this);
 			}
 
 			scheduleAutoTranslationBackoff (ms) {
-				// Pause the auto-translate queue for a short window after a 429/5xx so we don't
-				// hammer a rate-limited or ailing provider. Resumes via the retry timer.
-				if (!ms) return;
-				autoTranslationBackoffUntil = Math.max(autoTranslationBackoffUntil || 0, Date.now() + ms);
-				this.scheduleAutoTranslationQueueRetry();
+				return receivedTranslationRuntime.scheduleAutoTranslationBackoff(this, ms);
 			}
 
 			requestWithTimeout (url, options, callback, timeoutMs = 30000) {
@@ -5924,68 +7036,59 @@ module.exports = (_ => {
 			}
 
 			scheduleHistoricalAutoTranslationStart () {
-				if (historicalAutoTranslationStartTimer) clearTimeout(historicalAutoTranslationStartTimer);
-				historicalAutoTranslationStartTimer = setTimeout(_ => {
-					historicalAutoTranslationStartTimer = null;
-					this.processAutoTranslationQueue();
-				}, HISTORICAL_AUTO_TRANSLATION_COLLECT_DELAY);
+				return receivedTranslationRuntime.scheduleHistoricalAutoTranslationStart(this);
 			}
 
 			getReceivedAutoTranslateSourceLanguages () {
-				const sourceLanguages = this.settings.filters && BDFDB.ArrayUtils.is(this.settings.filters.receivedAutoTranslateSourceLanguages) ? this.settings.filters.receivedAutoTranslateSourceLanguages : [];
-				return [...new Set(sourceLanguages.filter(languageId => languages[languageId] && !languages[languageId].auto && !languages[languageId].special))];
+				return receivedSettingsPolicy.getReceivedAutoTranslateSourceLanguages(this);
 			}
 
 			getMinimumAutoTranslateLength () {
-				// Do not skip short chat text. Even one-character or two-character interjections can carry meaning.
-				return 0;
+				return receivedSettingsPolicy.getMinimumAutoTranslateLength(this);
 			}
 
 			getAutoTranslateMinimumLengthForAnalysis (analysis = null) {
-				return this.getMinimumAutoTranslateLength();
+				return receivedSettingsPolicy.getAutoTranslateMinimumLengthForAnalysis(this, analysis);
 			}
 
 			getTranslationSimilarityThreshold () {
-				const value = this.settings.filters && this.settings.filters.translationSimilarityThreshold;
-				return Math.max(0.5, Math.min(0.99, parseFloat(value) || 0.9));
+				return receivedSettingsPolicy.getTranslationSimilarityThreshold(this);
 			}
 
 			shouldTreatLanguageVariantsAsSame () {
-				return !(this.settings.filters && this.settings.filters.treatLanguageVariantsAsSame === false);
+				return receivedSettingsPolicy.shouldTreatLanguageVariantsAsSame(this);
 			}
 
 			shouldSkipMixedReceivedMessages () {
-				// Mixed-language skipping is too aggressive for Discord chat and conflicts with protected terms.
-				return false;
+				return receivedSettingsPolicy.shouldSkipMixedReceivedMessages(this);
 			}
 
 			shouldSkipSameLanguageReceivedMessages () {
-				return !!(this.settings.filters && this.settings.filters.skipSameLanguageReceivedMessages !== false);
+				return receivedSettingsPolicy.shouldSkipSameLanguageReceivedMessages(this);
 			}
 
 			useLocalLanguagePrecheck () {
-				return !(this.settings.filters && this.settings.filters.useLocalLanguagePrecheck === false);
+				return receivedSettingsPolicy.useLocalLanguagePrecheck(this);
 			}
 
 			shouldDropSimilarTranslations () {
-				return !!(this.settings.filters && this.settings.filters.dropSimilarTranslations !== false);
+				return receivedSettingsPolicy.shouldDropSimilarTranslations(this);
 			}
 
 			getAutoTranslateDecisionMode () {
-				const mode = this.settings.filters && this.settings.filters.autoTranslateDecisionMode;
-				return mode == "ai" ? "ai" : "basic";
+				return aiDecisionPolicy.getAutoTranslateDecisionMode(this);
 			}
 
 			supportsAiAutoTranslateDecisionEngine (engineKey) {
-				return ["deepseek", "oaicompat"].includes(engineKey);
+				return aiDecisionPolicy.supportsAiAutoTranslateDecisionEngine(this, engineKey);
 			}
 
-			isAiAutoTranslateDecisionAvailable () {
-				return this.supportsAiAutoTranslateDecisionEngine(this.settings.engines && this.settings.engines.translator) || this.supportsAiAutoTranslateDecisionEngine(this.settings.engines && this.settings.engines.backup);
+			isAiAutoTranslateDecisionAvailable (channelId = null) {
+				return aiDecisionPolicy.isAiAutoTranslateDecisionAvailable(this, channelId);
 			}
 
-			shouldUseAiAutoTranslateDecision () {
-				return this.getAutoTranslateDecisionMode() == "ai" && this.isAiAutoTranslateDecisionAvailable();
+			shouldUseAiAutoTranslateDecision (channelId = null) {
+				return aiDecisionPolicy.shouldUseAiAutoTranslateDecision(this, channelId);
 			}
 
 			getDefaultAiAutoTranslatePrompt () {
@@ -6116,78 +7219,15 @@ module.exports = (_ => {
 			}
 
 			getLatinStopwordTables () {
-				// Compact stopword tables for common Latin-script languages. Used only to fill the
-				// gap that script-family analysis cannot: telling English/French/Spanish/etc. apart.
-				return {
-					en: "the,and,you,that,this,is,are,was,were,have,has,it,for,not,with,but,they,your,from,been,will,just,like,can,what,there,their",
-					es: "que,de,no,es,en,un,una,por,con,se,los,las,su,para,como,mas,pero,le,al,lo,ella,este,eso",
-					fr: "le,la,les,de,et,un,une,que,pas,pour,qui,dans,sur,ne,se,au,est,son,il,elle,avec,nous,vous",
-					de: "der,die,das,und,ist,nicht,ein,eine,den,von,mit,sich,auf,fur,sie,dem,es,auch,wir,aber,hat",
-					pt: "que,de,nao,um,uma,para,com,os,as,se,por,como,mas,mais,eu,voce,sua,seu,ja,esta,isto",
-					it: "che,di,non,un,una,per,si,la,il,le,con,come,ma,piu,gli,sono,questo,quella,anche,stato",
-					nl: "de,het,een,en,van,is,niet,te,dat,die,in,op,voor,met,zijn,haar,maar,wat,heb,wij,zij",
-					pl: "nie,sie,to,na,jest,do,ze,jak,ale,co,dla,moze,tego,tym,byc,lub,oraz,takze,ich,jesli",
-					ro: "sa,de,nu,in,ca,pe,un,o,cu,este,la,ai,mai,dar,sunt,pentru,fata,asta,ori,sau,aceasta",
-					tr: "ve,bir,bu,icin,ile,ben,sen,degil,ama,daha,cok,var,yok,benim,senin,bana,sana,onlar,gibi,kadar",
-					sv: "och,att,det,som,en,den,for,ar,inte,med,har,jag,du,han,hon,ett,kan,sa,men,om,alla",
-					da: "og,at,det,som,en,den,er,ikke,med,har,jag,du,han,hun,et,kan,sa,men,om,vi,der",
-					no: "og,at,det,som,en,den,er,ikke,med,har,jag,du,han,hun,et,kan,sa,men,om,vi,der",
-					cs: "a,se,na,je,to,v,ze,si,pro,ale,jak,tak,ktery,byt,nebo,tento,jejich,coz,vice,ktere",
-					hu: "es,egy,nem,hogy,az,is,volt,meg,lehet,csak,de,mint,mar,ott,majd,igen,mert,azzal,ilyen,olyan",
-					id: "yang,dan,di,ini,itu,untuk,dengan,tidak,saya,anda,akan,ke,pada,dari,juga,karena,bisa,ada,mereka,sebagai",
-					vi: "va,cua,la,mot,cac,trong,khong,co,nay,do,da,duoc,nguoi,cho,voi,den,tu,roi,ra,cung",
-					tl: "ang,ng,mga,sa,ay,na,at,ni,si,naman,dahil,hindi,para,kung,ngunit,siya,ako,ikaw,nila,kapag"
-				};
+				return languageHeuristicsRuntime.getLatinStopwordTables(this);
 			}
 
 			identifyLatinLanguage (text) {
-				if (!this._latinStopwordIndex) {
-					const tables = this.getLatinStopwordTables();
-					const index = Object.create(null);
-					for (const lang in tables) {
-						for (const word of tables[lang].split(",")) {
-							if (!index[word]) index[word] = [];
-							index[word].push(lang);
-						}
-					}
-					this._latinStopwordIndex = index;
-				}
-				const words = (text || "").toLowerCase().match(/[a-zà-ÿ]+(?:['’][a-zà-ÿ]+)*/g) || [];
-				if (words.length < 5) return {languageId: null, confident: false, tokenCount: words.length};
-				const scores = Object.create(null);
-				const seen = Object.create(null);
-				for (const word of words) {
-					const langs = this._latinStopwordIndex[word];
-					if (!langs) continue;
-					for (const lang of langs) {
-						const key = lang + "|" + word;
-						if (seen[key]) continue;
-						seen[key] = 1;
-						scores[lang] = (scores[lang] || 0) + 1;
-					}
-				}
-				let best = null, bestScore = 0, runnerUp = 0;
-				for (const lang in scores) {
-					const score = scores[lang];
-					if (score > bestScore) { runnerUp = bestScore; bestScore = score; best = lang; }
-					else if (score > runnerUp) runnerUp = score;
-				}
-				// Conservative: only trust the call when one language clearly dominates.
-				// Uncertain cases fall through to translation so we never silently drop a real foreign message.
-				const confident = !!(best && bestScore >= 3 && bestScore >= 2 * runnerUp);
-				return {languageId: best, score: bestScore, runnerUp, tokenCount: words.length, confident};
+				return languageHeuristicsRuntime.identifyLatinLanguage(this, text);
 			}
 
 			detectMessageLanguageLocal (text, analysis, targetLanguageId) {
-				if (!analysis || !analysis.totalLetters) return {languageId: null, confident: false};
-				// Non-Latin scripts are already handled by script-family checks upstream; the local
-				// identifier only fills the Latin-vs-Latin gap where those checks bail out.
-				const targetFamilies = analysis.targetFamilies || this.getLanguageScriptFamilies(targetLanguageId);
-				if (!targetFamilies.length || targetFamilies[0] != "latin") return {languageId: null, confident: false};
-				if (analysis.dominantFamily != "latin") return {languageId: null, confident: false};
-				// Run on the raw masked text, not analysis.cleanedText: the sanitizer strips 1-3
-				// letter tokens, which are exactly the stopwords we score on.
-				return this.identifyLatinLanguage(text);
+				return languageHeuristicsRuntime.detectMessageLanguageLocal(this, text, analysis, targetLanguageId);
 			}
 
 			// Local high-confidence "this message is clearly a foreign language" check. Used by the
@@ -6195,24 +7235,7 @@ module.exports = (_ => {
 			// override the skip without any network call whenever the script family alone proves the
 			// message is foreign (e.g. Latin-script message with a Han/Cyrillic/Arabic target).
 			isClearlyForeignLanguageMessage (text, targetLanguageId) {
-				if (!text || !targetLanguageId || targetLanguageId == "auto") return false;
-				const targetLanguage = languages[targetLanguageId];
-				if (targetLanguage && targetLanguage.special) return false;
-				const targetFamilies = this.getLanguageScriptFamilies(targetLanguageId);
-				if (!targetFamilies.length) return false;
-				const targetFamily = targetFamilies[0];
-				const analysis = this.analyzeTextForAutoTranslate(text, targetLanguageId);
-				if (!analysis || !analysis.totalLetters) return false;
-				const dominant = analysis.dominantFamily;
-				if (!dominant) return false;
-				// Different script from the target with enough non-target letters = clearly foreign.
-				if (dominant != targetFamily && analysis.nonTargetLetterCount >= 6) return true;
-				// Same script (latin-vs-latin): confirm a different language via the stopword identifier.
-				if (targetFamily == "latin" && dominant == "latin") {
-					const detected = this.identifyLatinLanguage(text);
-					if (detected.confident && detected.languageId && !this.isSameLanguageOrVariant(detected.languageId, targetLanguageId)) return true;
-				}
-				return false;
+				return languageHeuristicsRuntime.isClearlyForeignLanguageMessage(this, text, targetLanguageId);
 			}
 
 			// Safety-net helper for received auto messages. Returns true when the message is foreign
@@ -6220,123 +7243,43 @@ module.exports = (_ => {
 			// to Google gtx detection (covers latin-vs-latin the local check cannot). If gtx is
 			// unreachable, the second tier resolves false so the caller honors the original skip.
 			isReceivedMessageForeignAsync (text, targetLanguageId, callback) {
-				if (this.isClearlyForeignLanguageMessage(text, targetLanguageId)) return callback(true);
-				if (!text || !targetLanguageId || targetLanguageId == "auto") return callback(false);
-				this.detectLanguage(text, detected => callback(!!detected && !this.isSameLanguageOrVariant(detected, targetLanguageId)));
+				return foreignLanguageDecisionRuntime.isReceivedMessageForeignAsync(this, text, targetLanguageId, callback);
 			}
 
 			isHanTargetMessageWithLatinTerms (analysis, targetLanguageId) {
-				if (!analysis || !analysis.totalLetters) return false;
-				const targetFamilies = analysis.targetFamilies || this.getLanguageScriptFamilies(targetLanguageId);
-				if (!targetFamilies.includes("han")) return false;
-				if (analysis.targetLetterCount < 2 || analysis.hanRunCount < 1) return false;
-				const latinCount = analysis.counts && analysis.counts.latin || 0;
-				const nonTargetNonLatinLetterCount = Math.max(0, analysis.nonTargetLetterCount - latinCount);
-				if (nonTargetNonLatinLetterCount > 0) return false;
-				if (!latinCount) return true;
-				if (analysis.latinWordCount > 3) return false;
-				return analysis.targetShare >= 0.18;
+				return languageHeuristicsRuntime.isHanTargetMessageWithLatinTerms(this, analysis, targetLanguageId);
 			}
 
 			isMostlyTargetLanguageMessage (analysis, targetLanguageId) {
-				if (!analysis || !analysis.totalLetters) return false;
-				const targetFamilies = analysis.targetFamilies || this.getLanguageScriptFamilies(targetLanguageId);
-				// Latin-script languages share the same script, so local script heuristics cannot safely
-				// tell English/French/Spanish apart. Let the translator or AI decision handle those.
-				if (!targetFamilies.length || targetFamilies[0] == "latin") return false;
-				if (this.isHanTargetMessageWithLatinTerms(analysis, targetLanguageId)) return true;
-				if (analysis.targetLetterCount >= 6 && analysis.targetShare >= 0.55) return true;
-				if (analysis.targetLetterCount >= 12 && analysis.targetShare >= 0.45 && analysis.nonTargetLetterCount <= Math.max(8, analysis.targetLetterCount * 0.8)) return true;
-				return !!analysis.strongTargetScriptMatch;
+				return languageHeuristicsRuntime.isMostlyTargetLanguageMessage(this, analysis, targetLanguageId);
 			}
 
 			isClearlyTargetLanguageMessage (analysis, targetLanguageId) {
-				if (!analysis || !analysis.totalLetters) return false;
-				const targetFamilies = analysis.targetFamilies || this.getLanguageScriptFamilies(targetLanguageId);
-				if (!targetFamilies.length || targetFamilies[0] == "latin") return false;
-				// Hard pre-check before sending received messages to a translator. This is intentionally
-				// stricter than the post-check but stronger than the old heuristic for CJK/Cyrillic/etc.
-				// It prevents target-language chat from being sent to AI and rewritten in the same language.
-				if (this.isHanTargetMessageWithLatinTerms(analysis, targetLanguageId)) return true;
-				if (analysis.targetLetterCount >= 3 && analysis.targetShare >= 0.82) return true;
-				if (analysis.targetLetterCount >= 6 && analysis.targetShare >= 0.68 && analysis.nonTargetLetterCount <= Math.max(3, Math.floor(analysis.targetLetterCount * 0.25))) return true;
-				if (analysis.targetLetterCount >= 12 && analysis.targetShare >= 0.6 && analysis.nonTargetLetterCount <= Math.max(6, Math.floor(analysis.targetLetterCount * 0.35))) return true;
-				return false;
+				return languageHeuristicsRuntime.isClearlyTargetLanguageMessage(this, analysis, targetLanguageId);
 			}
 
 			shouldSkipReceivedTranslationBeforeRequest (originalContentData, channelId) {
-				if (!originalContentData || !channelId) return false;
-				if (this.isLinkOnlyReceivedContent(originalContentData)) return true;
-				const targetLanguageId = this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId);
-				const targetLanguage = languages[targetLanguageId];
-				if (!targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special) return false;
-				const analysisSource = this.buildAutoTranslateAnalysisText(originalContentData);
-				if (!analysisSource || !analysisSource.hasUnprotectedContent) return false;
-				const analysis = this.analyzeTextForAutoTranslate(analysisSource.text, targetLanguageId);
-				return this.isClearlyTargetLanguageMessage(analysis, targetLanguageId);
+				return receivedMessageFilterRuntime.shouldSkipReceivedTranslationBeforeRequest(this, originalContentData, channelId);
 			}
 
 			isTranslationLikelyInTargetLanguage (text, targetLanguageId) {
-				targetLanguageId = this.normalizeLanguageId(targetLanguageId);
-				if (!text || !targetLanguageId || targetLanguageId == "auto") return true;
-				const targetLanguage = languages[targetLanguageId];
-				if (targetLanguage && targetLanguage.special) return true;
-				const targetFamilies = this.getLanguageScriptFamilies(targetLanguageId);
-				// Latin-script languages cannot be reliably distinguished by local script checks.
-				// Keep validation conservative and only block obvious non-Latin target mismatches.
-				if (!targetFamilies.length || targetFamilies[0] == "latin") return true;
-				const analysis = this.analyzeTextForAutoTranslate(text, targetLanguageId);
-				if (!analysis || !analysis.totalLetters) return true;
-				if (analysis.totalLetters < 4) return true;
-				if (analysis.targetLetterCount == 0 && analysis.nonTargetLetterCount >= 4) return false;
-				if (analysis.targetLetterCount >= 2 && analysis.targetShare >= 0.2) return true;
-				return analysis.targetLetterCount >= 4 || analysis.targetShare >= 0.35;
+				return languageHeuristicsRuntime.isTranslationLikelyInTargetLanguage(this, text, targetLanguageId);
 			}
 
 			buildAutoTranslateAnalysisText (originalContentData) {
-				const rawText = this.buildTranslationRequestText(originalContentData);
-				const [maskedText, , hasUnprotectedContent] = this.removeExceptions(rawText, messageTypes.RECEIVED);
-				return {text: maskedText || "", hasUnprotectedContent};
+				return receivedMessageFilterRuntime.buildAutoTranslateAnalysisText(this, originalContentData);
 			}
 
 			isLinkOnlyReceivedContent (originalContentData) {
-				if (!originalContentData) return false;
-				const content = (originalContentData.content || "").trim();
-				if (!content) return false;
-				const [maskedContent, , hasUnprotectedContent] = this.removeExceptions(content, messageTypes.RECEIVED);
-				if (hasUnprotectedContent) return false;
-				const counts = this.countScriptFamilies(maskedContent);
-				return !!maskedContent && Object.keys(counts).every(family => !counts[family]);
+				return receivedMessageFilterRuntime.isLinkOnlyReceivedContent(this, originalContentData);
 			}
 
 			normalizeComparisonText (text) {
-				text = (text || "").toLowerCase();
-				if (typeof text.normalize == "function") text = text.normalize("NFKC");
-				return text
-					.replace(/https?:\/\/\S+/gi, "")
-					.replace(/[`~!@#$%^&*()\-_=+\[\]{}\\|;:'",.<>/?，。！？；：“”‘’（）【】《》、…·]/g, "")
-					.replace(/\s+/g, "");
+				return textSimilarityRuntime.normalizeComparisonText(this, text);
 			}
 
 			getTextSimilarityScore (textA, textB) {
-				const normalizedA = this.normalizeComparisonText(textA);
-				const normalizedB = this.normalizeComparisonText(textB);
-				if (!normalizedA || !normalizedB) return 0;
-				if (normalizedA == normalizedB) return 1;
-				if (normalizedA.length < 2 || normalizedB.length < 2) return normalizedA == normalizedB ? 1 : 0;
-				const createBigrams = value => {
-					const bigrams = new Map();
-					for (let index = 0; index < value.length - 1; index++) {
-						const bigram = value.slice(index, index + 2);
-						bigrams.set(bigram, (bigrams.get(bigram) || 0) + 1);
-					}
-					return bigrams;
-				};
-				const bigramsA = createBigrams(normalizedA);
-				const bigramsB = createBigrams(normalizedB);
-				let overlap = 0;
-				for (const [bigram, count] of bigramsA.entries()) if (bigramsB.has(bigram)) overlap += Math.min(count, bigramsB.get(bigram));
-				return (2 * overlap) / (Math.max(1, normalizedA.length - 1) + Math.max(1, normalizedB.length - 1));
+				return textSimilarityRuntime.getTextSimilarityScore(this, textA, textB);
 			}
 
 			isSameLanguageOrVariant (languageA, languageB) {
@@ -6351,111 +7294,19 @@ module.exports = (_ => {
 			}
 
 			isTranslationResultTooSimilar (translation) {
-				if (!translation) return false;
-				const normalizedTranslation = this.normalizeStoredTranslationData(translation);
-				const originalContent = (normalizedTranslation.originalContent || "").trim();
-				const translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
-				if (!originalContent || !translatedContent) return false;
-				const normalizedOriginal = this.normalizeComparisonText(originalContent);
-				const normalizedTranslated = this.normalizeComparisonText(translatedContent);
-				if (!normalizedOriginal || !normalizedTranslated) return false;
-				if (normalizedOriginal == normalizedTranslated) return true;
-				return this.getTextSimilarityScore(originalContent, translatedContent) >= Math.max(0.92, this.getTranslationSimilarityThreshold());
+				return receivedMessageFilterRuntime.isTranslationResultTooSimilar(this, translation);
 			}
 
 			shouldKeepAutoTranslatedResult (translation, channelId) {
-				return !this.getAutoTranslatedResultRejectReason(translation, channelId);
+				return receivedMessageFilterRuntime.shouldKeepAutoTranslatedResult(this, translation, channelId);
 			}
 
 			shouldAutoTranslateReceivedMessage (message, channel, originalContentData = null, ignoreQueued = false) {
-				if (!channel || !channel.id || !message || !message.id) return false;
-				if (!this.isTranslationEnabled(channel.id) || !this.isReceivedAutoTranslationEnabled(channel.id) || this.isOwnMessage(message)) return false;
-				if (suppressedAutoTranslations[message.id]) return false;
-				if (translatedMessages[message.id] || !ignoreQueued && queuedAutoTranslations[message.id]) return false;
-				const sourceData = originalContentData || this.extractOriginalContentData(message);
-				if (this.getCachedReceivedSkipDecision(message, channel.id, sourceData)) return false;
-				if (this.isLinkOnlyReceivedContent(sourceData)) return false;
-				if (!this.hasTranslatableMessageContent(sourceData)) return false;
-				const analysisSource = this.buildAutoTranslateAnalysisText(sourceData);
-				if (!analysisSource.hasUnprotectedContent) return false;
-				const targetLanguageId = this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channel.id);
-				const analysis = this.analyzeTextForAutoTranslate(analysisSource.text, targetLanguageId);
-				if (!analysis.totalLetters) return false;
-				if (analysis.totalLetters < this.getAutoTranslateMinimumLengthForAnalysis(analysis)) return false;
-				if (this.isClearlyTargetLanguageMessage(analysis, targetLanguageId)) return false;
-				if (this.shouldSkipSameLanguageReceivedMessages() && this.isMostlyTargetLanguageMessage(analysis, targetLanguageId)) return false;
-				if (this.useLocalLanguagePrecheck()) {
-					// Latin-vs-Latin same-language and source-filter checks that script-family
-					// analysis cannot resolve locally, so we avoid a wasteful AI request. Only
-					// acts on high-confidence detections; uncertain text still goes to translation.
-					const localDetection = this.detectMessageLanguageLocal(analysisSource.text, analysis, targetLanguageId);
-					if (localDetection.confident && localDetection.languageId) {
-						if (this.isSameLanguageOrVariant(localDetection.languageId, targetLanguageId)) return false;
-						const sourceLanguages = this.getReceivedAutoTranslateSourceLanguages();
-						if (sourceLanguages.length && !this.matchesConfiguredSourceLanguage(localDetection.languageId, sourceLanguages)) return false;
-					}
-				}
-				return true;
+				return receivedMessageFilterRuntime.shouldAutoTranslateReceivedMessage(this, message, channel, originalContentData, ignoreQueued);
 			}
 
 			queueAutoTranslateMessage (message, channel, originalContentData = null, queueOptions = {}) {
-				const cachedTranslation = queueOptions.cachedTranslation || null;
-				if (!cachedTranslation && !this.shouldAutoTranslateReceivedMessage(message, channel, originalContentData)) return;
-				if (queueOptions.historicalLoad && !this.isMessageWithinLoadedRange(message)) return;
-				queuedAutoTranslations[message.id] = true;
-				const queueItem = {
-					message,
-					channel,
-					originalContentData: originalContentData || this.extractOriginalContentData(message),
-					historicalLoad: !!queueOptions.historicalLoad,
-					deferWhileReading: !!queueOptions.deferWhileReading,
-					cachedTranslation
-				};
-				if (queueItem.historicalLoad) {
-					const channelId = channel && channel.id || "__global";
-					if (!this.isTranslationEnabled(channelId) || !this.isReceivedAutoTranslationEnabled(channelId)) {
-						delete queuedAutoTranslations[message.id];
-						this.clearLoadedAutoTranslationStatus();
-						return;
-					}
-					if (loadedAutoTranslationAttemptedMessages[message.id] && !cachedTranslation) {
-						delete queuedAutoTranslations[message.id];
-						return;
-					}
-					if (!this.shouldContinueLoadedAutoTranslateOnScroll() && loadedAutoTranslationStatus.done && loadedAutoTranslationStatus.channelId == channelId) {
-						delete queuedAutoTranslations[message.id];
-						return;
-					}
-					if (historicalAutoTranslationBatchActive && !this.isHistoricalAutoTranslationSnapshotMessage(message.id, channelId)) {
-						delete queuedAutoTranslations[message.id];
-						return;
-					}
-					if (this.shouldContinueLoadedAutoTranslateOnScroll()) {
-						const currentScrollStamp = lastAutoTranslationUserScrollTime || 0;
-						if ((loadedAutoTranslationPassScrollStamps[channelId] || 0) < currentScrollStamp) {
-							loadedAutoTranslationPassCounts[channelId] = 0;
-							loadedAutoTranslationPassRequestCounts[channelId] = 0;
-							loadedAutoTranslationPassScrollStamps[channelId] = currentScrollStamp;
-						}
-					}
-					const loadedLimit = this.getReceivedAutoTranslateLoadedLimit();
-					const countsTowardRequestLimit = !cachedTranslation;
-					const currentRequestCount = loadedAutoTranslationPassRequestCounts[channelId] || 0;
-					if (countsTowardRequestLimit && currentRequestCount >= loadedLimit) {
-						delete queuedAutoTranslations[message.id];
-						return;
-					}
-					if (countsTowardRequestLimit) loadedAutoTranslationPassRequestCounts[channelId] = currentRequestCount + 1;
-					const currentPassCount = loadedAutoTranslationPassCounts[channelId] || 0;
-					loadedAutoTranslationPassCounts[channelId] = currentPassCount + 1;
-					autoTranslationQueue.push(queueItem);
-					this.updateLoadedAutoTranslationStatus({active: true, collecting: true, done: false, channelId, batch: (loadedAutoTranslationBatchNumbers[channelId] || 0) + 1, total: loadedAutoTranslationPassCounts[channelId], processed: historicalAutoTranslationBatchProcessedCount || 0});
-					this.scheduleHistoricalAutoTranslationStart();
-				}
-				else {
-					autoTranslationQueue.unshift(queueItem);
-					this.processAutoTranslationQueue();
-				}
+				return receivedTranslationRuntime.queueAutoTranslateMessage(this, message, channel, originalContentData, queueOptions);
 			}
 
 
@@ -6500,7 +7351,7 @@ module.exports = (_ => {
 			}
 
 			getHistoricalAiBatchEngineKey (channelId = null) {
-				const engineKey = this.settings && this.settings.engines && this.settings.engines.translator;
+				const engineKey = this.getEffectivePrimaryEngine(channelId);
 				if (!["deepseek", "oaicompat"].includes(engineKey)) return null;
 				const input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {});
 				const output = Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {});
@@ -6614,10 +7465,12 @@ module.exports = (_ => {
 					if (!queueItem) continue;
 					if (limit > 1) {
 						delete queueItem.forceSingle;
+						delete queueItem.forcePlainTranslation;
 						queueItem.aiBatchSizeLimit = limit;
 					}
 					else {
 						queueItem.forceSingle = true;
+						queueItem.forcePlainTranslation = true;
 						delete queueItem.aiBatchSizeLimit;
 					}
 					autoTranslationQueue.unshift(queueItem);
@@ -6625,240 +7478,11 @@ module.exports = (_ => {
 			}
 
 			processHistoricalAutoTranslationBatchChunk () {
-				if (isBackgroundTranslating || isTranslating) return false;
-				const channelId = historicalAutoTranslationBatchChannelId || loadedAutoTranslationStatus.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId() || "__global";
-				const engineKey = this.getHistoricalAiBatchEngineKey(channelId);
-				if (!engineKey) return false;
-				const input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {});
-				const output = Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {});
-				let requestItems = [], processedWithoutRequest = [], selectedIds = {}, charCount = 0;
-				const remainingQueue = [];
-				let activeBatchItemLimit = this.getHistoricalAiBatchItemLimit(channelId);
-				for (const queueItem of autoTranslationQueue) {
-					const itemChannelId = this.getHistoricalQueueItemChannelId(queueItem, channelId);
-					const eligible = queueItem && queueItem.historicalLoad && !queueItem.forceSingle && itemChannelId == channelId && this.isHistoricalAutoTranslationSnapshotMessage(queueItem.message && queueItem.message.id, channelId);
-					if (eligible && queueItem.aiBatchSizeLimit) activeBatchItemLimit = Math.max(1, Math.min(activeBatchItemLimit, queueItem.aiBatchSizeLimit));
-					if (!eligible || requestItems.length >= activeBatchItemLimit) {
-						remainingQueue.push(queueItem);
-						continue;
-					}
-					const prepared = this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
-					if (!prepared) {
-						remainingQueue.push(queueItem);
-						continue;
-					}
-					if (prepared.cachedTranslation || prepared.skipped) {
-						processedWithoutRequest.push(prepared);
-						selectedIds[queueItem.message.id] = true;
-						continue;
-					}
-					const nextCharCount = charCount + prepared.protectedText.length;
-					if (requestItems.length && nextCharCount > HISTORICAL_AI_BATCH_CHAR_LIMIT) {
-						remainingQueue.push(queueItem);
-						continue;
-					}
-					charCount = nextCharCount;
-					requestItems.push(prepared);
-					selectedIds[queueItem.message.id] = true;
-				}
-				autoTranslationQueue = remainingQueue;
-				const markProcessed = (queueItem, outcome = {}) => {
-					if (!queueItem || !queueItem.message) return;
-					delete queuedAutoTranslations[queueItem.message.id];
-					historicalAutoTranslationBatchProcessedCount++;
-					const statusUpdate = {active: true, collecting: false, done: false, channelId, batch: loadedAutoTranslationBatchNumbers[channelId] || loadedAutoTranslationStatus.batch || 1, total: historicalAutoTranslationBatchTotal || loadedAutoTranslationStatus.total || historicalAutoTranslationBatchProcessedCount, processed: historicalAutoTranslationBatchProcessedCount};
-					if (outcome.displayed) statusUpdate.displayed = (loadedAutoTranslationStatus.displayed || 0) + outcome.displayed;
-					if (outcome.skipped) statusUpdate.skipped = (loadedAutoTranslationStatus.skipped || 0) + outcome.skipped;
-					if (outcome.aiDropped) statusUpdate.aiDropped = (loadedAutoTranslationStatus.aiDropped || 0) + outcome.aiDropped;
-					if (outcome.reason) statusUpdate.lastSkipReason = outcome.reason;
-					if (outcome.preview) statusUpdate.lastSkipPreview = this.getLoadedAutoTranslationPreviewText(outcome.preview);
-					this.updateLoadedAutoTranslationStatus(statusUpdate);
-				};
-				for (const prepared of processedWithoutRequest) {
-					if (prepared.cachedTranslation) {
-						const storedCachedTranslation = Object.assign({channelId, auto: true}, prepared.cachedTranslation);
-						this.stageHistoricalAutoTranslationResult(prepared.queueItem.message, storedCachedTranslation, prepared.queueItem.originalContentData);
-					}
-					loadedAutoTranslationAttemptedMessages[prepared.queueItem.message.id] = channelId;
-					markProcessed(prepared.queueItem, prepared.cachedTranslation ? {displayed: 1} : {skipped: 1, reason: prepared.skipReason || "symbol_only", preview: prepared.skipPreview || this.buildTranslationRequestText(prepared.queueItem.originalContentData || prepared.originalContentData || {})});
-				}
-				if (!requestItems.length) {
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					this.processAutoTranslationQueue();
-					return true;
-				}
-				isBackgroundTranslating = true;
-				this.requestAiBatchTranslation(engineKey, requestItems).then(resultMap => {
-					if (!resultMap) {
-						// JSON parsing/API failure: retry the same selected messages with smaller AI batches, then single-message fallback.
-						this.requeueHistoricalAiBatchFallbackItems(requestItems);
-						isBackgroundTranslating = false;
-						return this.processAutoTranslationQueue();
-					}
-					const fallbackItems = [];
-					for (const item of requestItems) {
-						const messageId = String(item.message.id);
-						const hasReturnedId = Object.prototype.hasOwnProperty.call(resultMap, messageId);
-						const rawTranslation = hasReturnedId ? resultMap[messageId] : null;
-						if (!hasReturnedId || rawTranslation == null || String(rawTranslation).trim() === "") {
-							fallbackItems.push(item.queueItem);
-							continue;
-						}
-						if (this.isSkipTranslationSignal(rawTranslation)) {
-							loadedAutoTranslationAttemptedMessages[item.message.id] = channelId;
-							this.persistReceivedSkipDecision(item.message.id, item.signature, "ai_skip_signal", this.buildTranslationRequestText(item.originalContentData));
-							markProcessed(item.queueItem, {skipped: 1, aiDropped: 1, reason: "ai_skip_signal", preview: this.buildTranslationRequestText(item.originalContentData)});
-							continue;
-						}
-						let translatedText = String(rawTranslation).replace(/\[NEWLINE\]/g, "\n").trim();
-						translatedText = this.addExceptions(translatedText, item.exceptions);
-						if (!this.isTranslationLikelyInTargetLanguage(translatedText, item.output && item.output.id)) {
-							loadedAutoTranslationAttemptedMessages[item.message.id] = channelId;
-							markProcessed(item.queueItem, {skipped: 1, aiDropped: 1, reason: "wrong_target_language", preview: translatedText || this.buildTranslationRequestText(item.originalContentData)});
-							continue;
-						}
-						const storedTranslation = this.createStoredReceivedTranslationData(item.message, channelId, item.originalContentData, item.signature, translatedText, item.input, item.output, true);
-						if (storedTranslation && this.shouldKeepAutoTranslatedResult(storedTranslation, channelId) && !this.isTranslationResultTooSimilar(storedTranslation)) {
-							this.stageHistoricalAutoTranslationResult(item.message, storedTranslation, item.originalContentData);
-							this.persistTranslationCacheEntry(item.message.id, item.signature, storedTranslation);
-							loadedAutoTranslationAttemptedMessages[item.message.id] = channelId;
-							markProcessed(item.queueItem, {displayed: 1});
-						}
-						else if (storedTranslation) {
-							loadedAutoTranslationAttemptedMessages[item.message.id] = channelId;
-							const rejectReason = this.getAutoTranslatedResultRejectReason(storedTranslation, channelId) || "local_guard";
-							this.persistReceivedSkipDecision(item.message.id, item.signature, rejectReason, storedTranslation.originalContent || storedTranslation.translatedContent);
-							markProcessed(item.queueItem, {skipped: 1, aiDropped: 1, reason: rejectReason, preview: storedTranslation.originalContent || storedTranslation.translatedContent});
-						}
-						else fallbackItems.push(item.queueItem);
-					}
-					this.requeueHistoricalAiBatchFallbackItems(fallbackItems, fallbackItems.length > 1 ? this.getNextHistoricalAiBatchFallbackLimit(fallbackItems.length) : 1);
-					isBackgroundTranslating = false;
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					this.processAutoTranslationQueue();
-				}).catch(_ => {
-					this.requeueHistoricalAiBatchFallbackItems(requestItems);
-					isBackgroundTranslating = false;
-					this.processAutoTranslationQueue();
-				});
-				return true;
+				return receivedTranslationRuntime.processHistoricalAutoTranslationBatchChunk(this);
 			}
 
 			processAutoTranslationQueue () {
-				if (historicalAutoTranslationStartTimer) {
-					clearTimeout(historicalAutoTranslationStartTimer);
-					historicalAutoTranslationStartTimer = null;
-				}
-				if (loadedAutoTranslationStatus.active && loadedAutoTranslationStatus.collecting) this.updateLoadedAutoTranslationStatus({collecting: false});
-				if (isBackgroundTranslating || isTranslating) return;
-				if (Date.now() < (autoTranslationBackoffUntil || 0)) {
-					// Provider is rate-limited or erroring; wait out the backoff window before consuming more.
-					this.scheduleAutoTranslationQueueRetry();
-					return;
-				}
-				if (!autoTranslationQueue.length) {
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					if (!historicalAutoTranslationBatchActive && loadedAutoTranslationStatus && loadedAutoTranslationStatus.active && this.getReceivedAutoTranslateScope() == "loaded_messages") {
-						const channelId = loadedAutoTranslationStatus.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-						const total = Math.max(0, loadedAutoTranslationStatus.total || 0);
-						this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId, total, processed: Math.min(total, loadedAutoTranslationStatus.processed || 0)});
-					}
-					return;
-				}
-				this.sortAutoTranslationQueueForStableOrder();
-				const nextItem = autoTranslationQueue.shift();
-				if (!nextItem || !nextItem.message) {
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					return this.processAutoTranslationQueue();
-				}
-				if (nextItem.historicalLoad) {
-					const nextChannelId = nextItem.channel && nextItem.channel.id || loadedAutoTranslationStatus.channelId || "__global";
-					if (!this.isTranslationEnabled(nextChannelId) || !this.isReceivedAutoTranslationEnabled(nextChannelId)) {
-						delete queuedAutoTranslations[nextItem.message.id];
-						this.clearLoadedAutoTranslationStatus();
-						isBackgroundTranslating = false;
-						return this.processAutoTranslationQueue();
-					}
-				}
-				if (nextItem.historicalLoad && !historicalAutoTranslationBatchActive) {
-					historicalAutoTranslationBatchActive = true;
-					historicalAutoTranslationBatchProcessedCount = 0;
-					const snapshot = this.createHistoricalAutoTranslationBatchSnapshot(nextItem);
-					const channelId = snapshot.channelId;
-					loadedAutoTranslationBatchNumbers[channelId] = (loadedAutoTranslationBatchNumbers[channelId] || 0) + 1;
-					this.updateLoadedAutoTranslationStatus({active: true, collecting: false, done: false, channelId, batch: loadedAutoTranslationBatchNumbers[channelId], total: snapshot.total || 1, processed: 0, displayed: 0, skipped: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""});
-				}
-				if (nextItem.historicalLoad && !this.isMessageWithinLoadedRange(nextItem.message)) {
-					delete queuedAutoTranslations[nextItem.message.id];
-					historicalAutoTranslationBatchProcessedCount++;
-					this.updateLoadedAutoTranslationStatus({processed: historicalAutoTranslationBatchProcessedCount, skipped: (loadedAutoTranslationStatus.skipped || 0) + 1, lastSkipReason: "out_of_range", lastSkipPreview: this.getLoadedAutoTranslationPreviewText(this.buildTranslationRequestText(nextItem.originalContentData))});
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					return this.processAutoTranslationQueue();
-				}
-				if (nextItem.historicalLoad && this.shouldPauseHistoricalAutoTranslation()) {
-					autoTranslationQueue.unshift(nextItem);
-					this.scheduleAutoTranslationQueueRetry();
-					return;
-				}
-				if (nextItem.historicalLoad && !nextItem.forceSingle && this.getHistoricalAiBatchEngineKey(nextItem.channel && nextItem.channel.id || loadedAutoTranslationStatus.channelId || "__global")) {
-					autoTranslationQueue.unshift(nextItem);
-					if (this.processHistoricalAutoTranslationBatchChunk()) return;
-				}
-				if (nextItem.cachedTranslation) {
-					const channelId = nextItem.channel && nextItem.channel.id || loadedAutoTranslationStatus.channelId || "__global";
-					const storedCachedTranslation = Object.assign({channelId, auto: true}, nextItem.cachedTranslation);
-					if (nextItem.historicalLoad) {
-						this.stageHistoricalAutoTranslationResult(nextItem.message, storedCachedTranslation, nextItem.originalContentData);
-						loadedAutoTranslationAttemptedMessages[nextItem.message.id] = channelId;
-						historicalAutoTranslationBatchProcessedCount++;
-						this.updateLoadedAutoTranslationStatus({active: true, collecting: false, done: false, channelId, batch: loadedAutoTranslationBatchNumbers[channelId] || loadedAutoTranslationStatus.batch || 1, total: historicalAutoTranslationBatchTotal || loadedAutoTranslationStatus.total || historicalAutoTranslationBatchProcessedCount, processed: historicalAutoTranslationBatchProcessedCount, displayed: (loadedAutoTranslationStatus.displayed || 0) + 1});
-					}
-					else this.applyStoredTranslationToMessage(nextItem.message, storedCachedTranslation, nextItem.originalContentData);
-					delete queuedAutoTranslations[nextItem.message.id];
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					return this.processAutoTranslationQueue();
-				}
-				if (!this.shouldAutoTranslateReceivedMessage(nextItem.message, nextItem.channel, nextItem.originalContentData, true)) {
-					delete queuedAutoTranslations[nextItem.message.id];
-					if (nextItem.historicalLoad) {
-						loadedAutoTranslationAttemptedMessages[nextItem.message.id] = nextItem.channel && nextItem.channel.id || loadedAutoTranslationStatus.channelId || "__global";
-						historicalAutoTranslationBatchProcessedCount++;
-						this.updateLoadedAutoTranslationStatus({processed: historicalAutoTranslationBatchProcessedCount, skipped: (loadedAutoTranslationStatus.skipped || 0) + 1, lastSkipReason: this.getReceivedAutoTranslateSkipReason(nextItem.originalContentData, nextItem.channel && nextItem.channel.id || loadedAutoTranslationStatus.channelId || "__global") || "local_guard", lastSkipPreview: this.getLoadedAutoTranslationPreviewText(this.buildTranslationRequestText(nextItem.originalContentData))});
-					}
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					return this.processAutoTranslationQueue();
-				}
-				isBackgroundTranslating = true;
-				this.translateMessage(nextItem.message, nextItem.channel, {
-					auto: true,
-					silent: true,
-					trackBusy: false,
-					historicalLoad: !!nextItem.historicalLoad,
-					deferRerender: !!nextItem.historicalLoad,
-					stageResult: !!nextItem.historicalLoad,
-					originalContentData: nextItem.originalContentData
-				}).then(result => {
-					delete queuedAutoTranslations[nextItem.message.id];
-					if (nextItem.historicalLoad) {
-						const channelId = nextItem.channel && nextItem.channel.id || loadedAutoTranslationStatus.channelId || "__global";
-						if (result) loadedAutoTranslationAttemptedMessages[nextItem.message.id] = channelId;
-						historicalAutoTranslationBatchProcessedCount++;
-						this.updateLoadedAutoTranslationStatus({active: true, collecting: false, done: false, channelId, batch: loadedAutoTranslationBatchNumbers[channelId] || loadedAutoTranslationStatus.batch || 1, total: historicalAutoTranslationBatchTotal || loadedAutoTranslationStatus.total || historicalAutoTranslationBatchProcessedCount, processed: historicalAutoTranslationBatchProcessedCount, displayed: (loadedAutoTranslationStatus.displayed || 0) + (result ? 1 : 0), skipped: (loadedAutoTranslationStatus.skipped || 0) + (result ? 0 : 1), aiDropped: (loadedAutoTranslationStatus.aiDropped || 0) + (result ? 0 : 1), lastSkipReason: result ? loadedAutoTranslationStatus.lastSkipReason : "local_guard", lastSkipPreview: result ? loadedAutoTranslationStatus.lastSkipPreview : this.getLoadedAutoTranslationPreviewText(this.buildTranslationRequestText(nextItem.originalContentData))});
-					}
-					isBackgroundTranslating = false;
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					this.processAutoTranslationQueue();
-				}).catch(_ => {
-					delete queuedAutoTranslations[nextItem.message.id];
-					if (nextItem.historicalLoad) {
-						const channelId = nextItem.channel && nextItem.channel.id || loadedAutoTranslationStatus.channelId || "__global";
-						historicalAutoTranslationBatchProcessedCount++;
-						this.updateLoadedAutoTranslationStatus({active: true, collecting: false, done: false, channelId, batch: loadedAutoTranslationBatchNumbers[channelId] || loadedAutoTranslationStatus.batch || 1, total: historicalAutoTranslationBatchTotal || loadedAutoTranslationStatus.total || historicalAutoTranslationBatchProcessedCount, processed: historicalAutoTranslationBatchProcessedCount, skipped: (loadedAutoTranslationStatus.skipped || 0) + 1, aiDropped: (loadedAutoTranslationStatus.aiDropped || 0) + 1, lastSkipReason: "local_guard", lastSkipPreview: this.getLoadedAutoTranslationPreviewText(this.buildTranslationRequestText(nextItem.originalContentData))});
-					}
-					isBackgroundTranslating = false;
-					this.finishHistoricalAutoTranslationBatchIfDone();
-					this.processAutoTranslationQueue();
-				});
+				return receivedTranslationRuntime.processAutoTranslationQueue(this);
 			}
 		
 			forceUpdateAll () {
@@ -6868,37 +7492,25 @@ module.exports = (_ => {
 				authKeys = BDFDB.DataUtils.load(this, "authKeys");
 				channelLanguages = BDFDB.DataUtils.load(this, "channelLanguages");
 				guildLanguages = BDFDB.DataUtils.load(this, "guildLanguages");
+				channelPrimaryEngineOverrides = this.normalizeStoredChannelPrimaryEngineOverrides(BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides"));
 				translationCache = BDFDB.DataUtils.load(this, "translationCache");
 				translationCache = translationCache && typeof translationCache == "object" && !Array.isArray(translationCache) ? translationCache : {};
 				
-				translationEnabledStates = BDFDB.DataUtils.load(this, "translationEnabledStates");
-				translationEnabledStates = BDFDB.ArrayUtils.is(translationEnabledStates) ? translationEnabledStates : [];
-				receivedAutoTranslationEnabledStates = BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates");
-				receivedAutoTranslationEnabledStates = BDFDB.ArrayUtils.is(receivedAutoTranslationEnabledStates) ? receivedAutoTranslationEnabledStates : [].concat(translationEnabledStates);
-				autoTranslationQueue = [];
-				queuedAutoTranslations = {};
+				const storedTranslationEnabledStates = BDFDB.DataUtils.load(this, "translationEnabledStates");
+				const storedReceivedAutoTranslationEnabledStates = BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates");
+				const normalizedStoredTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedTranslationEnabledStates);
+				const normalizedStoredReceivedAutoTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedReceivedAutoTranslationEnabledStates);
+				translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates);
+				if (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) this.saveChannelEnablementState(translationEnabledStates);
 				suppressedAutoTranslations = {};
+				this.clearAutoTranslationQueue();
+				this.resetAutoTranslationTracking();
 				this.clearLoadedAutoTranslationStatus();
-				isBackgroundTranslating = false;
-				historicalAutoTranslationBatchActive = false;
-				historicalAutoTranslationBatchProcessedCount = 0;
-				historicalAutoTranslationBatchMessageIds = {};
-				historicalAutoTranslationBatchChannelId = null;
-				historicalAutoTranslationBatchTotal = 0;
-				this.clearHistoricalAutoTranslationStaging();
-				loadedAutoTranslationPassScrollStamps = {};
-				loadedAutoTranslationPassRequestCounts = {};
-				loadedAutoTranslationAttemptedMessages = {};
-				autoTranslationChannelStates = {};
+				isLiveAutoTranslating = false;
+				isHistoricalAutoTranslating = false;
 				replyPreviewTranslations = {};
-				queuedReplyPreviewTranslations = {};
-				lastAutoTranslationChannelId = null;
 				if (translationRerenderTimer) clearTimeout(translationRerenderTimer);
 				translationRerenderTimer = null;
-				if (autoTranslationQueueRetryTimer) clearTimeout(autoTranslationQueueRetryTimer);
-				autoTranslationQueueRetryTimer = null;
-				if (historicalAutoTranslationStartTimer) clearTimeout(historicalAutoTranslationStartTimer);
-				historicalAutoTranslationStartTimer = null;
 				if (deferredSettingsRerenderTimer) clearTimeout(deferredSettingsRerenderTimer);
 				deferredSettingsRerenderTimer = null;
 				
@@ -6926,7 +7538,7 @@ module.exports = (_ => {
 						action: _ => this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true})
 					}));
 					this.injectMessageLanguageActions(children, index > -1 ? index + 1 : 0, e.instance.props.message, e.instance.props.channel);
-					this.injectSearchItem(e, false);
+					this.injectSearchItem(e, false, e.instance.props.channel.id);
 				}
 			}
 			
@@ -6934,7 +7546,7 @@ module.exports = (_ => {
 				this.injectSearchItem(e, true);
 			}
 			
-			injectSearchItem (e, ownMessage) {
+			injectSearchItem (e, ownMessage, channelId = null) {
 				let text = document.getSelection().toString();
 				if (text) {
 					let translating, foundTranslation, foundInput, foundOutput, copied;
@@ -6985,7 +7597,7 @@ module.exports = (_ => {
 												createTooltip();
 											}
 											else createTooltip();
-										});
+										}, null, {channelId: channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId()});
 									}
 								}
 							}
@@ -6995,7 +7607,7 @@ module.exports = (_ => {
 			}
 			
 			processMessageButtons (e) {
-				if (!this.settings.general.addQuickTranslateButton || !e.instance.props.message || !e.instance.props.channel) return;
+				if (!e.instance.props.message || !e.instance.props.channel) return;
 				let [children, index] = BDFDB.ReactUtils.findParent(e.returnvalue, {props: [["className", BDFDB.disCN.messagebuttons]]});
 				if (index == -1) return;
 				const channelId = e.instance.props.channel && e.instance.props.channel.id || null;
@@ -7065,9 +7677,9 @@ module.exports = (_ => {
 									// Override the output language with the one from the prefix
 									output = {id: targetLanguage, name: languages[targetLanguage] ? languages[targetLanguage].name : targetLanguage};
 									
-									translation = this.shouldSendOriginalInsteadOfSentTranslation(cleanText, translation, input, output) ? cleanText : (this.settings.general.sendOriginalMessage ? (translation + this.formatOriginalTextForMessage(cleanText)) : translation);
+									translation = this.buildSentTranslationMessageValue(cleanText, translation, input, output);
 									e2.originalMethod(Object.assign({}, e2.methodArguments[0], {value: translation}));
-								}, targetLanguage);
+								}, targetLanguage, {channelId: e.instance.props.channel.id});
 							}, targetLanguage);
 							
 							return Promise.resolve({
@@ -7081,9 +7693,9 @@ module.exports = (_ => {
 							this.shouldAutoTranslateSentMessage(originalValue, e.instance.props.channel.id, shouldTranslate => {
 								if (!shouldTranslate) return e2.originalMethod(Object.assign({}, e2.methodArguments[0], {value: originalValue}));
 								this.translateText(originalValue, messageTypes.SENT, (translation, input, output) => {
-									translation = this.shouldSendOriginalInsteadOfSentTranslation(originalValue, translation, input, output) ? originalValue : (this.settings.general.sendOriginalMessage ? (translation + this.formatOriginalTextForMessage(originalValue)) : translation);
+									translation = this.buildSentTranslationMessageValue(originalValue, translation, input, output);
 									e2.originalMethod(Object.assign({}, e2.methodArguments[0], {value: translation}));
-								});
+								}, null, {channelId: e.instance.props.channel.id});
 							});
 							return Promise.resolve({
 								shouldClear: true,
@@ -7101,7 +7713,7 @@ module.exports = (_ => {
 			}
 			
 			processChannelTextAreaButtons (e) {
-				if (!this.settings.general.addTranslateButton || e.instance.props.disabled || e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.NORMAL && e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.SIDEBAR) return;
+				if (e.instance.props.disabled || e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.NORMAL && e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.SIDEBAR) return;
 				if (!e.returnvalue || !e.returnvalue.props) return;
 				let children = [].concat(e.returnvalue.props.children || []).filter(child => {
 					if (!child) return false;
@@ -7118,111 +7730,15 @@ module.exports = (_ => {
 			}
 
 			processMessages (e) {
-				e.instance.props.channelStream = [].concat(e.instance.props.channelStream);
-				const channel = e.instance.props.channel;
-				const channelId = channel && channel.id;
-				this.prepareAutoTranslationChannelSession(channelId);
-				const channelState = this.getAutoTranslationChannelState(channelId);
-				const shouldInitializeAutoTranslation = !!(channelId && this.isReceivedAutoTranslationEnabled(channelId) && channelState && !channelState.initialized);
-				const historicalLoadedPass = shouldInitializeAutoTranslation && this.getReceivedAutoTranslateScope() == "loaded_messages";
-				if (historicalLoadedPass) {
-					this.attachAutoTranslationScrollWatcher();
-					this.updateLoadedAutoTranslationStatus({active: true, collecting: true, done: false, channelId, batch: (loadedAutoTranslationBatchNumbers[channelId] || 0) + 1, total: 0, processed: 0, displayed: 0, skipped: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""});
-				}
-				const skipInitialLoadedMessages = shouldInitializeAutoTranslation && this.shouldDeferInitialAutoTranslate(channelId);
-				const autoTranslateBoundaryId = channelState ? channelState.boundaryMessageId : null;
-				let highestMessageId = autoTranslateBoundaryId;
-				for (let i in e.instance.props.channelStream) {
-					let message = e.instance.props.channelStream[i].content;
-					if (message) {
-						if (BDFDB.ArrayUtils.is(message.attachments)) {
-							highestMessageId = this.getNewestMessageId(highestMessageId, message.id);
-							this.checkMessage(e.instance.props.channelStream[i], message, channel, {
-								skipAutoQueue: skipInitialLoadedMessages,
-								autoTranslateBoundaryId,
-								historicalLoad: historicalLoadedPass
-							});
-						}
-						else if (BDFDB.ArrayUtils.is(message)) for (let j in message) {
-							let childMessage = message[j].content;
-							if (childMessage && BDFDB.ArrayUtils.is(childMessage.attachments)) {
-								highestMessageId = this.getNewestMessageId(highestMessageId, childMessage.id);
-								this.checkMessage(message[j], childMessage, channel, {
-									skipAutoQueue: skipInitialLoadedMessages,
-									autoTranslateBoundaryId,
-									historicalLoad: historicalLoadedPass
-								});
-							}
-						}
-					}
-				}
-				if (channelState) {
-					channelState.boundaryMessageId = this.getNewestMessageId(channelState.boundaryMessageId, highestMessageId);
-					if (shouldInitializeAutoTranslation) channelState.initialized = true;
-				}
-				if (historicalLoadedPass) {
-					const hasQueuedHistoricalForChannel = autoTranslationQueue.some(queueItem => queueItem && queueItem.historicalLoad && this.getHistoricalQueueItemChannelId(queueItem, channelId) == channelId);
-					if (!hasQueuedHistoricalForChannel && !historicalAutoTranslationBatchActive) this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId, batch: loadedAutoTranslationBatchNumbers[channelId] || loadedAutoTranslationStatus.batch || 1, total: loadedAutoTranslationPassCounts[channelId] || 0, processed: 0});
-				}
+				return receivedTranslationRuntime.processMessages(this, e);
 			}
-			
+
 			checkMessage (stream, message, channel, options = {}) {
-				if (!message || !stream || !stream.content) return;
-				const channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-				const originalContentData = this.extractOriginalContentData(message);
-				const expectedSignature = this.createReceivedTranslationSignature(message, channelId, originalContentData);
-				const skipAutoQueue = !!options.skipAutoQueue;
-				const channelState = this.getAutoTranslationChannelState(channelId);
-				const autoTranslateBoundaryId = options.autoTranslateBoundaryId != null ? options.autoTranslateBoundaryId : channelState && channelState.boundaryMessageId;
-				const isNewerThanBoundary = this.isMessageIdNewer(message.id, autoTranslateBoundaryId);
-				const hadDisplayedTranslation = !!translatedMessages[message.id];
-				let translation = this.getActiveMessageTranslation(message, channelId, expectedSignature);
-				let messageChanged = hadDisplayedTranslation && !translation;
-				const canAutoTranslateMessage = this.isTranslationEnabled(channelId) && this.isReceivedAutoTranslationEnabled(channelId) && !suppressedAutoTranslations[message.id];
-				const canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !skipAutoQueue && (options.historicalLoad ? this.isMessageWithinLoadedRange(message) : isNewerThanBoundary);
-				let cachedTranslation = null;
-				if (canAutoTranslateReplyPreviewForBase) this.markAutoTranslationEligibleReplyPreviewMessage(channelId, message.id);
-				if (!translation && canAutoTranslateMessage && !skipAutoQueue && (options.historicalLoad || messageChanged || isNewerThanBoundary)) {
-					cachedTranslation = this.getCachedReceivedTranslation(message, channelId, originalContentData);
-					if (cachedTranslation && !options.historicalLoad) translation = this.applyStoredTranslationToMessage(message, Object.assign({channelId, auto: true}, cachedTranslation), originalContentData);
-				}
-				if (translation) {
-					this.refreshTranslationDisplay(translation);
-					stream.content.content = translation.content;
-				}
-				else if (oldMessages[message.id]) {
-					// Restore the original stream content before dropping the snapshot.
-					stream.content.content = oldMessages[message.id].content;
-					delete oldMessages[message.id];
-					messageChanged = true;
-				}
-				if (!translation && !skipAutoQueue && canAutoTranslateMessage) {
-					if (channelState) channelState.boundaryMessageId = this.getNewestMessageId(channelState.boundaryMessageId, message.id);
-					if (messageChanged || isNewerThanBoundary || options.historicalLoad) {
-						const liveMessage = !options.historicalLoad && (isNewerThanBoundary || this.isLikelyLiveAutoTranslateMessage(message, channelId));
-						this.queueAutoTranslateMessage(message, channel || {id: channelId}, originalContentData, {
-							historicalLoad: !!options.historicalLoad && !liveMessage,
-							deferWhileReading: false,
-							cachedTranslation: !!options.historicalLoad && !liveMessage ? cachedTranslation : null
-						});
-					}
-				}
+				return receivedTranslationRuntime.checkMessage(this, stream, message, channel, options);
 			}
 
 			processMessageReply (e) {
-				if (!e.instance.props.referencedMessage || !e.instance.props.referencedMessage.message) return;
-				const referencedMessage = e.instance.props.referencedMessage.message;
-				const stableReferencedMessage = this.getStableReplyPreviewMessage(referencedMessage);
-				const channelId = this.getMessageChannelId(e.instance.props.baseMessage || stableReferencedMessage);
-				const fallbackContent = this.getReplyPreviewDisplayContentForMessage(stableReferencedMessage, channelId) || this.getReplyPreviewFallbackContent(stableReferencedMessage) || (stableReferencedMessage.content || "").trim();
-				e.instance.props.referencedMessage = Object.assign({}, e.instance.props.referencedMessage);
-				const previewMessage = new BDFDB.DiscordObjects.Message(stableReferencedMessage);
-				previewMessage.content = fallbackContent;
-				this.markReplyPreviewRenderMessage(previewMessage);
-				e.instance.props.referencedMessage.message = previewMessage;
-				if (e.returnvalue && e.returnvalue.props) {
-					e.returnvalue = this.wrapReplyPreviewJumpPause(this.stripTranslatorStylingFromReplyPreviewNode(e.returnvalue));
-				}
+				return translationDisplayLogic.processMessageReply(this, e);
 			}
 
 			processMessageContent (e) {
@@ -7234,155 +7750,186 @@ module.exports = (_ => {
 					e.returnvalue = this.stripTranslatorStylingFromReplyPreviewNode(e.returnvalue);
 					return;
 				}
-				const channelId = this.getMessageChannelId(message);
-				const hadDisplayedTranslation = !!translatedMessages[message.id];
-				let translation = this.getActiveMessageTranslation(message, channelId);
-				if (!translation && hadDisplayedTranslation) {
-					if (oldMessages[message.id]) {
-						e.instance.props.message = new BDFDB.DiscordObjects.Message(oldMessages[message.id]);
-						delete oldMessages[message.id];
-					}
-				}
-				if (!translation && this.getReceivedAutoTranslateScope() == "loaded_messages" && this.isTranslationEnabled(channelId) && this.isReceivedAutoTranslationEnabled(channelId) && !this.isOwnMessage(message) && !suppressedAutoTranslations[message.id] && !queuedAutoTranslations[message.id]) {
-					const originalContentData = this.extractOriginalContentData(message);
-					const cachedTranslation = this.getCachedReceivedTranslation(message, channelId, originalContentData);
-					const liveMessage = this.isLikelyLiveAutoTranslateMessage(message, channelId);
-					if (cachedTranslation && liveMessage) {
-						translation = this.applyStoredTranslationToMessage(message, Object.assign({channelId, auto: true}, cachedTranslation), originalContentData);
-					}
-					else if (cachedTranslation || this.shouldAutoTranslateReceivedMessage(message, {id: channelId}, originalContentData)) {
-						this.queueAutoTranslateMessage(message, {id: channelId}, originalContentData, {
-							historicalLoad: !liveMessage,
-							deferWhileReading: false,
-							cachedTranslation: !liveMessage ? cachedTranslation : null
-						});
-					}
-				}
-				let children = this.ensureElementChildrenArray(e.returnvalue);
-				this.cleanupInjectedMessageChildren(children);
-				const translationPlace = this.isOwnMessage(message) ? messageTypes.SENT : messageTypes.RECEIVED;
-				if (translation && this.shouldProtectWrappedTextForPlace(translationPlace)) {
-					e.returnvalue.props.children = this.highlightProtectedWrappedTextInNode(e.returnvalue.props.children, message.id);
-					children = this.ensureElementChildrenArray(e.returnvalue);
-				}
-				if (translation && this.settings.general.highlightTranslatedMessages) e.returnvalue.props.className = BDFDB.DOMUtils.formatClassName(e.returnvalue.props.className, "translator-translated-message");
-				if (translation) e.returnvalue.props.style = Object.assign({}, e.returnvalue.props.style, {
-					"--translator-accent-color": this.getTranslatedTextColor(),
-					"--translator-text-color": this.getTranslatedTextColor()
-				});
-				if (translation && translation.content) children.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
-					key: "translator-translated-watermark",
-					text: this.getTranslationTooltipText(translation.input, translation.output),
-					tooltipConfig: {style: "max-width: 400px"},
-					children: BDFDB.ReactUtils.createElement("span", {
-						className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.messagetimestamp, BDFDB.disCN.messagetimestampinline, BDFDB.disCN._translatortranslated),
-						children: BDFDB.ReactUtils.createElement("span", {
-							className: BDFDB.disCN.messageedited,
-							children: `(${this.labels.translated_watermark})`
-						})
-					})
-				}));
-				if (translation && translation.originalContent && this.settings.general.showOriginalMessage && this.settings.general.showOriginalDirectly && !translation.contentIncludesOriginal) children.push(this.createOriginalMessageBlock(translation.originalContent));
+				const {translation} = translationDisplayLogic.prepareMessageContentDisplay(this, e);
+				translationDisplayLogic.applyMessageContentRenderDecorations(this, e, message, translation);
 			}
 
 			processEmbed (e) {
-				if (!e.instance.props.embed || !e.instance.props.embed.message_id) return;
-				let translation = this.getActiveMessageTranslation({id: e.instance.props.embed.message_id}, this.getDisplayedTranslationChannelId(e.instance.props.embed.message_id));
-				if (translation && Object.keys(translation.embeds).length) {
-					if (!e.returnvalue) e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
-						rawDescription: translation.embeds[e.instance.props.embed.id].description,
-						rawTitle: translation.embeds[e.instance.props.embed.id].title,
-						footer: Object.assign({}, e.instance.props.embed.footer || {}, {
-							text: translation.embeds[e.instance.props.embed.id].footerText || ""
-						}),
-						fields: translation.embeds[e.instance.props.embed.id].fields.map(n => ({ rawName: n.name, rawValue: n.value })),
-						originalDescription: e.instance.props.embed.originalDescription || e.instance.props.embed.rawDescription,
-						originalTitle: e.instance.props.embed.originalTitle || e.instance.props.embed.rawTitle,
-						originalFields: e.instance.props.embed.originalFields || e.instance.props.embed.fields,
-						originalFooter: e.instance.props.embed.originalFooter || Object.assign({}, e.instance.props.embed.footer)
-					});
-					else {
-						let [children, index] = BDFDB.ReactUtils.findParent(e.returnvalue, { props: [["className", BDFDB.disCN.embeddescription]] });
-						if (index > -1) {
-							// Ensure children[index].props.children is an array before attempting to push
-							// Fix for errors on multiple embeds in single messages
-							if (!Array.isArray(children[index].props.children)) {
-								children[index].props.children = [children[index].props.children];
-							}
-							this.cleanupInjectedMessageChildren(children[index].props.children);
-
-							children[index].props.children.push(
-								BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
-									key: "translator-embed-watermark",
-									text: this.getTranslationTooltipText(translation.input, translation.output),
-									tooltipConfig: { style: "max-width: 400px" },
-									children: BDFDB.ReactUtils.createElement("span", {
-										className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.messagetimestamp, BDFDB.disCN.messagetimestampinline, BDFDB.disCN._translatortranslated),
-										children: BDFDB.ReactUtils.createElement("span", {
-											className: BDFDB.disCN.messageedited,
-											children: `(${this.labels.translated_watermark})`
-										})
-									})
-								})
-							);
-						}
-					}
-				}
-				else if (!e.returnvalue && e.instance.props.embed.originalDescription) {
-					e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
-						rawDescription: e.instance.props.embed.originalDescription,
-						rawTitle: e.instance.props.embed.originalTitle,
-						fields: e.instance.props.embed.originalFields,
-						footer: e.instance.props.embed.originalFooter
-					});
-					delete e.instance.props.embed.originalDescription;
-					delete e.instance.props.embed.originalTitle;
-					delete e.instance.props.embed.originalFields;
-					delete e.instance.props.embed.originalFooter;
-				}
+				return translationDisplayLogic.processEmbed(this, e);
 			}
-			
-			getTranslationStateKey (channelId) {
-				return this.settings.general.usePerChatTranslation ? channelId : "global";
+
+			normalizeStoredChannelPrimaryEngineOverrides (overrides) {
+				if (!overrides || typeof overrides != "object" || Array.isArray(overrides)) return {};
+				const normalizedOverrides = {};
+				for (const channelId in overrides) {
+					const engineKey = overrides[channelId];
+					if (!channelId || typeof engineKey != "string" || !translationEngines[engineKey]) continue;
+					normalizedOverrides[channelId] = engineKey;
+				}
+				return normalizedOverrides;
+			}
+
+			getGlobalPrimaryEngine () {
+				const engineKey = this.settings && this.settings.engines && this.settings.engines.translator;
+				return translationEngines[engineKey] ? engineKey : Object.keys(translationEngines)[0];
+			}
+
+			getEffectivePrimaryEngine (channelId = null) {
+				if (channelId && translationEngines[channelPrimaryEngineOverrides[channelId]]) return channelPrimaryEngineOverrides[channelId];
+				return this.getGlobalPrimaryEngine();
+			}
+
+			getEffectiveBackupEngine (channelId = null) {
+				const backupEngineKey = this.settings && this.settings.engines && this.settings.engines.backup;
+				if (!translationEngines[backupEngineKey] || backupEngineKey == this.getEffectivePrimaryEngine(channelId)) return "----";
+				return backupEngineKey;
+			}
+
+			isEngineConfiguredForRuntime (engineKey) {
+				if (!["microsoft", "googlecloud", "deepl", "deepseek", "oaicompat"].includes(engineKey)) return true;
+				return !!(authKeys[engineKey] && authKeys[engineKey].key);
+			}
+
+			engineSupportsLanguage (engineKey, language) {
+				const engine = translationEngines[engineKey];
+				if (!engine || !language) return false;
+				if (language.special) return true;
+				if (language.auto) return !!engine.auto;
+				return engine.languages.includes(language.id);
+			}
+
+			engineSupportsLanguagePair (engineKey, input, output) {
+				if (output && output.special) return true;
+				return this.engineSupportsLanguage(engineKey, input) && this.engineSupportsLanguage(engineKey, output);
+			}
+
+			hasChannelPrimaryEngineOverride (channelId) {
+				return !!channelId && Object.prototype.hasOwnProperty.call(channelPrimaryEngineOverrides, channelId) && !!translationEngines[channelPrimaryEngineOverrides[channelId]];
+			}
+
+			saveChannelPrimaryEngineOverrides () {
+				BDFDB.DataUtils.save(channelPrimaryEngineOverrides, this, "channelPrimaryEngineOverrides");
+			}
+
+			setChannelPrimaryEngine (channelId, engineKey) {
+				if (!channelId || !translationEngines[engineKey]) return false;
+				channelPrimaryEngineOverrides[channelId] = engineKey;
+				this.saveChannelPrimaryEngineOverrides();
+				return true;
+			}
+
+			clearChannelPrimaryEngineOverride (channelId) {
+				if (!channelId || !Object.prototype.hasOwnProperty.call(channelPrimaryEngineOverrides, channelId)) return false;
+				delete channelPrimaryEngineOverrides[channelId];
+				this.saveChannelPrimaryEngineOverrides();
+				return true;
+			}
+
+			refreshChannelPrimaryEngineRuntime (channelId) {
+				if (!channelId) return;
+				this.clearDisplayedAutoTranslations(channelId);
+				this.clearAutoTranslationQueue(channelId);
+				this.resetAutoTranslationTracking(channelId);
+				this.scheduleTranslationRerender();
+				this.processAutoTranslationQueue();
+			}
+
+			createEmptyChannelEnablementState (globalDefault = false) {
+				return {
+					globalDefault: !!globalDefault,
+					channelOverrides: {}
+				};
+			}
+
+			normalizeStoredChannelEnablementState (state) {
+				if (!state || typeof state != "object" || Array.isArray(state)) return null;
+				const normalizedState = this.createEmptyChannelEnablementState(state.globalDefault);
+				const overrides = state.channelOverrides;
+				if (!overrides || typeof overrides != "object" || Array.isArray(overrides)) return normalizedState;
+				for (const channelId in overrides) {
+					if (!channelId) continue;
+					if (typeof overrides[channelId] != "boolean") continue;
+					normalizedState.channelOverrides[channelId] = overrides[channelId];
+				}
+				return normalizedState;
+			}
+
+			migrateLegacyChannelEnablementState (stateKeys) {
+				const normalizedState = this.createEmptyChannelEnablementState(false);
+				for (const stateKey of stateKeys || []) {
+					if (typeof stateKey != "string" || !stateKey || stateKey == "global") continue;
+					normalizedState.channelOverrides[stateKey] = true;
+				}
+				return normalizedState;
+			}
+
+			loadChannelEnablementState (primaryStoredState, secondaryStoredState) {
+				const normalizedPrimaryState = this.normalizeStoredChannelEnablementState(primaryStoredState) || (BDFDB.ArrayUtils.is(primaryStoredState) ? this.migrateLegacyChannelEnablementState(primaryStoredState) : null);
+				const normalizedSecondaryState = this.normalizeStoredChannelEnablementState(secondaryStoredState) || (BDFDB.ArrayUtils.is(secondaryStoredState) ? this.migrateLegacyChannelEnablementState(secondaryStoredState) : null);
+				return {
+					globalDefault: false,
+					channelOverrides: Object.assign({}, normalizedSecondaryState && normalizedSecondaryState.channelOverrides, normalizedPrimaryState && normalizedPrimaryState.channelOverrides)
+				};
+			}
+
+			getChannelEnablementStateValue (channelId, state) {
+				const normalizedState = this.normalizeStoredChannelEnablementState(state) || this.createEmptyChannelEnablementState(false);
+				if (channelId && Object.prototype.hasOwnProperty.call(normalizedState.channelOverrides, channelId)) return normalizedState.channelOverrides[channelId];
+				return normalizedState.globalDefault;
+			}
+
+			channelEnablementStatesEqual (leftState, rightState) {
+				const normalizedLeftState = this.normalizeStoredChannelEnablementState(leftState) || this.createEmptyChannelEnablementState(false);
+				const normalizedRightState = this.normalizeStoredChannelEnablementState(rightState) || this.createEmptyChannelEnablementState(false);
+				if (normalizedLeftState.globalDefault != normalizedRightState.globalDefault) return false;
+				const leftChannelIds = Object.keys(normalizedLeftState.channelOverrides);
+				const rightChannelIds = Object.keys(normalizedRightState.channelOverrides);
+				if (leftChannelIds.length != rightChannelIds.length) return false;
+				for (const channelId of leftChannelIds) if (normalizedLeftState.channelOverrides[channelId] != normalizedRightState.channelOverrides[channelId]) return false;
+				return true;
+			}
+
+			saveChannelEnablementState (nextState) {
+				translationEnabledStates = nextState;
+				BDFDB.DataUtils.save(nextState, this, "translationEnabledStates");
+				BDFDB.DataUtils.save(nextState, this, "receivedAutoTranslationEnabledStates");
+			}
+
+			setChannelEnablementStateValue (channelId, enabled) {
+				const currentState = this.normalizeStoredChannelEnablementState(translationEnabledStates) || this.createEmptyChannelEnablementState(false);
+				const nextState = {
+					globalDefault: false,
+					channelOverrides: Object.assign({}, currentState.channelOverrides)
+				};
+				if (!channelId) return currentState;
+				if (enabled == nextState.globalDefault) delete nextState.channelOverrides[channelId];
+				else nextState.channelOverrides[channelId] = !!enabled;
+				this.saveChannelEnablementState(nextState);
+				return nextState;
 			}
 
 			toggleTranslation (channelId) {
 				const wasEnabled = this.isTranslationEnabled(channelId);
-				const stateKey = this.getTranslationStateKey(channelId);
-				if (!wasEnabled) translationEnabledStates.push(stateKey);
-				else BDFDB.ArrayUtils.remove(translationEnabledStates, stateKey, true);
-				BDFDB.DataUtils.save(translationEnabledStates, this, "translationEnabledStates");
+				this.setChannelEnablementStateValue(channelId, !wasEnabled);
 				if (wasEnabled) {
-					const targetChannelId = this.settings.general.usePerChatTranslation ? channelId : null;
-					this.clearDisplayedAutoTranslations(targetChannelId);
-					this.clearAutoTranslationQueue(targetChannelId);
+					this.clearDisplayedAutoTranslations(channelId);
+					this.clearAutoTranslationQueue(channelId);
 				}
-				this.resetAutoTranslationTracking();
+				this.resetAutoTranslationTracking(channelId);
 				this.scheduleTranslationRerender();
 				this.processAutoTranslationQueue();
 			}
 			
 			isTranslationEnabled (channelId) {
-				return translationEnabledStates.includes(this.getTranslationStateKey(channelId));
+				return this.getChannelEnablementStateValue(channelId, translationEnabledStates);
 			}
 
 			toggleReceivedAutoTranslation (channelId) {
-				const wasEnabled = this.isReceivedAutoTranslationEnabled(channelId);
-				const stateKey = this.getTranslationStateKey(channelId);
-				if (!wasEnabled) receivedAutoTranslationEnabledStates.push(stateKey);
-				else BDFDB.ArrayUtils.remove(receivedAutoTranslationEnabledStates, stateKey, true);
-				BDFDB.DataUtils.save(receivedAutoTranslationEnabledStates, this, "receivedAutoTranslationEnabledStates");
-				if (wasEnabled) {
-					this.clearDisplayedAutoTranslations(this.settings.general.usePerChatTranslation ? channelId : null);
-					this.clearAutoTranslationQueue(this.settings.general.usePerChatTranslation ? channelId : null);
-				}
-				this.resetAutoTranslationTracking();
-				this.scheduleTranslationRerender();
-				this.processAutoTranslationQueue();
+				return this.toggleTranslation(channelId);
 			}
 
 			isReceivedAutoTranslationEnabled (channelId) {
-				return receivedAutoTranslationEnabledStates.includes(this.getTranslationStateKey(channelId));
+				return this.isTranslationEnabled(channelId);
 			}
 
 			setLanguages () {
@@ -7390,11 +7937,9 @@ module.exports = (_ => {
 					this.settings.engines.backup = Object.keys(translationEngines).filter(n => n != this.settings.engines.translator)[0];
 					BDFDB.DataUtils.save(this.settings.engines, this, "engines");
 				}
-				let engine = translationEngines[this.settings.engines.translator] || {};
-				let backup = translationEngines[this.settings.engines.backup] || {};
-				let languageIds = [].concat(engine.languages, backup.languages).flat(10).filter(n => n);
+				let languageIds = Object.values(translationEngines).reduce((ids, translationEngine) => ids.concat(translationEngine.languages || []), []);
 				languages = BDFDB.ObjectUtils.deepAssign(
-					!engine.auto && !backup.auto ? {} : {
+					!Object.values(translationEngines).some(translationEngine => translationEngine.auto) ? {} : {
 						auto: {
 							auto: true,
 							name: this.labels.detect_language,
@@ -7613,70 +8158,35 @@ module.exports = (_ => {
 			}
 
 			getAutoTranslateSourceLanguages () {
-				const sourceLanguages = this.settings.filters && BDFDB.ArrayUtils.is(this.settings.filters.autoTranslateSourceLanguages) ? this.settings.filters.autoTranslateSourceLanguages : [];
-				return [...new Set(sourceLanguages.filter(languageId => languages[languageId] && !languages[languageId].auto && !languages[languageId].special))];
+				return languagePolicy.getConcreteConfiguredLanguages(this, "autoTranslateSourceLanguages");
 			}
 
 			normalizeLanguageId (languageId) {
-				return (languageId || "").toLowerCase();
+				return languagePolicy.normalizeLanguageId(this, languageId);
 			}
 
 			matchesConfiguredSourceLanguage (languageId, sourceLanguages = null) {
-				if (!languageId) return false;
-				const normalizedLanguageId = this.normalizeLanguageId(languageId);
-				const normalizedSourceLanguages = (sourceLanguages || this.getAutoTranslateSourceLanguages()).map(sourceLanguage => this.normalizeLanguageId(sourceLanguage));
-				return normalizedSourceLanguages.some(sourceLanguage => sourceLanguage == normalizedLanguageId || sourceLanguage.startsWith(`${normalizedLanguageId}-`) || normalizedLanguageId.startsWith(`${sourceLanguage}-`));
+				return languagePolicy.matchesConfiguredSourceLanguage(this, languageId, sourceLanguages);
 			}
 
 			detectLanguage (text, callback) {
-				let [newText, , translate] = this.removeExceptions((text || "").trim(), messageTypes.SENT);
-				if (!translate || !newText) return callback(null);
-				BDFDB.LibraryRequires.request("https://translate.googleapis.com/translate_a/single", {
-					form: {
-						"client": "gtx",
-						"dt": "t",
-						"dj": "1",
-						"source": "input",
-						"sl": "auto",
-						"tl": "en",
-						"q": encodeURIComponent(newText)
-					}
-				}, (error, response, body) => {
-					if (!error && body && response.statusCode == 200) {
-						try {callback((JSON.parse(body) || {}).src || null);}
-						catch (err) {callback(null);}
-					}
-					else callback(null);
-				});
+				return languageDetectionRuntime.detectLanguage(this, text, callback);
 			}
 
 			shouldSkipSentTranslationForSameTarget (text, channelId, forcedOutputLanguage = null, callback) {
-				const targetLanguageId = forcedOutputLanguage || this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.SENT, channelId);
-				const targetLanguage = targetLanguageId && languages[targetLanguageId];
-				if (!targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special) return callback(false, null);
-				const configuredInputLanguage = this.getLanguageChoice(languageTypes.INPUT, messageTypes.SENT, channelId);
-				if (configuredInputLanguage && configuredInputLanguage != "auto") return callback(this.isSameLanguageOrVariant(configuredInputLanguage, targetLanguageId), configuredInputLanguage);
-				const analysis = this.analyzeTextForAutoTranslate(text, targetLanguageId);
-				if (this.isMostlyTargetLanguageMessage(analysis, targetLanguageId)) return callback(true, targetLanguageId);
-				this.detectLanguage(text, detectedLanguage => callback(!!detectedLanguage && this.isSameLanguageOrVariant(detectedLanguage, targetLanguageId), detectedLanguage));
+				return sentTranslationPolicy.shouldSkipSentTranslationForSameTarget(this, text, channelId, forcedOutputLanguage, callback);
 			}
 
 			shouldSendOriginalInsteadOfSentTranslation (originalText, translation, input, output) {
-				if (!translation) return true;
-				if (input && output && input.id && output.id && this.isSameLanguageOrVariant(input.id, output.id)) return true;
-				return this.getTextSimilarityScore(originalText, translation) >= Math.max(0.94, this.getTranslationSimilarityThreshold());
+				return sentTranslationPolicy.shouldSendOriginalInsteadOfSentTranslation(this, originalText, translation, input, output);
+			}
+
+			buildSentTranslationMessageValue (originalText, translation, input, output) {
+				return sentTranslationPolicy.buildSentTranslationMessageValue(this, originalText, translation, input, output);
 			}
 
 			shouldAutoTranslateSentMessage (text, channelId, callback, forcedOutputLanguage = null) {
-				this.shouldSkipSentTranslationForSameTarget(text, channelId, forcedOutputLanguage, (sameLanguage, detectedLanguage) => {
-					if (sameLanguage) return callback(false);
-					const sourceLanguages = this.getAutoTranslateSourceLanguages();
-					if (!sourceLanguages.length) return callback(true);
-					const configuredInputLanguage = this.getLanguageChoice(languageTypes.INPUT, messageTypes.SENT, channelId);
-					if (configuredInputLanguage && configuredInputLanguage != "auto") return callback(this.matchesConfiguredSourceLanguage(configuredInputLanguage, sourceLanguages));
-					if (detectedLanguage) return callback(this.matchesConfiguredSourceLanguage(detectedLanguage, sourceLanguages));
-					this.detectLanguage(text, detectedLanguageId => callback(this.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages)));
-				});
+				return sentTranslationPolicy.shouldAutoTranslateSentMessage(this, text, channelId, callback, forcedOutputLanguage);
 			}
 
 			translateMessage (message, channel, options = {}) {
@@ -7697,7 +8207,12 @@ module.exports = (_ => {
 						callback(false);
 					}
 					else {
-						if (options.auto && !this.isReceivedAutoTranslationEnabled(channelId)) return callback(false);
+						if (options.auto && !this.isTranslationEnabled(channelId)) return callback(false);
+						const rerenderOptions = {
+							batched: options.auto || options.silent,
+							deferHistorical: !!options.deferRerender,
+							allowWhileTyping: !!options.auto && !options.historicalLoad && !options.deferRerender
+						};
 						const originalContentData = options.originalContentData || this.extractOriginalContentData(message, {ignoreReferencedPreview: isManualTranslation});
 						if (!this.hasTranslatableMessageContent(originalContentData)) return callback(false);
 						const shouldStageResult = !!(options.stageResult || options.historicalLoad || options.deferRerender);
@@ -7720,14 +8235,14 @@ module.exports = (_ => {
 								return callback(true);
 							}
 							this.applyStoredTranslationToMessage(message, storedCachedTranslation, originalContentData);
-							this.scheduleTranslationRerender({batched: options.auto || options.silent, deferHistorical: !!options.deferRerender});
+							this.scheduleTranslationRerender(rerenderOptions);
 							return callback(true);
 						}
 						const allTextsToTranslate = this.buildTranslationRequestText(originalContentData);
 						message.embeds.forEach(embed => embed.message_id = message.id);
 						let embedIds = message.embeds.map(embed => embed.id);
 						this.translateText(allTextsToTranslate, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
-							if (options.auto && !this.isReceivedAutoTranslationEnabled(channelId)) return callback(false);
+							if (options.auto && !this.isTranslationEnabled(channelId)) return callback(false);
 							if (translation) {
 								let strings = translation.split(/\n{0,1}__________________ __________________ __________________\n{0,1}/);
 								let oldContent = (originalContentData.content || "").trim();
@@ -7769,7 +8284,7 @@ module.exports = (_ => {
 								if (shouldStageResult) this.stageHistoricalAutoTranslationResult(message, storedTranslation, originalContentData);
 								else {
 									this.applyStoredTranslationToMessage(message, storedTranslation, originalContentData);
-									this.scheduleTranslationRerender({batched: options.auto || options.silent, deferHistorical: !!options.deferRerender});
+									this.scheduleTranslationRerender(rerenderOptions);
 								}
 								this.persistTranslationCacheEntry(message.id, signature, storedTranslation);
 							}
@@ -7781,6 +8296,7 @@ module.exports = (_ => {
 							showToast: !options.silent,
 							showFailureToast: !options.silent,
 							trackBusy: options.trackBusy !== false,
+							forcePlainTranslation: !!options.forcePlainTranslation,
 							channelId
 						});
 					}
@@ -7799,9 +8315,9 @@ module.exports = (_ => {
 					// is never dropped to an AI misjudgement. Runs before the cleanup guards so the
 					// translating state stays live.
 					const isSkip = this.isSkipTranslationSignal(translation);
-					if (!isSkip && translation) translation = this.addExceptions(translation, excepts);
+					if (!isSkip && translation) translation = this.addExceptions(translation, protectedSegments);
 					const wrongTarget = !isSkip && !!translation && !this.isTranslationLikelyInTargetLanguage(translation, output && output.id);
-					if (!finished && !retriedAfterSkip && skipSafetyNetHandler && (isSkip || wrongTarget) && options.auto && place == messageTypes.RECEIVED && this.useLocalLanguagePrecheck() && this.shouldUseAiAutoTranslateDecision()) {
+					if (!finished && !retriedAfterSkip && skipSafetyNetHandler && (isSkip || wrongTarget) && options.auto && place == messageTypes.RECEIVED && this.useLocalLanguagePrecheck() && this.shouldUseAiAutoTranslateDecision(channelId)) {
 						retriedAfterSkip = true;
 						skipSafetyNetHandler(translation);
 						return;
@@ -7812,13 +8328,19 @@ module.exports = (_ => {
 
 					if (finished) return;
 					finished = true;
-					if (isSkip) return callback("", input, output, {skipped: true});
-					if (translation && wrongTarget) return callback("", input, output, {failed: true, wrongTargetLanguage: true});
-					callback(translation == text ? "" : translation, input, output, {failed: !translation});
+					const complete = (...args) => {
+						callback(...args);
+						if (trackBusy) this.processAutoTranslationQueue();
+					};
+					if (isSkip) return complete("", input, output, {skipped: true});
+					if (translation && wrongTarget) return complete("", input, output, {failed: true, wrongTargetLanguage: true});
+					complete(translation == text ? "" : translation, input, output, {failed: !translation});
 				};
 				// Bottom-layer protection is shared by AI and traditional engines: only protected placeholders are sent for mentions/emoji/links/code.
-				let [newText, excepts, translate] = this.removeExceptions(text.trim(), place);
+				let [newText, protectedSegments, translate] = this.removeExceptions(text.trim(), place);
 				let channelId = options.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+				const primaryEngineKey = this.getEffectivePrimaryEngine(channelId);
+				const backupEngineKey = this.getEffectiveBackupEngine(channelId);
 				let input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, place, channelId)]);
 				let output = forcedOutputLanguage ? 
 					Object.assign({}, languages[forcedOutputLanguage] || {id: forcedOutputLanguage, name: forcedOutputLanguage}) : 
@@ -7869,19 +8391,19 @@ module.exports = (_ => {
 						const aiPrompt = this.getAiAutoTranslatePrompt({input, output});
 						const dispatchEngine = useAutoDecision => {
 							const aiDecisionFor = engineKey => !!useAutoDecision && this.supportsAiAutoTranslateDecisionEngine(engineKey);
-							if (this.validTranslator(this.settings.engines.translator, input, output, specialCase)) {
-								startTranslating(this.settings.engines.translator);
-								this[translationEngines[this.settings.engines.translator].funcName].apply(this, [{input, output, text: newText, specialCase, engine: translationEngines[this.settings.engines.translator], autoDecision: aiDecisionFor(this.settings.engines.translator), decisionPrompt: aiPrompt}, translation => {
-									if (!translation && this.validTranslator(this.settings.engines.backup, input, output, specialCase)) {
-										startTranslating(this.settings.engines.backup);
-										this[translationEngines[this.settings.engines.backup].funcName].apply(this, [{input, output, text: newText, specialCase, engine: translationEngines[this.settings.engines.backup], autoDecision: aiDecisionFor(this.settings.engines.backup), decisionPrompt: aiPrompt}, finishTranslation]);
+							if (this.validTranslator(primaryEngineKey, input, output, specialCase)) {
+								startTranslating(primaryEngineKey);
+								this[translationEngines[primaryEngineKey].funcName].apply(this, [{input, output, text: newText, specialCase, engine: translationEngines[primaryEngineKey], autoDecision: aiDecisionFor(primaryEngineKey), decisionPrompt: aiPrompt}, translation => {
+									if (!translation && this.validTranslator(backupEngineKey, input, output, specialCase)) {
+										startTranslating(backupEngineKey);
+										this[translationEngines[backupEngineKey].funcName].apply(this, [{input, output, text: newText, specialCase, engine: translationEngines[backupEngineKey], autoDecision: aiDecisionFor(backupEngineKey), decisionPrompt: aiPrompt}, finishTranslation]);
 									}
 									else finishTranslation(translation);
 								}]);
 							}
-							else if (this.validTranslator(this.settings.engines.backup, input, output, specialCase)) {
-								startTranslating(this.settings.engines.backup);
-								this[translationEngines[this.settings.engines.backup].funcName].apply(this, [{input, output, text: newText, specialCase, engine: translationEngines[this.settings.engines.backup], autoDecision: aiDecisionFor(this.settings.engines.backup), decisionPrompt: aiPrompt}, finishTranslation]);
+							else if (this.validTranslator(backupEngineKey, input, output, specialCase)) {
+								startTranslating(backupEngineKey);
+								this[translationEngines[backupEngineKey].funcName].apply(this, [{input, output, text: newText, specialCase, engine: translationEngines[backupEngineKey], autoDecision: aiDecisionFor(backupEngineKey), decisionPrompt: aiPrompt}, finishTranslation]);
 							}
 							else finishTranslation();
 						};
@@ -7897,7 +8419,7 @@ module.exports = (_ => {
 						// Clearly cross-script foreign messages (e.g. all-caps Latin "HELLO CRYZYYY" -> Chinese)
 						// are always foreign: translate plainly so AI decision mode cannot misjudge all-caps
 						// text as an acronym and echo/skip it. Same-script (latin<->latin) still uses AI decision.
-						const isReceivedAutoAiDecision = options.auto && place == messageTypes.RECEIVED && this.shouldUseAiAutoTranslateDecision();
+						const isReceivedAutoAiDecision = options.auto && !options.forcePlainTranslation && place == messageTypes.RECEIVED && this.shouldUseAiAutoTranslateDecision(channelId);
 						const useAutoDecision = isReceivedAutoAiDecision && !this.isClearlyForeignLanguageMessage(newText, output && output.id);
 						dispatchEngine(useAutoDecision);
 					}
@@ -7909,7 +8431,7 @@ module.exports = (_ => {
 				let engine = translationEngines[key];
 				if (!engine || typeof this[engine.funcName] != "function") return false;
 				if (["microsoft", "googlecloud", "deepseek", "oaicompat"].includes(key) && !(authKeys[key] && authKeys[key].key)) return false;
-				return specialCase || input.auto && engine.auto || engine.languages.includes(input.id) && engine.languages.includes(output.id);
+				return specialCase || this.engineSupportsLanguagePair(key, input, output);
 			}
 
 			isValidatableEngine (engineKey) {
@@ -8959,359 +9481,102 @@ module.exports = (_ => {
 			}			
 
 			escapeRegExp (string) {
-				return (string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+				return protectionLogic.escapeRegExp(this, string);
 			}
 
 			getExceptionScopeSetting (key, fallback = true) {
-				const exceptions = this.settings && this.settings.exceptions || {};
-				return exceptions[key] == null ? !!fallback : !!exceptions[key];
+				return protectionLogic.getExceptionScopeSetting(this, key, fallback);
 			}
 
 			shouldProtectConfiguredTermsForPlace (place) {
-				return place == messageTypes.SENT ? this.getExceptionScopeSetting("protectedTermsForSent", true) : this.getExceptionScopeSetting("protectedTermsForReceived", true);
+				return protectionLogic.shouldProtectConfiguredTermsForPlace(this, place);
 			}
 
 			shouldProtectWrappedTextForPlace (place) {
-				return place == messageTypes.SENT ? this.getExceptionScopeSetting("wrapperPairsForSent", true) : this.getExceptionScopeSetting("wrapperPairsForReceived", true);
+				return protectionLogic.shouldProtectWrappedTextForPlace(this, place);
 			}
 
 			getProtectedTermsList () {
-				let protectedTerms = BDFDB.ArrayUtils.is(this.settings.exceptions.protectedTerms) ? this.settings.exceptions.protectedTerms : [];
-				return [...new Set(protectedTerms.map(term => (term || "").trim()).filter(Boolean))].sort((termA, termB) => termB.length - termA.length);
+				return protectionLogic.getProtectedTermsList(this);
 			}
-
-			// No hidden built-in term dictionary here. User-visible custom protected terms are handled by getProtectedTermsList().
-			// Automatic protection below is limited to structural patterns only, such as URLs, files, versions,
-			// repository paths, commands, variables and code-like identifiers.
 
 			trimTrailingProtectedPunctuation (text) {
-				if (!text) return {protectedText: text, trailingText: ""};
-				const trailingMatch = text.match(/([,.;:!?'"`)\]}>，。！？；：）】」》、]+)$/);
-				if (!trailingMatch || trailingMatch.index < 1) return {protectedText: text, trailingText: ""};
-				return {
-					protectedText: text.slice(0, trailingMatch.index),
-					trailingText: trailingMatch[0]
-				};
+				return protectionLogic.trimTrailingProtectedPunctuation(this, text);
 			}
 
-			protectRegexMatches (string, regex, excepts = {}, count = 0, options = {}) {
-				if (!string || !(regex instanceof RegExp)) return {string, excepts, count};
-				regex.lastIndex = 0;
-				let lastIndex = 0, nextString = "", hasMatch = false, match;
-				while ((match = regex.exec(string))) {
-					let fullMatch = match[0];
-					if (!fullMatch) {
-						if (regex.global && regex.lastIndex === match.index) regex.lastIndex++;
-						continue;
-					}
-					let protectedText = fullMatch;
-					let trailingText = "";
-					if (typeof options.normalize == "function") {
-						let normalized = options.normalize(fullMatch, match, string) || {};
-						protectedText = normalized.protectedText != null ? normalized.protectedText : protectedText;
-						trailingText = normalized.trailingText || "";
-					}
-					if (!protectedText || !String(protectedText).trim()) continue;
-					hasMatch = true;
-					nextString += string.slice(lastIndex, match.index);
-					excepts[count] = protectedText;
-					nextString += `${this.createProtectionPlaceholder(count++)}${trailingText}`;
-					lastIndex = match.index + fullMatch.length;
-					if (!regex.global) break;
-				}
-				if (!hasMatch) return {string, excepts, count};
-				nextString += string.slice(lastIndex);
-				return {string: nextString, excepts, count};
+			protectRegexMatches (string, regex, protectedSegments = {}, count = 0, options = {}) {
+				return protectionLogic.protectRegexMatches(this, string, regex, protectedSegments, count, options);
 			}
 
-			protectCodeBlockSegments (string, excepts = {}, count = 0) {
-				return this.protectRegexMatches(string, /```[\s\S]*?```/g, excepts, count);
+			protectCodeBlockSegments (string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectCodeBlockSegments(this, string, protectedSegments, count);
 			}
 
-			protectAutoDetectedSegments (string, excepts = {}, count = 0) {
-				let result = this.protectRegexMatches(string, /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}\b/gi, excepts, count);
-				string = result.string;
-				excepts = result.excepts;
-				count = result.count;
-
-				const trimTrailing = fullMatch => this.trimTrailingProtectedPunctuation(fullMatch);
-				result = this.protectRegexMatches(string, /\bhttps?:\/\/[^\s<>()\u3000]+/gi, excepts, count, {normalize: trimTrailing});
-				string = result.string;
-				excepts = result.excepts;
-				count = result.count;
-
-				result = this.protectRegexMatches(string, /\b(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?:\/[^\s<>()\u3000]*)?/gi, excepts, count, {
-					normalize: fullMatch => {
-						const trimmed = trimTrailing(fullMatch);
-						if (!/[./]/.test(trimmed.protectedText || "")) return {protectedText: "", trailingText: fullMatch};
-						return trimmed;
-					}
-				});
-				string = result.string;
-				excepts = result.excepts;
-				count = result.count;
-
-				result = this.protectRegexMatches(string, /\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b/g, excepts, count);
-				string = result.string;
-				excepts = result.excepts;
-				count = result.count;
-
-				string = string.replace(/(^|\s)(\/[A-Za-z][A-Za-z0-9_-]{1,32})(?=\s|$)/g, (fullMatch, leading, command) => {
-					excepts[count] = command;
-					return `${leading || ""}${this.createProtectionPlaceholder(count++)}`;
-				});
-
-				return {string, excepts, count};
+			protectAutoDetectedSegments (string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectAutoDetectedSegments(this, string, protectedSegments, count);
 			}
 
-			protectDiscordMarkupSegments (string, excepts = {}, count = 0) {
-				if (!string) return {string, excepts, count};
-				return this.protectRegexMatches(string, /<a?:[A-Za-z0-9_~]+:\d+>|<@[!&]?\d+>|<#\d+>|<@&\d+>|<t:\d+(?::[tTdDfFR])?>/g, excepts, count);
+			protectDiscordMarkupSegments (string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectDiscordMarkupSegments(this, string, protectedSegments, count);
 			}
 
-			protectQuotedTextSegments (string, excepts = {}, count = 0) {
-				if (!this.settings.general.protectQuotedText || !string) return {string, excepts, count};
-				const quotedRegex = /"([^"\r\n]+)"|“([^”\r\n]+)”/g;
-				string = string.replace(quotedRegex, fullMatch => {
-					if (!fullMatch || !fullMatch.slice(1, -1).trim()) return fullMatch;
-					excepts[count] = fullMatch;
-					return this.createProtectionPlaceholder(count++);
-				});
-				return {string, excepts, count};
+			protectQuotedTextSegments (string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectQuotedTextSegments(this, string, protectedSegments, count);
 			}
 
-			protectWrappedTextSegments (string, excepts = {}, count = 0, place = null) {
-				if (!this.shouldProtectWrappedTextForPlace(place) || !string) return {string, excepts, count};
-				for (let rule of this.getProtectedWrapperRules()) {
-					let cursor = 0;
-					let nextString = "";
-					while (cursor < string.length) {
-						let startIndex = string.indexOf(rule.left, cursor);
-						if (startIndex < 0) {
-							nextString += string.slice(cursor);
-							break;
-						}
-						let contentStart = startIndex + rule.left.length;
-						let endIndex = string.indexOf(rule.right, contentStart);
-						if (endIndex < 0) {
-							nextString += string.slice(cursor);
-							break;
-						}
-						let fullText = string.slice(startIndex, endIndex + rule.right.length);
-						let innerText = string.slice(contentStart, endIndex);
-						nextString += string.slice(cursor, startIndex);
-						if (innerText.trim() && !/[\r\n]/.test(fullText)) {
-							excepts[count] = fullText;
-							nextString += this.createProtectionPlaceholder(count++);
-						}
-						else nextString += fullText;
-						cursor = endIndex + rule.right.length;
-					}
-					string = nextString;
-				}
-				return {string, excepts, count};
+			protectWrappedTextSegments (string, protectedSegments = {}, count = 0, place = null) {
+				return protectionLogic.protectWrappedTextSegments(this, string, protectedSegments, count, place);
 			}
 
-			protectConfiguredTerms (string, excepts = {}, count = 0) {
-				let protectedTerms = this.getProtectedTermsList();
-				const boundaryChars = "A-Za-z0-9_";
-				for (let term of protectedTerms) {
-					term = (term || "").trim();
-					if (!term) continue;
-					const startsWithWord = new RegExp(`^[${boundaryChars}]`).test(term);
-					const endsWithWord = new RegExp(`[${boundaryChars}]$`).test(term);
-					// Match internal whitespace flexibly: a configured "BUG team" should also protect
-					// "bugteam" (no space) or "bug  team". Each whitespace run becomes \s* (zero or more).
-					const termPattern = term.split(/\s+/).filter(Boolean).map(part => this.escapeRegExp(part)).join("\\s*");
-					const regex = new RegExp(`${startsWithWord ? `(^|[^${boundaryChars}])` : `()`}(${termPattern})${endsWithWord ? `(?=$|[^${boundaryChars}])` : ""}`, "gi");
-					string = string.replace(regex, (match, leading, protectedTerm) => {
-						if (!protectedTerm) return match;
-						excepts[count] = protectedTerm;
-						return `${leading || ""}${this.createProtectionPlaceholder(count++)}`;
-					});
-				}
-				return {string, excepts, count};
+			protectConfiguredTerms (string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectConfiguredTerms(this, string, protectedSegments, count);
 			}
 
-			protectAutoTechnicalTerms (string, excepts = {}, count = 0) {
-				if (!string) return {string, excepts, count};
-				const protectToken = (fullMatch, offset, fullString) => {
-					if (!fullMatch || fullMatch.length < 2) return fullMatch;
-					const left = fullString[offset - 1] || "";
-					const right = fullString[offset + fullMatch.length] || "";
-					if (/[A-Za-z0-9_]/.test(left) || /[A-Za-z0-9_]/.test(right)) return fullMatch;
-					excepts[count] = fullMatch;
-					return this.createProtectionPlaceholder(count++);
-				};
-
-				// Structural protection only. Do not protect a hidden built-in word list here.
-				// These patterns are code/file/repo/version/identifier-shaped content, not normal words.
-				string = string.replace(/\b[A-Za-z0-9_.-]{2,}\/[A-Za-z0-9_.-]{2,}(?:\/[A-Za-z0-9_.-]+)*\b/g, protectToken);
-				string = string.replace(/\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|json|yml|yaml|toml|env|py|java|go|rs|cpp|c|h|css|html|md|txt|zip|rar|7z|exe|dll|png|jpg|jpeg|webp|gif|mp4|mov|psd|fig)\b/gi, protectToken);
-				// Version/identifier numbers: require a "v" prefix (v3.7, v0.3.26) or at least three
-				// dot-separated parts (1.2.3). A bare two-part number like "3.1" in "版本 3.1" is plain
-				// text and must not be auto-protected.
-				string = string.replace(/\bv\d+(?:\.\d+){1,4}(?:[-+][A-Za-z0-9.-]+)?\b|\b\d+(?:\.\d+){2,4}(?:[-+][A-Za-z0-9.-]+)?\b/gi, protectToken);
-				// All-caps "shouting" in Latin-dominant text (e.g. "HELLO CRYZYYY") must not be treated
-				// as acronyms: the all-caps rule below would mask every word and leave nothing
-				// translatable, so the message got skipped entirely. Only protect genuine acronyms
-				// embedded in normal-case or CJK-dominant text. Detection uses the original input so
-				// earlier structural replacements (which yield non-Latin placeholders) do not skew it.
-				const originalForShoutCheck = String(string);
-				const isAllCapsLatinShouting = (() => {
-					const latinLetters = originalForShoutCheck.match(/[A-Za-z]/g) || [];
-					if (latinLetters.length < 4) return false;
-					const upperCount = latinLetters.reduce((n, c) => n + (c >= "A" && c <= "Z" ? 1 : 0), 0);
-					if (upperCount / latinLetters.length < 0.8) return false;
-					// CJK/Hangul-dominant text keeps acronym protection (e.g. "我需要CDK用于GPT").
-					const nonLatin = (originalForShoutCheck.match(/[一-鿿぀-ヿ가-힯]/g) || []).length;
-					return nonLatin * 2 < latinLetters.length;
-				})();
-				if (!isAllCapsLatinShouting) {
-					string = string.replace(/\b[A-Z][A-Z0-9]{1,}(?:[-_/+.][A-Z0-9]+)*\b/g, protectToken);
-				}
-				string = string.replace(/\b[A-Za-z]+(?:[A-Z][a-z0-9]+){1,}[A-Za-z0-9]*\b/g, protectToken);
-				string = string.replace(/\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+){1,}\b/g, protectToken);
-				return {string, excepts, count};
+			protectAutoTechnicalTerms (string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectAutoTechnicalTerms(this, string, protectedSegments, count);
 			}
 
 
-			protectMixedLanguageLatinTokens (string, excepts = {}, count = 0) {
-				// Disabled by design: do not auto-protect ordinary Latin words in mixed-language chat.
-				// Users can add exact terms to “Protected Terms / Phrases”; structural tokens are handled separately.
-				return {string, excepts, count};
+			protectMixedLanguageLatinTokens (string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectMixedLanguageLatinTokens(this, string, protectedSegments, count);
 			}
 
 
 			getUnicodeEmojiDetector () {
-				try {return new RegExp("[\\u200D\\uFE0E\\uFE0F\\u20E3]|\\p{Extended_Pictographic}|\\p{Regional_Indicator}", "u");}
-				catch (err) {return /[\u200D\uFE0E\uFE0F\u20E3\u2600-\u27BF]|[\uD83C-\uDBFF][\uDC00-\uDFFF]/;}
+				return protectionLogic.getUnicodeEmojiDetector();
 			}
 
 			isUnicodeEmojiGrapheme (segment) {
-				if (!segment || typeof segment != "string") return false;
-				if (/^(?:\d|#|\*)$/.test(segment)) return false;
-				const detector = this.getUnicodeEmojiDetector();
-				return !!(detector && detector.test(segment));
+				return protectionLogic.isUnicodeEmojiGrapheme(this, segment);
 			}
 
 			getUnicodeEmojiRegex () {
-				try {
-					return new RegExp("(?:\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20E3|\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?(?:\\p{Emoji_Modifier})?(?:\\u200D\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?(?:\\p{Emoji_Modifier})?)*)", "gu");
-				}
-				catch (err) {
-					return /(?:[\u2600-\u27BF]\uFE0F?|[\uD83C-\uDBFF][\uDC00-\uDFFF](?:\uFE0F|\uFE0E)?(?:\u200D[\uD83C-\uDBFF][\uDC00-\uDFFF](?:\uFE0F|\uFE0E)?)*)/g;
-				}
+				return protectionLogic.getUnicodeEmojiRegex();
 			}
 
-			protectUnicodeEmojiSegments (string, excepts = {}, count = 0) {
-				if (!string) return {string, excepts, count};
-				// Hard rule: protect full emoji grapheme clusters before any translator sees them.
-				// This keeps ❤️, 👍🏽, 🇺🇸, 👨‍💻, etc. from being normalized or partially rewritten.
-				if (typeof Intl != "undefined" && Intl.Segmenter) {
-					const detector = this.getUnicodeEmojiDetector();
-					const segmenter = new Intl.Segmenter(undefined, {granularity: "grapheme"});
-					let nextString = "";
-					for (const part of segmenter.segment(string)) {
-						const segment = part && part.segment || "";
-						if (segment && detector && this.isUnicodeEmojiGrapheme(segment)) {
-							excepts[count] = segment;
-							nextString += this.createProtectionPlaceholder(count++);
-						}
-						else nextString += segment;
-					}
-					return {string: nextString, excepts, count};
-				}
-				return this.protectRegexMatches(string, this.getUnicodeEmojiRegex(), excepts, count);
+			protectUnicodeEmojiSegments (string, protectedSegments = {}, count = 0) {
+				return protectionLogic.protectUnicodeEmojiSegments(this, string, protectedSegments, count);
 			}
 
 
 			createProtectionPlaceholder (count) {
-				// Per-request local placeholder. Shorter and safer for both AI and traditional translators.
-				return `⟦${count}⟧`;
+				return protectionLogic.createProtectionPlaceholder(this, count);
 			}
 
 			getProtectionPlaceholderRegex (count) {
-				// Be tolerant: some engines add spaces or normalize brackets. Keep backward compatibility with older {{0}} / ⟦DTA0⟧ placeholders.
-				return new RegExp(`(?:⟦\\s*(?:DTA\\s*)?${count}\\s*⟧|【\\s*${count}\\s*】|\\[\\s*${count}\\s*\\]|<\\s*<\\s*<\\s*${count}\\s*>\\s*>\\s*>|[｛\\{]\\s*[｛\\{]\\s*${count}\\s*[｝\\}]\\s*[｝\\}])`, "g");
+				return protectionLogic.getProtectionPlaceholderRegex(this, count);
 			}
 
 			formatProtectedExceptionForDisplay (exception) {
-				if (exception == null) return "";
-				exception = String(exception);
-				// Hard rule: after translation, restore Discord markup itself for mentions/channels/roles/custom emoji.
-				// Discord's message renderer can then keep the original mention pill, bold color, and emoji rendering.
-				if (/^<a?:[A-Za-z0-9_~]+:\d+>$/.test(exception)) return exception;
-				if (/^<@!?\d+>$/.test(exception)) return exception;
-				if (/^<@&\d+>$/.test(exception)) return exception;
-				if (/^<#\d+>$/.test(exception)) return exception;
-				return exception;
+				return protectionLogic.formatProtectedExceptionForDisplay(this, exception);
 			}
 
-			addExceptions (string, excepts) {
-				for (let count in excepts) {
-					let exception = BDFDB.ArrayUtils.is(this.settings.exceptions.wordStart) && this.settings.exceptions.wordStart.some(n => String(excepts[count]).indexOf(n) == 0) ? String(excepts[count]).slice(1) : String(excepts[count]);
-					let replacement = this.formatProtectedExceptionForDisplay(exception);
-					let newString = string.replace(this.getProtectionPlaceholderRegex(count), replacement);
-					// If the translator drops a protected placeholder, do not append raw Discord markup at the end.
-					// Appending raw custom emoji/mentions caused visible <:emoji:id> and <@id> artifacts.
-					string = newString;
-				}
-				return string;
+			addExceptions (string, protectedSegments) {
+				return protectionLogic.addExceptions(this, string, protectedSegments);
 			}
 
 			removeExceptions (string, place) {
-				let excepts = {}, newString = [], count = 0;
-				let discordMarkupResult = this.protectDiscordMarkupSegments(string, excepts, count);
-				string = discordMarkupResult.string;
-				excepts = discordMarkupResult.excepts;
-				count = discordMarkupResult.count;
-				let codeBlockResult = this.protectCodeBlockSegments(string, excepts, count);
-				string = codeBlockResult.string;
-				excepts = codeBlockResult.excepts;
-				count = codeBlockResult.count;
-				let wrappedTextResult = this.protectWrappedTextSegments(string, excepts, count, place);
-				string = wrappedTextResult.string;
-				excepts = wrappedTextResult.excepts;
-				count = wrappedTextResult.count;
-				let autoProtectedResult = this.protectAutoDetectedSegments(string, excepts, count);
-				string = autoProtectedResult.string;
-				excepts = autoProtectedResult.excepts;
-				count = autoProtectedResult.count;
-				// Configured terms first: a user phrase like "BUG team" must be protected as a whole
-				// before the all-caps abbreviation rule can split it into "BUG".
-				if (this.shouldProtectConfiguredTermsForPlace(place)) {
-					let protectedTermsResult = this.protectConfiguredTerms(string, excepts, count);
-					string = protectedTermsResult.string;
-					excepts = protectedTermsResult.excepts;
-					count = protectedTermsResult.count;
-				}
-				let autoTechnicalTermsResult = this.protectAutoTechnicalTerms(string, excepts, count);
-				string = autoTechnicalTermsResult.string;
-				excepts = autoTechnicalTermsResult.excepts;
-				count = autoTechnicalTermsResult.count;
-				let emojiProtectedResult = this.protectUnicodeEmojiSegments(string, excepts, count);
-				string = emojiProtectedResult.string;
-				excepts = emojiProtectedResult.excepts;
-				count = emojiProtectedResult.count;
-
-				if (place == messageTypes.RECEIVED) {
-					newString.push(string);
-				}
-				else {
-					let usedExceptions = BDFDB.ArrayUtils.is(this.settings.exceptions.wordStart) ? this.settings.exceptions.wordStart : [];
-					string.split(" ").forEach(word => {
-						if (word.indexOf("<@!") == 0 || word.indexOf("<#") == 0 || word.indexOf(":") == 0 || word.indexOf("<:") == 0 || word.indexOf("<a:") == 0 || word.indexOf("@") == 0 || word.indexOf("#") == 0 || usedExceptions.some(n => word.indexOf(n) == 0 && word.length > 1)) {
-							newString.push(this.createProtectionPlaceholder(count));
-							excepts[count] = word;
-							count++;
-						}
-						else newString.push(word);
-					});
-				}
-				const maskedString = newString.join(place == messageTypes.RECEIVED ? "" : " ");
-				const hasTranslatableContent = maskedString.replace(/(?:⟦\s*(?:DTA\s*)?\d+\s*⟧|【\s*\d+\s*】|\[\s*\d+\s*\]|<<<\s*\d+\s*>>>|\{\{\d+\}\})/g, "").trim().length > 0;
-				return [maskedString, excepts, hasTranslatableContent];
+				return protectionLogic.removeExceptions(this, string, place);
 			}
 
 			getGoogleTranslatePageURL (input, output, text) {
@@ -9334,11 +9599,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Месечният лимит на заявките е достигнат.",
 							error_serverdown:					"Сървърът за превод може да е офлайн.",
 							exception_text:						"Думите, започващи с {{var0}}, ще бъдат игнорирани",
-							general_addQuickTranslateButton:			"Добавя бърз бутон за превод в лентата за действия за съобщения",
-							general_addTranslateButton:				"Добавя бутон за превод към текстовото поле на канала",
 							general_sendOriginalMessage:				"Също така изпраща оригиналното съобщение, когато превежда вашето изпратено съобщение",
 							general_showOriginalMessage:				"Също така показва оригиналното съобщение при превод на получено съобщение",
-							general_usePerChatTranslation:				"Активира/деактивира състоянието на бутона за преводач за всеки канал, а не глобално",
 							language_choice_input_received:				"Език на въвеждане в получените съобщения",
 							language_choice_input_sent:				"Език на въвеждане в изпратените от вас съобщения",
 							language_choice_output_received:			"Изходен език в получените съобщения",
@@ -9371,11 +9633,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Byl dosažen limit měsíčních požadavků.",
 							error_serverdown:					"Překladový server může být offline.",
 							exception_text:						"Slova začínající na {{var0}} budou ignorována",
-							general_addQuickTranslateButton:			"Přidá tlačítko rychlého překladu do panelu Actions Message",
-							general_addTranslateButton:				"Přidá tlačítko Přeložit do textové oblasti kanálu",
 							general_sendOriginalMessage:				"Při překladu odeslané zprávy také odešle původní zprávu",
 							general_showOriginalMessage:				"Také zobrazuje původní zprávu při překladu přijaté zprávy",
-							general_usePerChatTranslation:				"Povolí/zakáže stav tlačítka překladače pro kanál, nikoli globálně",
 							language_choice_input_received:				"Vstupní jazyk do přijatých zpráv",
 							language_choice_input_sent:				"Zadejte jazyk do odeslaných zpráv",
 							language_choice_output_received:			"Výstupní jazyk v přijatých zprávách",
@@ -9408,11 +9667,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Månedlig anmodningsgrænse nået.",
 							error_serverdown:					"Oversættelsesserveren er muligvis offline.",
 							exception_text:						"Ord, der begynder med {{var0}}, ignoreres",
-							general_addQuickTranslateButton:			"Tilføjer en hurtig oversættelsesknap i linjen Message Actions",
-							general_addTranslateButton:				"Tilføjer en Oversæt-knap til kanaltekstområdet",
 							general_sendOriginalMessage:				"Sender også den originale besked, når du oversætter din sendte besked",
 							general_showOriginalMessage:				"Viser også den originale besked, når du oversætter modtaget besked",
-							general_usePerChatTranslation:				"Aktiverer/deaktiverer oversætterknappens tilstand pr. kanal og ikke globalt",
 							language_choice_input_received:				"Inputsprog i modtagne beskeder",
 							language_choice_input_sent:				"Indtast sprog i dine sendte beskeder",
 							language_choice_output_received:			"Outputsprog i modtagne beskeder",
@@ -9445,11 +9701,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Monatliches Anforderungslimit erreicht.",
 							error_serverdown:					"Der Übersetzungsserver ist möglicherweise offline.",
 							exception_text:						"Wörter, die mit {{var0}} beginnen, werden ignoriert",
-							general_addQuickTranslateButton:			"Fügt einen Schnellübersetz Schalter zur Nachrichtenaktionsleiste hinzu",
-							general_addTranslateButton:				"Fügt dem Textbereich des Kanals eine Schalter zum Übersetzen hinzu",
 							general_sendOriginalMessage:				"Sendet auch die ursprüngliche Nachricht, wenn die gesendete Nachricht übersetzt wird",
 							general_showOriginalMessage:				"Zeigt auch die ursprüngliche Nachricht an, wenn eine empfangene Nachricht übersetzt wird",
-							general_usePerChatTranslation:				"Aktiviert/deaktiviert die Übersetzung pro Kanal und nicht global",
 							language_choice_input_received:				"Eingabesprache in empfangenen Nachrichten",
 							language_choice_input_sent:				"Eingabesprache in gesendeten Nachrichten",
 							language_choice_output_received:			"Ausgabesprache in empfangenen Nachrichten",
@@ -9482,11 +9735,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Συμπληρώθηκε το μηνιαίο όριο αιτημάτων.",
 							error_serverdown:					"Ο διακομιστής μετάφρασης ενδέχεται να είναι εκτός σύνδεσης.",
 							exception_text:						"Οι λέξεις θα αγνοηθούν που ξεκινούν με {{var0}}",
-							general_addQuickTranslateButton:			"Προσθέτει ένα κουμπί γρήγορης μετάφρασης στη γραμμή ενεργειών μηνυμάτων",
-							general_addTranslateButton:				"Προσθήκη κουμπιού μετάφρασης στην Περιοχή κειμένου του Καναλιού",
 							general_sendOriginalMessage:				"Αποστολή αρχικού Μηνύματος με τη μετάφραση απεσταλμένου μηνύματος",
 							general_showOriginalMessage:				"Εμφάνιση αρχικού Μηνύματος με τη μετάφραση ενός ληφθέντος μηνύματος",
-							general_usePerChatTranslation:				"(Απ)Ενεργοποίηση κατάστασης κουμπιού μεταφραστή ανά κανάλι",
 							language_choice_input_received:				"Γλώσσα εισαγωγής στα ληφθέντα μηνύματα",
 							language_choice_input_sent:				"Γλώσσα εισαγωγής στα απεσταλμένα μηνύματά σας",
 							language_choice_output_received:			"Γλώσσα εξαγωγής στα ληφθέντα μηνύματα",
@@ -9519,11 +9769,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Se alcanzó el límite de solicitudes mensuales.",
 							error_serverdown:					"El servidor de traducción puede estar fuera de línea.",
 							exception_text:						"Las palabras que comienzan con {{var0}} serán ignoradas",
-							general_addQuickTranslateButton:			"Agrega un botón de traducción rápida en la barra de acciones del mensaje",
-							general_addTranslateButton:				"Agrega un botón de traducción al área de texto del canal",
 							general_sendOriginalMessage:				"También envía el mensaje original al traducir su mensaje enviado",
 							general_showOriginalMessage:				"También muestra el mensaje original al traducir un mensaje recibido",
-							general_usePerChatTranslation:				"Habilita/deshabilita el estado del botón del traductor por canal y no globalmente",
 							language_choice_input_received:				"Idioma de entrada en los mensajes recibidos",
 							language_choice_input_sent:				"Idioma de entrada en sus mensajes enviados",
 							language_choice_output_received:			"Idioma de salida en los mensajes recibidos",
@@ -9556,11 +9803,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Límite de solicitud mensual alcanzado.",
 							error_serverdown:					"El servidor de traducción puede estar fuera de línea.",
 							exception_text:						"Las palabras que comienzan con {{var0}} se ignorarán",
-							general_addQuickTranslateButton:			"Agrega un botón de traducción rápida en la barra de acciones del mensaje",
-							general_addTranslateButton:				"Agrega un botón de traducción al canal TextAREA",
 							general_sendOriginalMessage:				"También envía el mensaje original al traducir su mensaje enviado",
 							general_showOriginalMessage:				"También muestra el mensaje original al traducir un mensaje recibido",
-							general_usePerChatTranslation:				"Habilita/deshabilita el estado del botón de traductor por canal y no a nivel mundial",
 							language_choice_input_received:				"Idioma de entrada en mensajes recibidos",
 							language_choice_input_sent:				"Idioma de entrada en sus mensajes enviados",
 							language_choice_output_received:			"Lenguaje de salida en mensajes recibidos",
@@ -9593,11 +9837,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Kuukauden pyyntöraja saavutettu.",
 							error_serverdown:					"Käännöspalvelin saattaa olla offline-tilassa.",
 							exception_text:						"{{var0}} alkavat sanat ohitetaan",
-							general_addQuickTranslateButton:			"Lisää nopea käännöspainike Message Action -palkkiin",
-							general_addTranslateButton:				"Lisää käännöspainikkeen kanavan tekstialueeseen",
 							general_sendOriginalMessage:				"Lähettää myös alkuperäisen viestin kääntäessään lähettämääsi viestiä",
 							general_showOriginalMessage:				"Näyttää myös alkuperäisen viestin käännettäessä vastaanotettua viestiä",
-							general_usePerChatTranslation:				"Ottaa käyttöön/poistaa käytöstä kääntäjän painikkeen tilan kanavakohtaisesti, ei maailmanlaajuisesti",
 							language_choice_input_received:				"Syöttökieli vastaanotetuissa viesteissä",
 							language_choice_input_sent:				"Syötä kieli lähettämiisi viesteihin",
 							language_choice_output_received:			"Tulostuskieli vastaanotetuissa viesteissä",
@@ -9630,11 +9871,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Limite mensuelle de demandes atteinte.",
 							error_serverdown:					"Le serveur de traduction est peut-être hors ligne.",
 							exception_text:						"Les mots commençant par {{var0}} seront ignorés",
-							general_addQuickTranslateButton:			"Ajoute un bouton de traduire rapidement dans la barre des actions du message",
-							general_addTranslateButton:				"Ajoute un bouton de traduction à la zone de texte du canal",
 							general_sendOriginalMessage:				"Envoie également le message d'origine lors de la traduction de votre message envoyé",
 							general_showOriginalMessage:				"Affiche également le message d'origine lors de la traduction d'un message reçu",
-							general_usePerChatTranslation:				"Active/désactive l'état du bouton du traducteur par canal et non globalement",
 							language_choice_input_received:				"Langue d'entrée dans les messages reçus",
 							language_choice_input_sent:				"Langue d'entrée dans vos messages envoyés",
 							language_choice_output_received:			"Langue de sortie dans les messages reçus",
@@ -9667,11 +9905,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"मासिक अनुरोध सीमा पूरी हो गई है।",
 							error_serverdown:					"अनुवाद सर्वर ऑफ़लाइन हो सकता है।",
 							exception_text:						"{{var0}} से शुरू होने वाले शब्दों पर ध्यान नहीं दिया जाएगा",
-							general_addQuickTranslateButton:			"संदेश कार्रवाई बार में एक त्वरित अनुवाद बटन जोड़ता है",
-							general_addTranslateButton:				"चैनल Textarea में एक अनुवाद बटन जोड़ता है",
 							general_sendOriginalMessage:				"आपके भेजे गए संदेश का अनुवाद करते समय मूल संदेश भी भेजता है",
 							general_showOriginalMessage:				"प्राप्त संदेश का अनुवाद करते समय मूल संदेश भी दिखाता है",
-							general_usePerChatTranslation:				"प्रति चैनल अनुवादक बटन स्थिति को सक्षम/अक्षम करता है और विश्व स्तर पर नहीं",
 							language_choice_input_received:				"प्राप्त संदेशों में इनपुट भाषा",
 							language_choice_input_sent:				"आपके भेजे गए संदेशों में इनपुट भाषा",
 							language_choice_output_received:			"प्राप्त संदेशों में आउटपुट भाषा",
@@ -9704,11 +9939,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Dosegnuto je mjesečno ograničenje zahtjeva.",
 							error_serverdown:					"Translation Server možda je offline.",
 							exception_text:						"Riječi koje počinju s {{var0}} bit će zanemarene",
-							general_addQuickTranslateButton:			"Dodaje gumb za brzo prevođenje u traku Akcija poruka",
-							general_addTranslateButton:				"Dodaje gumb Prevedi tekstualnom području kanala",
 							general_sendOriginalMessage:				"Također šalje izvornu poruku prilikom prijevoda vaše poslane poruke",
 							general_showOriginalMessage:				"Također prikazuje izvornu poruku prilikom prijevoda primljene poruke",
-							general_usePerChatTranslation:				"Omogućuje/onemogućuje stanje gumba prevoditelja po kanalu, a ne globalno",
 							language_choice_input_received:				"Jezik unosa u primljenim porukama",
 							language_choice_input_sent:				"Jezik unosa u vaše poslane poruke",
 							language_choice_output_received:			"Izlazni jezik u primljenim porukama",
@@ -9741,11 +9973,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Elérte a havi igénylési limitet.",
 							error_serverdown:					"Lehet, hogy a Fordítószerver offline állapotban van.",
 							exception_text:						"A(z) {{var0}} kezdetű szavak figyelmen kívül maradnak",
-							general_addQuickTranslateButton:			"Hozzáad egy gyors lefordítást a Művelet Művelet sávban",
-							general_addTranslateButton:				"Fordítási gombot ad a csatorna szövegterületéhez",
 							general_sendOriginalMessage:				"Az eredeti üzenetet is elküldi az elküldött üzenet fordítása során",
 							general_showOriginalMessage:				"A fogadott üzenet lefordításakor az eredeti üzenetet is megjeleníti",
-							general_usePerChatTranslation:				"Engedélyezi/letiltja a Fordító gomb állapotát csatornánként, nem pedig globálisan",
 							language_choice_input_received:				"Beviteli nyelv a fogadott üzenetekben",
 							language_choice_input_sent:				"Írja be a nyelvet az elküldött üzenetekben",
 							language_choice_output_received:			"Kimeneti nyelv a fogadott üzenetekben",
@@ -9778,11 +10007,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Limite di richieste mensili raggiunto.",
 							error_serverdown:					"Il server di traduzione potrebbe essere offline.",
 							exception_text:						"Le parole che iniziano con {{var0}} verranno ignorate",
-							general_addQuickTranslateButton:			"Aggiunge un pulsante di traduzione rapida nella barra delle azioni del messaggio",
-							general_addTranslateButton:				"Aggiunge un pulsante Traduci all'area di testo del canale",
 							general_sendOriginalMessage:				"Invia anche il messaggio originale durante la traduzione del messaggio inviato",
 							general_showOriginalMessage:				"Mostra anche il messaggio originale durante la traduzione di un messaggio ricevuto",
-							general_usePerChatTranslation:				"Abilita/disabilita lo stato del pulsante Translator per canale e non globalmente",
 							language_choice_input_received:				"Lingua di input nei messaggi ricevuti",
 							language_choice_input_sent:				"Inserisci la lingua nei tuoi messaggi inviati",
 							language_choice_output_received:			"Lingua di output nei messaggi ricevuti",
@@ -9815,11 +10041,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"月間リクエスト制限に達しました。",
 							error_serverdown:					"翻訳サーバーがオフラインになっている可能性があります。",
 							exception_text:						"{{var0}} で始まる単語は無視されます",
-							general_addQuickTranslateButton:			"メッセージアクションバーにクイック翻訳ボタンを追加します",
-							general_addTranslateButton:				"チャンネルのテキストエリアに翻訳ボタンを追加します",
 							general_sendOriginalMessage:				"送信したメッセージを翻訳するときに元のメッセージも送信します",
 							general_showOriginalMessage:				"受信したメッセージを翻訳するときに元のメッセージも表示します",
-							general_usePerChatTranslation:				"グローバルではなく、チャネルごとに翻訳者ボタンの状態を有効/無効にします",
 							language_choice_input_received:				"受信メッセージの入力言語",
 							language_choice_input_sent:				"送信メッセージの入力言語",
 							language_choice_output_received:			"受信メッセージの出力言語",
@@ -9852,11 +10075,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"월간 요청 한도에 도달했습니다.",
 							error_serverdown:					"번역 서버가 오프라인일 수 있습니다.",
 							exception_text:						"{{var0}}로 시작하는 단어는 무시됩니다.",
-							general_addQuickTranslateButton:			"메시지 동작 막대에서 빠른 번역 버튼 추가",
-							general_addTranslateButton:				"채널 텍스트 영역에 번역 버튼 추가",
 							general_sendOriginalMessage:				"또한 보낸 메시지를 번역할 때 원본 메시지를 보냅니다.",
 							general_showOriginalMessage:				"또한 수신된 메시지를 번역할 때 원본 메시지를 표시합니다.",
-							general_usePerChatTranslation:				"전역이 아닌 채널별로 번역기 버튼 상태를 활성화/비활성화합니다.",
 							language_choice_input_received:				"수신된 메시지의 입력 언어",
 							language_choice_input_sent:				"보낸 메시지의 입력 언어",
 							language_choice_output_received:			"수신된 메시지의 출력 언어",
@@ -9889,11 +10109,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Pasiektas mėnesio užklausų limitas.",
 							error_serverdown:					"Vertimo serveris gali būti neprisijungęs.",
 							exception_text:						"Žodžiai, prasidedantys {{var0}}, bus ignoruojami",
-							general_addQuickTranslateButton:			"Prideda greito vertimo mygtuką pranešimo veiksmų juostoje",
-							general_addTranslateButton:				"Prie kanalo teksto srities pridedamas vertimo mygtukas",
 							general_sendOriginalMessage:				"Taip pat siunčia originalų pranešimą verčiant jūsų išsiųstą žinutę",
 							general_showOriginalMessage:				"Taip pat rodomas pradinis pranešimas, kai verčiamas gautas pranešimas",
-							general_usePerChatTranslation:				"Įjungia / išjungia Vertėjo mygtuko būseną kiekvienam kanalui, o ne visame pasaulyje",
 							language_choice_input_received:				"Įvesties kalba gautuose pranešimuose",
 							language_choice_input_sent:				"Įveskite kalbą siunčiamuose pranešimuose",
 							language_choice_output_received:			"Išvesties kalba gautuose pranešimuose",
@@ -9926,11 +10143,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Maandelijkse aanvraaglimiet bereikt.",
 							error_serverdown:					"Vertaalserver is mogelijk offline.",
 							exception_text:						"Woorden die beginnen met {{var0}} worden genegeerd",
-							general_addQuickTranslateButton:			"Voegt een snel vertalende knop toe in de Bericht Acties Bar",
-							general_addTranslateButton:				"Voegt een vertaalknop toe aan het kanaaltekstgebied",
 							general_sendOriginalMessage:				"Verzendt ook het originele bericht bij het vertalen van uw verzonden bericht",
 							general_showOriginalMessage:				"Toont ook het originele bericht bij het vertalen van een ontvangen bericht",
-							general_usePerChatTranslation:				"Schakelt de status van de vertaalknop in/uit per kanaal en niet globaal",
 							language_choice_input_received:				"Invoertaal in ontvangen berichten",
 							language_choice_input_sent:				"Invoertaal in uw verzonden berichten",
 							language_choice_output_received:			"Uitvoertaal in ontvangen berichten",
@@ -9963,11 +10177,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Månedlig forespørselsgrense nådd.",
 							error_serverdown:					"Oversettelsesserveren kan være frakoblet.",
 							exception_text:						"Ord som begynner med {{var0}} vil bli ignorert",
-							general_addQuickTranslateButton:			"Legger til en rask oversettelsesknapp i meldingslinjen",
-							general_addTranslateButton:				"Legger til en oversettknapp til kanaltekstområdet",
 							general_sendOriginalMessage:				"Sender også den originale meldingen når du oversetter den sendte meldingen",
 							general_showOriginalMessage:				"Viser også den originale meldingen når du oversetter en mottatt melding",
-							general_usePerChatTranslation:				"Aktiverer/deaktiverer oversetterknappens tilstand per kanal og ikke globalt",
 							language_choice_input_received:				"Inndataspråk i mottatte meldinger",
 							language_choice_input_sent:				"Inntastingsspråk i sendte meldinger",
 							language_choice_output_received:			"Utdataspråk i mottatte meldinger",
@@ -10000,11 +10211,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Osiągnięto miesięczny limit żądań.",
 							error_serverdown:					"Serwer tłumaczeń może być w trybie offline.",
 							exception_text:						"Słowa zaczynające się od {{var0}} będą ignorowane",
-							general_addQuickTranslateButton:			"Dodaje szybki przycisk Tłumacz na pasku akcji wiadomości",
-							general_addTranslateButton:				"Dodaje przycisk Tłumacz do obszaru tekstowego kanału",
 							general_sendOriginalMessage:				"Wysyła również oryginalną wiadomość podczas tłumaczenia wysłanej wiadomości",
 							general_showOriginalMessage:				"Pokazuje również oryginalną wiadomość podczas tłumaczenia otrzymanej wiadomości",
-							general_usePerChatTranslation:				"Włącza/wyłącza stan przycisku translatora na kanał, a nie globalnie",
 							language_choice_input_received:				"Język wprowadzania w odebranych wiadomościach",
 							language_choice_input_sent:				"Język wprowadzania w wysyłanych wiadomościach",
 							language_choice_output_received:			"Język wyjściowy w odebranych wiadomościach",
@@ -10037,11 +10245,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Limite de solicitação mensal atingido.",
 							error_serverdown:					"O servidor de tradução pode estar offline.",
 							exception_text:						"Palavras que começam com {{var0}} serão ignoradas",
-							general_addQuickTranslateButton:			"Adiciona um botão de tradução rápida na barra de ações da mensagem",
-							general_addTranslateButton:				"Adiciona um botão de tradução à área de texto do canal",
 							general_sendOriginalMessage:				"Também envia a Mensagem original ao traduzir sua Mensagem enviada",
 							general_showOriginalMessage:				"Também mostra a Mensagem original ao traduzir uma Mensagem recebida",
-							general_usePerChatTranslation:				"Habilita/desabilita o estado do botão do tradutor por canal e não globalmente",
 							language_choice_input_received:				"Idioma de entrada nas mensagens recebidas",
 							language_choice_input_sent:				"Idioma de entrada em suas mensagens enviadas",
 							language_choice_output_received:			"Idioma de saída nas mensagens recebidas",
@@ -10074,11 +10279,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Limita lunară de solicitare a fost atinsă.",
 							error_serverdown:					"Serverul de traducere ar putea fi offline.",
 							exception_text:						"Cuvintele care încep cu {{var0}} vor fi ignorate",
-							general_addQuickTranslateButton:			"Adaugă un buton de traducere rapidă în bara de acțiuni de mesaje",
-							general_addTranslateButton:				"Adaugă un buton de traducere în zona de text a canalului",
 							general_sendOriginalMessage:				"De asemenea, trimite mesajul original atunci când traduceți mesajul trimis",
 							general_showOriginalMessage:				"Afișează, de asemenea, mesajul original atunci când traduceți un mesaj primit",
-							general_usePerChatTranslation:				"Activează/dezactivează starea butonului de traducător pe canal și nu la nivel global",
 							language_choice_input_received:				"Limba de intrare în mesajele primite",
 							language_choice_input_sent:				"Introduceți limba în mesajele trimise",
 							language_choice_output_received:			"Limba de ieșire în mesajele primite",
@@ -10111,11 +10313,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Достигнут месячный лимит запросов.",
 							error_serverdown:					"Сервер переводов может быть отключен.",
 							exception_text:						"Слова, начинающиеся с {{var0}}, будут игнорироваться.",
-							general_addQuickTranslateButton:			"Добавляет кнопку быстрого перевода в панель действий сообщений",
-							general_addTranslateButton:				"Добавляет кнопку перевода в текстовую область канала",
 							general_sendOriginalMessage:				"Также отправляет исходное сообщение при переводе отправленного сообщения.",
 							general_showOriginalMessage:				"Также показывает исходное сообщение при переводе полученного сообщения.",
-							general_usePerChatTranslation:				"Включает/отключает состояние кнопки переводчика для каждого канала, а не глобально",
 							language_choice_input_received:				"Язык ввода в полученных сообщениях",
 							language_choice_input_sent:				"Язык ввода в ваших отправленных сообщениях",
 							language_choice_output_received:			"Язык вывода в полученных сообщениях",
@@ -10148,11 +10347,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Gränsen för månatlig begäran har nåtts.",
 							error_serverdown:					"Översättningsservern kan vara offline.",
 							exception_text:						"Ord som börjar med {{var0}} kommer att ignoreras",
-							general_addQuickTranslateButton:			"Lägger till en snabb translate -knapp i meddelanden om meddelanden om meddelanden om meddelanden",
-							general_addTranslateButton:				"Lägger till en Översätt-knapp i kanaltextområdet",
 							general_sendOriginalMessage:				"Skickar också det ursprungliga meddelandet när du översätter ditt skickade meddelande",
 							general_showOriginalMessage:				"Visar även det ursprungliga meddelandet när ett mottaget meddelande översätts",
-							general_usePerChatTranslation:				"Aktiverar/inaktiverar översättarknappens status per kanal och inte globalt",
 							language_choice_input_received:				"Inmatningsspråk i mottagna meddelanden",
 							language_choice_input_sent:				"Inmatningsspråk i dina skickade meddelanden",
 							language_choice_output_received:			"Utmatningsspråk i mottagna meddelanden",
@@ -10185,11 +10381,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"ถึงขีดจำกัดคำขอรายเดือนแล้ว",
 							error_serverdown:					"เซิร์ฟเวอร์การแปลอาจออฟไลน์อยู่",
 							exception_text:						"คำที่ขึ้นต้นด้วย {{var0}} จะถูกละเว้น",
-							general_addQuickTranslateButton:			"เพิ่มปุ่มแปลอย่างรวดเร็วในแถบการกระทำข้อความ",
-							general_addTranslateButton:				"เพิ่มปุ่มแปลภาษาไปยัง Textarea ของช่อง",
 							general_sendOriginalMessage:				"ส่งข้อความต้นฉบับเมื่อแปลข้อความที่ส่งของคุณ",
 							general_showOriginalMessage:				"ยังแสดงข้อความต้นฉบับเมื่อแปลข้อความที่ได้รับ",
-							general_usePerChatTranslation:				"เปิด/ปิดสถานะปุ่มนักแปลต่อช่องและไม่ใช่ทั่วโลก",
 							language_choice_input_received:				"ป้อนภาษาในข้อความที่ได้รับ",
 							language_choice_input_sent:				"ป้อนภาษาในข้อความที่คุณส่ง",
 							language_choice_output_received:			"ภาษาเอาต์พุตในข้อความที่ได้รับ",
@@ -10222,11 +10415,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Aylık İstek Sınırına ulaşıldı.",
 							error_serverdown:					"Çeviri Sunucusu çevrimdışı olabilir.",
 							exception_text:						"{{var0}} ile başlayan kelimeler yok sayılacak",
-							general_addQuickTranslateButton:			"Mesaj Eylemleri çubuğuna hızlı bir çeviri düğmesi ekler",
-							general_addTranslateButton:				"Kanal Metin Alanına Çevir Düğmesi Ekler",
 							general_sendOriginalMessage:				"Gönderilen Mesajınızı çevirirken orijinal Mesajı da gönderir",
 							general_showOriginalMessage:				"Alınan bir Mesajı tercüme ederken orijinal Mesajı da gösterir.",
-							general_usePerChatTranslation:				"Genel olarak değil, Kanal başına Çevirmen Düğmesi Durumunu Etkinleştirir/Devre Dışı Bırakır",
 							language_choice_input_received:				"Alınan Mesajlarda Giriş Dili",
 							language_choice_input_sent:				"Gönderilen Mesajlarınızda Dil Girin",
 							language_choice_output_received:			"Alınan Mesajlarda Çıktı Dili",
@@ -10259,11 +10449,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Досягнуто місячного ліміту запитів.",
 							error_serverdown:					"Сервер перекладу може бути офлайн.",
 							exception_text:						"Слова, що починаються з {{var0}}, ігноруватимуться",
-							general_addQuickTranslateButton:			"Додає кнопку швидкого перекладу в панелі дій Message",
-							general_addTranslateButton:				"Додає кнопку перекладу до текстової області каналу",
 							general_sendOriginalMessage:				"Також надсилає оригінальне повідомлення під час перекладу вашого надісланого повідомлення",
 							general_showOriginalMessage:				"Також показує оригінальне повідомлення під час перекладу отриманого повідомлення",
-							general_usePerChatTranslation:				"Вмикає/вимикає стан кнопки перекладача для кожного каналу, а не глобально",
 							language_choice_input_received:				"Мова введення в отриманих повідомленнях",
 							language_choice_input_sent:				"Мова введення у ваших надісланих повідомленнях",
 							language_choice_output_received:			"Мова виводу в отриманих повідомленнях",
@@ -10296,11 +10483,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Đã đạt đến Giới hạn Yêu cầu Hàng tháng.",
 							error_serverdown:					"Máy chủ dịch có thể ngoại tuyến.",
 							exception_text:						"Các từ bắt đầu bằng {{var0}} sẽ bị bỏ qua",
-							general_addQuickTranslateButton:			"Thêm nút dịch nhanh vào thanh hành động tin nhắn",
-							general_addTranslateButton:				"Thêm nút dịch vào vùng văn bản của kênh",
 							general_sendOriginalMessage:				"Đồng thời gửi Tin nhắn gốc khi dịch Tin nhắn đã gửi của bạn",
 							general_showOriginalMessage:				"Đồng thời hiển thị Tin nhắn gốc khi dịch một Tin nhắn đã nhận",
-							general_usePerChatTranslation:				"Bật / tắt Trạng thái nút dịch trên mỗi kênh và không bật trên toàn cầu",
 							language_choice_input_received:				"Nhập Ngôn ngữ trong Tin nhắn đã nhận",
 							language_choice_input_sent:				"Nhập Ngôn ngữ trong Tin nhắn đã gửi của bạn",
 							language_choice_output_received:			"Ngôn ngữ đầu ra trong Tin nhắn đã nhận",
@@ -10333,11 +10517,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"已达到每月请求限制。",
 							error_serverdown:					"翻译服务器可能离线。",
 							exception_text:						"以 {{var0}} 开头的单词将被忽略",
-							general_addQuickTranslateButton:			"在消息操作栏中添加一个快速翻译按钮",
-							general_addTranslateButton:				"将翻译按钮添加到频道文本区域",
 							general_sendOriginalMessage:				"翻译您发送的消息时也会发送原始消息",
 							general_showOriginalMessage:				"翻译收到的消息时还显示原始消息",
-							general_usePerChatTranslation:				"启用/禁用每个通道而不是全局的转换器按钮状态",
 							language_choice_input_received:				"收到消息中的输入语言",
 							language_choice_input_sent:				"在您发送的消息中输入语言",
 							language_choice_output_received:			"接收消息中的输出语言",
@@ -10370,11 +10551,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"已達到每月請求限制。",
 							error_serverdown:					"翻譯服務器可能離線。",
 							exception_text:						"以 {{var0}} 開頭的單詞將被忽略",
-							general_addQuickTranslateButton:			"在消息操作欄中添加一個快速翻譯按鈕",
-							general_addTranslateButton:				"將翻譯按鈕添加到頻道文本區域",
 							general_sendOriginalMessage:				"翻譯您發送的消息時也會發送原始消息",
 							general_showOriginalMessage:				"翻譯收到的消息時還顯示原始消息",
-							general_usePerChatTranslation:				"啟用/禁用每個通道而不是全局的轉換器按鈕狀態",
 							language_choice_input_received:				"收到消息中的輸入語言",
 							language_choice_input_sent:				"在您發送的消息中輸入語言",
 							language_choice_output_received:			"接收消息中的輸出語言",
@@ -10407,11 +10585,8 @@ module.exports = (_ => {
 							error_monthlylimit:					"Monthly Request Limit reached.",
 							error_serverdown:					"Translation Server might be offline.",
 							exception_text:						"Words starting with {{var0}} will be ignored",
-							general_addQuickTranslateButton:			"Adds a Quick Translate Button in the Message Actions Bar",
-							general_addTranslateButton:				"Adds a Translate Button to the Channel Textarea",
 							general_sendOriginalMessage:				"Also sends the original Message when translating your sent Message",
 							general_showOriginalMessage:				"Also shows the original Message when translating a received Message",
-							general_usePerChatTranslation:				"Enables/Disables the Translator Button State per Channel and not globally",
 							language_choice_input_received:				"Input Language in received Messages",
 							language_choice_input_sent:				"Input Language in your sent Messages",
 							language_choice_output_received:			"Output Language in received Messages",

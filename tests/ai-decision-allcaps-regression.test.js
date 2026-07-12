@@ -1,74 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const path = require("node:path");
+const {createAiDecisionAllcapsPluginInstance: createPluginInstance} = require("./helpers/createPluginInstance");
 
 // Regression for AI-decision auto-translate dropping all-caps foreign messages.
 // Mocks the deepseek engine: autoDecision=true echoes the source unchanged (simulating the
 // model treating all-caps text as an acronym), autoDecision=false returns a real translation.
-
-function createPluginInstance() {
-	class BasePlugin {}
-	const BDFDB = {
-		ArrayUtils: {is: Array.isArray},
-		DataUtils: {load: () => ({}), save: () => {}},
-		DiscordObjects: {Message: class Message {constructor(d){Object.assign(this,d);}}},
-		ObjectUtils: {
-			isEmpty: o => !o || !Object.keys(o).length,
-			deepAssign: (...objs) => {
-				const r = {};
-				for (const o of objs) if (o) for (const k in o) r[k] = o[k];
-				return r;
-			},
-			filter: (obj, fn) => Object.fromEntries(Object.entries(obj || {}).filter(([_, v]) => fn(v))),
-			sort: obj => obj
-		},
-		TimeUtils: {clear: () => {}, interval: () => 0, timeout: () => 0},
-		NotificationUtils: {toast: () => null},
-		LanguageUtils: {
-			languages: {
-				"zh-CN": {id: "zh-CN", name: "Chinese"},
-				"en": {id: "en", name: "English"}
-			},
-			getLanguage: () => ({id: "en"})
-		},
-		LibraryStores: {ChannelStore: {getChannel: () => null}, SelectedChannelStore: {getChannelId: () => "channel-test"}},
-		UserUtils: {me: {id: "current-user"}}
-	};
-	global.BdApi = {React: {Component: class Component {}}};
-	global.window = {BDFDB_Global: {loaded: true, started: true, PluginUtils: {buildPlugin: () => [BasePlugin, BDFDB]}}};
-
-	const pluginPath = path.resolve(__dirname, "..", "DiscordAITranslator.plugin.js");
-	delete require.cache[pluginPath];
-	const PluginClass = require(pluginPath);
-	const plugin = new PluginClass();
-	plugin.settings = {
-		general: {protectQuotedText: true, usePerChatTranslation: true},
-		exceptions: {wordStart: ["!"], protectedTerms: [], wrapperPairs: []},
-		engines: {translator: "deepseek", backup: "----"},
-		filters: {
-			minimumAutoTranslateLength: 6,
-			skipMixedReceivedMessages: false,
-			skipSameLanguageReceivedMessages: true,
-			treatLanguageVariantsAsSame: true,
-			dropSimilarTranslations: true,
-			translationSimilarityThreshold: 0.9,
-			useLocalLanguagePrecheck: true,
-			autoTranslateDecisionMode: "ai",
-			receivedAutoTranslateSourceLanguages: []
-		},
-		choices: {received: {input: "auto", output: "zh-CN"}, sent: {input: "auto", output: "en"}}
-	};
-	plugin.defaults = {
-		choices: {received: {value: {input: "auto", output: "zh-CN"}}, sent: {value: {input: "auto", output: "en"}}},
-		general: {}
-	};
-	plugin.labels = {detect_language: "Auto detect"};
-	plugin.isTranslationEnabled = () => true;
-	plugin.isReceivedAutoTranslationEnabled = () => true;
-	plugin.isOwnMessage = () => false;
-	plugin.setLanguages();
-	return plugin;
-}
 
 function setupEngine(plugin, {plainResult}) {
 	const calls = [];
