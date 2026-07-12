@@ -43,7 +43,8 @@ test("normal and prefixed sent translations keep the submitted channel id", asyn
 				}
 			}
 		},
-		isTranslationEnabled: () => true
+		isTranslationEnabled: () => true,
+		isOwnMessage: message => !!(message && message.author && message.author.id == "current-user")
 	});
 	plugin.shouldAutoTranslateSentMessage = (_text, _channelId, callback) => callback(true);
 	plugin.translateText = (text, place, callback, forcedOutputLanguage, options) => {
@@ -76,4 +77,186 @@ test("normal and prefixed sent translations keep the submitted channel id", asyn
 		{text: "hello", place: "sent", forcedOutputLanguage: null, channelId: "channel-submit"},
 		{text: "bonjour", place: "sent", forcedOutputLanguage: "fr", channelId: "channel-submit"}
 	]);
+});
+
+test("late automatic sent translation falls back to original text after channel disable and re-enable", async () => {
+	let submitPatch = null;
+	let translateCallback = null;
+	let enabled = true;
+	const submittedValues = [];
+	const plugin = createBasePluginInstance({
+		callSetLanguages: false,
+		bdfdb: {
+			DiscordConstants: {
+				ChannelTextAreaTypes: {
+					NORMAL: "NORMAL",
+					SIDEBAR: "SIDEBAR"
+				}
+			},
+			PatchUtils: {
+				forceAllUpdates: () => {},
+				patch: (_plugin, _target, _method, config) => {
+					submitPatch = config.instead;
+				}
+			}
+		},
+		isTranslationEnabled: () => enabled
+	});
+	plugin.shouldAutoTranslateSentMessage = (_text, _channelId, callback) => callback(true);
+	plugin.translateText = (_text, _place, callback) => {
+		translateCallback = callback;
+	};
+	plugin.buildSentTranslationMessageValue = () => "translated text";
+
+	plugin.processChannelTextAreaContainer({
+		instance: {
+			props: {
+				type: "NORMAL",
+				channel: {id: "channel-late-submit"},
+				onSubmit: () => {}
+			}
+		}
+	});
+	await submitPatch({
+		methodArguments: [{value: "original text"}],
+		stopOriginalMethodCall: () => {},
+		originalMethod: payload => {
+			submittedValues.push(payload.value);
+			return Promise.resolve();
+		},
+		callOriginalMethodAfterwards: () => Promise.resolve()
+	});
+
+	enabled = false;
+	plugin.clearAutoTranslationQueue("channel-late-submit");
+	enabled = true;
+	translateCallback("translated text", {id: "en"}, {id: "zh-CN"});
+	await new Promise(resolve => setImmediate(resolve));
+
+	assert.deepEqual(submittedValues, ["original text"]);
+});
+
+test("echoed automatic and prefixed sent translations restore their original text when editing", async () => {
+	let submitPatch = null;
+	let startEditBefore = null;
+	const submittedValues = [];
+	const plugin = createBasePluginInstance({
+		callSetLanguages: false,
+		settings: {
+			prefixes: {
+				translationPrefixData: [{prefix: "$fr", language: "fr"}]
+			}
+		},
+		bdfdb: {
+			DiscordConstants: {
+				ChannelTextAreaTypes: {
+					NORMAL: "NORMAL",
+					SIDEBAR: "SIDEBAR"
+				}
+			},
+			LibraryModules: {
+				MessageUtils: {},
+				MessageToolbarUtils: {}
+			},
+			PatchUtils: {
+				forceAllUpdates: () => {},
+				patch: (_plugin, _target, method, config) => {
+					if (method == "onSubmit") submitPatch = config.instead;
+					if (method == "startEditMessage") startEditBefore = config.before;
+				}
+			}
+		},
+		isTranslationEnabled: () => true,
+		isOwnMessage: message => !!(message && message.author && message.author.id == "current-user")
+	});
+	plugin.forceUpdateAll = () => {};
+	plugin.shouldAutoTranslateSentMessage = (_text, _channelId, callback) => callback(true);
+	plugin.translateText = (_text, _place, callback) => callback("translated text", {id: "en"}, {id: "zh-CN"});
+	plugin.buildSentTranslationMessageValue = () => "translated text";
+	plugin.onStart();
+	plugin.processChannelTextAreaContainer({
+		instance: {
+			props: {
+				type: "NORMAL",
+				channel: {id: "channel-edit-echo"},
+				onSubmit: () => {}
+			}
+		}
+	});
+
+	await submitPatch({
+		methodArguments: [{value: "original text"}],
+		stopOriginalMethodCall: () => {},
+		originalMethod: payload => {
+			submittedValues.push(payload.value);
+			return Promise.resolve();
+		},
+		callOriginalMethodAfterwards: () => Promise.resolve()
+	});
+	await new Promise(resolve => setImmediate(resolve));
+	const echoedMessage = {
+		id: "sent-echo-1",
+		channel_id: "channel-edit-echo",
+		content: "translated text",
+		embeds: [],
+		attachments: [],
+		author: {id: "current-user"}
+	};
+	plugin.checkMessage({content: echoedMessage}, echoedMessage, {id: echoedMessage.channel_id}, {skipAutoQueue: true});
+	const editEvent = {methodArguments: [echoedMessage.channel_id, echoedMessage.id, echoedMessage.content]};
+	startEditBefore(editEvent);
+
+	assert.deepEqual(submittedValues, ["translated text"]);
+	assert.equal(editEvent.methodArguments[2], "original text");
+
+	await submitPatch({
+		methodArguments: [{value: "$fr bonjour"}],
+		stopOriginalMethodCall: () => {},
+		originalMethod: payload => {
+			submittedValues.push(payload.value);
+			return Promise.resolve();
+		},
+		callOriginalMethodAfterwards: () => Promise.resolve()
+	});
+	await new Promise(resolve => setImmediate(resolve));
+	const prefixedMessage = {
+		id: "sent-echo-prefix",
+		channel_id: "channel-edit-echo",
+		content: "translated text",
+		embeds: [],
+		attachments: [],
+		author: {id: "current-user"}
+	};
+	plugin.checkMessage({content: prefixedMessage}, prefixedMessage, {id: prefixedMessage.channel_id}, {skipAutoQueue: true});
+	const prefixedEditEvent = {methodArguments: [prefixedMessage.channel_id, prefixedMessage.id, prefixedMessage.content]};
+	startEditBefore(prefixedEditEvent);
+
+	assert.deepEqual(submittedValues, ["translated text", "translated text"]);
+	assert.equal(prefixedEditEvent.methodArguments[2], "bonjour");
+});
+
+test("a sent original remains editable after the short echo-correlation window expires", () => {
+	const realNow = Date.now;
+	let now = realNow();
+	Date.now = () => now;
+	try {
+		const plugin = createBasePluginInstance({
+			callSetLanguages: false,
+			isOwnMessage: message => !!(message && message.author && message.author.id == "current-user")
+		});
+		plugin.trackPendingSentOriginal("channel-edit-later", "original later", "translated later");
+		plugin.captureSentOriginalMessage({
+			id: "sent-edit-later",
+			channel_id: "channel-edit-later",
+			content: "translated later",
+			author: {id: "current-user"}
+		}, "channel-edit-later");
+
+		now += 3 * 60 * 1000;
+
+		assert.equal(plugin.getEditableSentMessageText("sent-edit-later", "translated later"), "original later");
+	}
+	finally {
+		Date.now = realNow;
+	}
 });

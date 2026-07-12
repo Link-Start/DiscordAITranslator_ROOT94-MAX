@@ -40,3 +40,28 @@ test("manual message translate ignores hidden auto-translation state when master
 	assert.equal(activeTranslation.manual, true);
 	assert.equal(activeTranslation.independentOfTextAreaSwitch, true);
 });
+
+test("manual message translation deduplicates repeated clicks for the same message", async () => {
+	const plugin = createPluginInstance();
+	const channel = {id: "channel-deduplicate"};
+	const message = {
+		id: "message-deduplicate",
+		channel_id: channel.id,
+		content: "hola amigo",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	const callbacks = [];
+	plugin.translateText = (_text, _place, callback) => {
+		callbacks.push(callback);
+	};
+
+	const firstTranslation = plugin.translateMessage(message, channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false});
+	const duplicateTranslation = plugin.translateMessage(message, channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false});
+
+	assert.equal(callbacks.length, 1);
+	assert.equal(await duplicateTranslation, false);
+
+	callbacks[0]("hello friend", {id: "es"}, {id: "en"}, {});
+	assert.equal(await firstTranslation, true);
+});

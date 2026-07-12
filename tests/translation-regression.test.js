@@ -41,6 +41,199 @@ test("short CJK terms can still pass the auto-translate length gate", () => {
 	assert.equal(plugin.getAutoTranslateMinimumLengthForAnalysis({dominantFamily: "han", totalLetters: 2}), 0);
 });
 
+test("short Latin chat words still enter received auto-translation", () => {
+	const plugin = createPluginInstance({
+		settings: {
+			choices: {
+				received: {input: "auto", output: "zh-CN"}
+			},
+			filters: {
+				useLocalLanguagePrecheck: false,
+				skipSameLanguageReceivedMessages: true
+			}
+		}
+	});
+	const channel = {id: "channel-short-latin"};
+	for (const [id, content] of [["short-hi", "hi"], ["short-ok", "ok"]]) {
+		const message = {id, content, embeds: [], author: {id: "other-user"}};
+		assert.equal(plugin.sanitizeTextForAutoTranslateAnalysis(content), content);
+		assert.equal(plugin.shouldAutoTranslateReceivedMessage(message, channel, null, true), true);
+	}
+});
+
+test("legacy skip decisions are invalidated when the skip policy changes", () => {
+	let storedData = {};
+	const plugin = createPluginInstance({
+		settings: {
+			choices: {
+				received: {input: "auto", output: "zh-CN"}
+			}
+		},
+		bdfdb: {
+			DataUtils: {
+				load: (_plugin, key) => storedData[key] || {},
+				save: () => {}
+			}
+		}
+	});
+	const message = {id: "legacy-skip", content: "hi", embeds: [], author: {id: "other-user"}};
+	const signature = plugin.createReceivedTranslationSignature(message, "channel-cache", {content: "hi", embeds: []});
+	storedData = {
+		translationCache: {
+			[message.id]: {
+				signature,
+				cachedAt: Date.now(),
+				skipped: {reason: "ai_skip_signal", preview: "hi"}
+			}
+		}
+	};
+	plugin.forceUpdateAll();
+
+	assert.equal(plugin.getCachedReceivedSkipDecision(message, "channel-cache", {content: "hi", embeds: []}), null);
+
+	plugin.persistReceivedSkipDecision(message.id, signature, "ai_skip_signal", "hi");
+	assert.equal(plugin.getCachedReceivedSkipDecision(message, "channel-cache", {content: "hi", embeds: []}).reason, "ai_skip_signal");
+});
+
+test("received skip cache is invalidated when source-language policy changes", () => {
+	const plugin = createPluginInstance();
+	const message = {id: "source-policy-skip", content: "bonjour", embeds: [], author: {id: "other-user"}};
+	const sourceData = {content: "bonjour", embeds: []};
+	const signature = plugin.createReceivedTranslationSignature(message, "channel-policy", sourceData);
+	plugin.persistReceivedSkipDecision(message.id, signature, "source_filter", sourceData.content);
+
+	assert.equal(plugin.getCachedReceivedSkipDecision(message, "channel-policy", sourceData).reason, "source_filter");
+	plugin.settings.filters.receivedAutoTranslateSourceLanguages = ["en"];
+	assert.equal(plugin.getCachedReceivedSkipDecision(message, "channel-policy", sourceData), null);
+});
+
+test("received translation signature covers filtering and protection policy", () => {
+	const createSignature = mutate => {
+		const plugin = createPluginInstance();
+		const message = {id: "signature-policy", content: "hello", embeds: []};
+		const sourceData = {content: "hello", embeds: []};
+		const before = plugin.createReceivedTranslationSignature(message, "channel-policy", sourceData);
+		mutate(plugin);
+		return [before, plugin.createReceivedTranslationSignature(message, "channel-policy", sourceData)];
+	};
+	const mutations = [
+		plugin => { plugin.settings.filters.skipSameLanguageReceivedMessages = false; },
+		plugin => { plugin.settings.filters.useLocalLanguagePrecheck = false; },
+		plugin => { plugin.settings.filters.treatLanguageVariantsAsSame = false; },
+		plugin => { plugin.settings.filters.dropSimilarTranslations = false; },
+		plugin => { plugin.settings.filters.translationSimilarityThreshold = 0.75; },
+		plugin => { plugin.settings.filters.autoTranslateDecisionMode = "ai"; },
+		plugin => { plugin.settings.filters.languageDetectionStrategy = "google_free"; },
+		plugin => { plugin.settings.general.protectQuotedText = false; },
+		plugin => { plugin.settings.exceptions.protectedTermsForReceived = false; },
+		plugin => { plugin.settings.exceptions.wrapperPairsForReceived = false; }
+	];
+
+	for (const mutate of mutations) {
+		const [before, after] = createSignature(mutate);
+		assert.notEqual(after, before);
+	}
+});
+
+test("AI auto-translation prompt forbids skipping short foreign chat terms", () => {
+	const plugin = createPluginInstance();
+	const prompt = plugin.getDefaultAiAutoTranslatePrompt();
+
+	assert.match(prompt, /短词|short/i);
+	assert.match(prompt, /不要.{0,12}(跳过|省略)|do not.{0,12}(skip|omit)/i);
+});
+
+test("editing a received message clears the stale translation and queues the new source", () => {
+	const plugin = createPluginInstance();
+	const originalMessage = {
+		id: "received-edit",
+		channel_id: "channel-edit",
+		content: "old source",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	plugin.applyStoredTranslationToMessage(originalMessage, {
+		channelId: "channel-edit",
+		auto: true,
+		content: "旧译文",
+		translatedContent: "旧译文",
+		originalContent: "old source",
+		input: {id: "en"},
+		output: {id: "zh-CN"}
+	}, {content: "old source", embeds: []});
+	plugin.getAutoTranslationChannelState("channel-edit").boundaryMessageId = "999";
+	plugin.getAutoTranslationChannelState("channel-edit").initialized = true;
+	plugin.getCachedReceivedTranslation = () => null;
+	let queued = null;
+	plugin.queueAutoTranslateMessage = (message, channel, originalContentData, options) => {
+		queued = {message, channel, originalContentData, options};
+		return true;
+	};
+	const editedMessage = Object.assign({}, originalMessage, {content: "new source"});
+	const stream = {content: editedMessage};
+
+	plugin.checkMessage(stream, editedMessage, {id: "channel-edit"}, {
+		skipAutoQueue: false,
+		autoTranslateBoundaryId: "999",
+		historicalLoad: false
+	});
+
+	assert.equal(plugin.getActiveMessageTranslation(editedMessage, "channel-edit"), null);
+	assert.equal(queued.originalContentData.content, "new source");
+	assert.equal(queued.options.historicalLoad, false);
+});
+
+test("editing a sent translated message retranslates the replacement before submit", async () => {
+	const plugin = createPluginInstance();
+	plugin.shouldAutoTranslateSentMessage = (_text, _channelId, callback) => callback(true);
+	plugin.translateText = (text, place, callback, _forcedOutputLanguage, options) => {
+		assert.equal(text, "edited source");
+		assert.equal(place, "sent");
+		assert.equal(options.channelId, "channel-edit");
+		callback("edited translation", {id: "en"}, {id: "zh-CN"});
+	};
+	plugin.buildSentTranslationMessageValue = (original, translation) => `${translation}\n> ${original}`;
+	let submittedArguments = null;
+
+	await plugin.handleEditedMessageSubmit([
+		"channel-edit",
+		"sent-edit",
+		{content: "edited source", allowedMentions: []}
+	], (...args) => {
+		submittedArguments = args;
+		return Promise.resolve("submitted");
+	});
+
+	assert.equal(submittedArguments[2].content, "edited translation\n> edited source");
+	assert.deepEqual(submittedArguments[2].allowedMentions, []);
+});
+
+test("editing a sent message falls back to original text when the plugin stops before translation returns", async () => {
+	const plugin = createPluginInstance();
+	let translateCallback = null;
+	let submittedArguments = null;
+	plugin.shouldAutoTranslateSentMessage = (_text, _channelId, callback) => callback(true);
+	plugin.translateText = (_text, _place, callback) => {
+		translateCallback = callback;
+	};
+	plugin.buildSentTranslationMessageValue = () => "late edited translation";
+
+	const submission = plugin.handleEditedMessageSubmit([
+		"channel-edit-stop",
+		"sent-edit-stop",
+		{content: "edited original", allowedMentions: []}
+	], (...args) => {
+		submittedArguments = args;
+		return Promise.resolve("submitted");
+	});
+	plugin.onStop();
+	translateCallback("late edited translation", {id: "en"}, {id: "zh-CN"});
+	await submission;
+
+	assert.equal(submittedArguments[2].content, "edited original");
+	assert.deepEqual(submittedArguments[2].allowedMentions, []);
+});
+
 test("legacy received preset no longer overrides manual received auto-translate switches", () => {
 	const plugin = createPluginInstance();
 	plugin.settings.filters.receivedAutoTranslatePreset = "loose";
@@ -256,9 +449,7 @@ test("new-only scope skips the messages that are already loaded when a channel s
 	assert.equal(plugin.getAutoTranslationChannelState("channel-1").boundaryMessageId, "100");
 });
 
-// DEFERRED: loaded_messages scope currently still defers initial loaded messages (skipAutoQueue stays true)
-// and the scroll watcher needs a real DOM. Revisit when the scope behavior is aligned with the test intent.
-test.skip("loaded-messages scope allows the currently loaded messages to enter the auto-translate flow", () => {
+test("loaded-messages scope allows the currently loaded messages to enter the auto-translate flow", () => {
 	const plugin = createPluginInstance();
 	plugin.isReceivedAutoTranslationEnabled = () => true;
 	const recordedOptions = [];
@@ -288,6 +479,38 @@ test.skip("loaded-messages scope allows the currently loaded messages to enter t
 	assert.equal(plugin.getAutoTranslationChannelState("channel-2").boundaryMessageId, "200");
 });
 
+test("newly loaded older messages are collected without forcing a Discord rerender", () => {
+	const plugin = createPluginInstance();
+	const recordedOptions = [];
+	let rerenderCount = 0;
+	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
+	plugin.checkMessage = (_stream, message, _channel, options) => {
+		recordedOptions.push({messageId: message.id, options});
+	};
+	plugin.scheduleTranslationRerender = () => {
+		rerenderCount++;
+	};
+	const process = channelStream => plugin.processMessages({
+		instance: {
+			props: {
+				channel: {id: "channel-scroll"},
+				channelStream
+			}
+		}
+	});
+	const streamEntry = id => ({content: {id, attachments: [], content: `message ${id}`}});
+
+	process([streamEntry("200")]);
+	recordedOptions.length = 0;
+	process([streamEntry("100"), streamEntry("200")]);
+
+	const older = recordedOptions.find(item => item.messageId == "100");
+	const existing = recordedOptions.find(item => item.messageId == "200");
+	assert.equal(older.options.historicalLoad, true);
+	assert.equal(existing.options.historicalLoad, false);
+	assert.equal(rerenderCount, 0);
+});
+
 test("new-only scope does not queue visible reply preview translations during the first channel render", () => {
 	const plugin = createPluginInstance();
 	let queuedCount = 0;
@@ -315,13 +538,13 @@ test("new-only scope does not queue visible reply preview translations during th
 	assert.equal(queuedCount, 0);
 });
 
-// DEFERRED: processMessageReply does not queue reply-preview translations on its own; the
-// immediate-queue path for loaded_messages scope is not wired through this entry point yet.
-test.skip("loaded-messages scope can still queue visible reply preview translations immediately", () => {
+test("loaded-messages scope can still queue visible reply preview translations immediately", () => {
 	const plugin = createPluginInstance();
 	let queuedCount = 0;
 	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
+	plugin.settings.general.showOriginalInReplyPreview = true;
 	plugin.getCachedReceivedTranslation = () => null;
+	plugin.shouldAutoTranslateReplyPreview = () => true;
 	plugin.queueReplyPreviewTranslation = () => {
 		queuedCount++;
 	};
@@ -676,9 +899,7 @@ test("toggling a channel off restores automatic embed translations only in that 
 	assert.deepEqual(otherEvent.instance.props.embed.footer, {text: "其他脚注"});
 });
 
-// DEFERRED (#3): when auto-translate is off, processMessageReply strips the quoted block
-// ("> hello friend" is dropped). This is a real content-loss bug deferred per the safe-fix scope.
-test.skip("disabled channel auto-translation leaves reply previews untouched", () => {
+test("disabled channel auto-translation leaves reply previews untouched", () => {
 	const plugin = createPluginInstance();
 	const originalContent = "Hola amigo\n> hello friend";
 	plugin.isTranslationEnabled = () => false;
@@ -971,303 +1192,6 @@ test("live cached queue items apply stored translation without calling translate
 	assert.equal(appliedTranslation && appliedTranslation.translatedContent, "你好，世界");
 });
 
-test("historical cached queue items finish through the cached fast-path without calling translateMessage", () => {
-	const plugin = createPluginInstance();
-	let appliedCount = 0;
-	let translateCalls = 0;
-	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
-	plugin.isReceivedAutoTranslationEnabled = () => true;
-	plugin.scheduleHistoricalAutoTranslationStart = () => {};
-	plugin.updateLoadedAutoTranslationStatus = () => {};
-	plugin.clearLoadedAutoTranslationStatus = () => {};
-	plugin.shouldPauseHistoricalAutoTranslation = () => false;
-	plugin.applyStoredTranslationToMessage = (message, translation) => {
-		appliedCount++;
-		return Object.assign({}, translation, {messageId: message.id});
-	};
-	plugin.translateMessage = () => {
-		translateCalls++;
-		return Promise.resolve(true);
-	};
-
-	plugin.queueAutoTranslateMessage({
-		id: "cached-history-1",
-		channel_id: "channel-cached-history",
-		content: "hello history",
-		timestamp: new Date().toISOString(),
-		embeds: [],
-		author: {id: "other-user"}
-	}, {id: "channel-cached-history"}, {content: "hello history"}, {
-		cachedTranslation: {
-			content: "你好，历史消息",
-			translatedContent: "你好，历史消息",
-			originalContent: "hello history"
-		},
-		historicalLoad: true,
-		deferWhileReading: true
-	});
-
-	assert.equal(appliedCount, 0);
-	plugin.processAutoTranslationQueue();
-	assert.equal(translateCalls, 0);
-	assert.equal(appliedCount, 1);
-});
-
-test("historical loaded messages can finish through the AI batch path without falling back to single-message translation", async () => {
-	const plugin = createPluginInstance();
-	let batchRequest = null;
-	let persistedTranslation = null;
-	let appliedTranslation = null;
-	let translateCalls = 0;
-	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
-	plugin.isReceivedAutoTranslationEnabled = () => true;
-	plugin.scheduleHistoricalAutoTranslationStart = () => {};
-	plugin.updateLoadedAutoTranslationStatus = () => {};
-	plugin.clearLoadedAutoTranslationStatus = () => {};
-	plugin.shouldPauseHistoricalAutoTranslation = () => false;
-	plugin.shouldAutoTranslateReceivedMessage = () => true;
-	plugin.getHistoricalAiBatchEngineKey = () => "deepseek";
-	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
-		batchRequest = preparedItems;
-		return Promise.resolve({
-			"ai-history-1": "translated batch result"
-		});
-	};
-	plugin.isTranslationLikelyInTargetLanguage = () => true;
-	plugin.shouldKeepAutoTranslatedResult = () => true;
-	plugin.isTranslationResultTooSimilar = () => false;
-	plugin.persistTranslationCacheEntry = (_messageId, _signature, translation) => {
-		persistedTranslation = translation;
-	};
-	plugin.applyStoredTranslationToMessage = (_message, translation) => {
-		appliedTranslation = translation;
-		return translation;
-	};
-	plugin.translateMessage = () => {
-		translateCalls++;
-		return Promise.resolve(true);
-	};
-	plugin.flushHistoricalAutoTranslationRerender = () => {};
-	plugin.scheduleLoadedAutoTranslationPostBatchRescan = () => {};
-
-	plugin.queueAutoTranslateMessage({
-		id: "ai-history-1",
-		channel_id: "channel-ai-history",
-		content: "hello batch",
-		timestamp: new Date().toISOString(),
-		embeds: [],
-		author: {id: "other-user"}
-	}, {id: "channel-ai-history"}, {content: "hello batch"}, {
-		historicalLoad: true,
-		deferWhileReading: true
-	});
-
-	plugin.processAutoTranslationQueue();
-	await new Promise(resolve => setTimeout(resolve, 0));
-
-	assert.equal(translateCalls, 0);
-	assert.equal(Array.isArray(batchRequest), true);
-	assert.equal(batchRequest.length, 1);
-	assert.equal(batchRequest[0].message.id, "ai-history-1");
-	assert.equal(persistedTranslation && persistedTranslation.translatedContent, "translated batch result");
-	assert.equal(appliedTranslation && appliedTranslation.translatedContent, "translated batch result");
-	assert.equal(appliedTranslation && appliedTranslation.auto, true);
-});
-
-test("historical AI batch results become visible before a later chunk finishes", async () => {
-	const plugin = createPluginInstance();
-	const appliedMessageIds = [];
-	let requestCount = 0;
-	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
-	plugin.scheduleHistoricalAutoTranslationStart = () => {};
-	plugin.updateLoadedAutoTranslationStatus = () => {};
-	plugin.clearLoadedAutoTranslationStatus = () => {};
-	plugin.shouldPauseHistoricalAutoTranslation = () => false;
-	plugin.shouldAutoTranslateReceivedMessage = () => true;
-	plugin.getHistoricalAiBatchEngineKey = () => "deepseek";
-	plugin.getHistoricalAiBatchItemLimit = () => 1;
-	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
-		requestCount++;
-		if (requestCount == 1) return Promise.resolve({[preparedItems[0].message.id]: "第一条译文"});
-		return new Promise(() => {});
-	};
-	plugin.isTranslationLikelyInTargetLanguage = () => true;
-	plugin.shouldKeepAutoTranslatedResult = () => true;
-	plugin.isTranslationResultTooSimilar = () => false;
-	plugin.persistTranslationCacheEntry = () => {};
-	plugin.applyStoredTranslationToMessage = message => {
-		appliedMessageIds.push(message.id);
-		return {};
-	};
-	plugin.scheduleTranslationRerender = () => {};
-	plugin.scheduleLoadedAutoTranslationPostBatchRescan = () => {};
-
-	for (const [id, content] of [["100", "first historical message"], ["200", "second historical message"]]) {
-		plugin.queueAutoTranslateMessage({
-			id,
-			channel_id: "channel-ai-progress",
-			content,
-			timestamp: new Date().toISOString(),
-			embeds: [],
-			author: {id: "other-user"}
-		}, {id: "channel-ai-progress"}, {content}, {
-			historicalLoad: true,
-			deferWhileReading: true
-		});
-	}
-
-	plugin.processAutoTranslationQueue();
-	await new Promise(resolve => setTimeout(resolve, 0));
-	await new Promise(resolve => setTimeout(resolve, 0));
-
-	assert.equal(requestCount, 2);
-	assert.deepEqual(appliedMessageIds, ["100"]);
-});
-
-test("historical AI batch skip and wrong-target items fall back to single-message translation", async () => {
-	const plugin = createPluginInstance();
-	const singleFallbackMessageIds = [];
-	const singleFallbackOptions = [];
-	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
-	plugin.scheduleHistoricalAutoTranslationStart = () => {};
-	plugin.updateLoadedAutoTranslationStatus = () => {};
-	plugin.clearLoadedAutoTranslationStatus = () => {};
-	plugin.shouldPauseHistoricalAutoTranslation = () => false;
-	plugin.shouldAutoTranslateReceivedMessage = () => true;
-	plugin.getHistoricalAiBatchEngineKey = () => "deepseek";
-	plugin.requestAiBatchTranslation = () => Promise.resolve({
-		"batch-skip": "__SKIP_TRANSLATION__",
-		"batch-wrong-target": "still English"
-	});
-	plugin.isTranslationLikelyInTargetLanguage = text => text != "still English";
-	plugin.translateMessage = (message, _channel, options) => {
-		singleFallbackMessageIds.push(message.id);
-		singleFallbackOptions.push(options);
-		return Promise.resolve(true);
-	};
-	plugin.flushHistoricalAutoTranslationRerender = () => {};
-	plugin.scheduleLoadedAutoTranslationPostBatchRescan = () => {};
-
-	for (const [id, content] of [["batch-skip", "translate this"], ["batch-wrong-target", "translate this too"]]) {
-		plugin.queueAutoTranslateMessage({
-			id,
-			channel_id: "channel-ai-fallback",
-			content,
-			timestamp: new Date().toISOString(),
-			embeds: [],
-			author: {id: "other-user"}
-		}, {id: "channel-ai-fallback"}, {content}, {
-			historicalLoad: true,
-			deferWhileReading: true
-		});
-	}
-
-	plugin.processAutoTranslationQueue();
-	await new Promise(resolve => setTimeout(resolve, 0));
-	await new Promise(resolve => setTimeout(resolve, 0));
-	await new Promise(resolve => setTimeout(resolve, 0));
-
-	assert.deepEqual(singleFallbackMessageIds.sort(), ["batch-skip", "batch-wrong-target"]);
-	assert.equal(singleFallbackOptions.every(options => options && options.forcePlainTranslation === true), true);
-});
-
-test("historical single-message fallback retries one transient failure", async () => {
-	const plugin = createPluginInstance();
-	let translateCalls = 0;
-	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
-	plugin.scheduleHistoricalAutoTranslationStart = () => {};
-	plugin.updateLoadedAutoTranslationStatus = () => {};
-	plugin.clearLoadedAutoTranslationStatus = () => {};
-	plugin.shouldPauseHistoricalAutoTranslation = () => false;
-	plugin.shouldAutoTranslateReceivedMessage = () => true;
-	plugin.getHistoricalAiBatchEngineKey = () => null;
-	plugin.getCachedReceivedSkipDecision = () => null;
-	plugin.translateMessage = () => {
-		translateCalls++;
-		return Promise.resolve(translateCalls > 1);
-	};
-	plugin.flushHistoricalAutoTranslationRerender = () => {};
-	plugin.scheduleLoadedAutoTranslationPostBatchRescan = () => {};
-
-	plugin.queueAutoTranslateMessage({
-		id: "historical-transient-retry",
-		channel_id: "channel-transient-retry",
-		content: "translate after a transient failure",
-		timestamp: new Date().toISOString(),
-		embeds: [],
-		author: {id: "other-user"}
-	}, {id: "channel-transient-retry"}, {content: "translate after a transient failure"}, {
-		historicalLoad: true,
-		deferWhileReading: true
-	});
-
-	plugin.processAutoTranslationQueue();
-	await new Promise(resolve => setTimeout(resolve, 0));
-	await new Promise(resolve => setTimeout(resolve, 0));
-
-	assert.equal(translateCalls, 2);
-});
-
-test("live incoming translations are not blocked by an in-flight historical AI batch", async () => {
-	const plugin = createPluginInstance();
-	let resolveHistoricalRequest = null;
-	let liveTranslateCalls = 0;
-	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
-	plugin.isTranslationEnabled = () => true;
-	plugin.isReceivedAutoTranslationEnabled = () => true;
-	plugin.scheduleHistoricalAutoTranslationStart = () => {};
-	plugin.updateLoadedAutoTranslationStatus = () => {};
-	plugin.clearLoadedAutoTranslationStatus = () => {};
-	plugin.shouldPauseHistoricalAutoTranslation = () => false;
-	plugin.shouldAutoTranslateReceivedMessage = () => true;
-	plugin.getHistoricalAiBatchEngineKey = () => "deepseek";
-	plugin.requestAiBatchTranslation = () => new Promise(resolve => {
-		resolveHistoricalRequest = resolve;
-	});
-	plugin.isTranslationLikelyInTargetLanguage = () => true;
-	plugin.shouldKeepAutoTranslatedResult = () => true;
-	plugin.isTranslationResultTooSimilar = () => false;
-	plugin.persistTranslationCacheEntry = () => {};
-	plugin.applyStoredTranslationToMessage = () => ({});
-	plugin.flushHistoricalAutoTranslationRerender = () => {};
-	plugin.scheduleLoadedAutoTranslationPostBatchRescan = () => {};
-	plugin.translateMessage = message => {
-		liveTranslateCalls++;
-		assert.equal(message.id, "live-priority-1");
-		return Promise.resolve(true);
-	};
-
-	plugin.queueAutoTranslateMessage({
-		id: "history-pending-1",
-		channel_id: "channel-priority",
-		content: "historical message",
-		timestamp: new Date().toISOString(),
-		embeds: [],
-		author: {id: "other-user"}
-	}, {id: "channel-priority"}, {content: "historical message"}, {
-		historicalLoad: true,
-		deferWhileReading: true
-	});
-	plugin.processAutoTranslationQueue();
-	await new Promise(resolve => setTimeout(resolve, 0));
-
-	assert.equal(typeof resolveHistoricalRequest, "function");
-	plugin.queueAutoTranslateMessage({
-		id: "live-priority-1",
-		channel_id: "channel-priority",
-		content: "live message",
-		embeds: [],
-		author: {id: "other-user"}
-	}, {id: "channel-priority"}, {content: "live message"}, {
-		historicalLoad: false
-	});
-	await new Promise(resolve => setTimeout(resolve, 0));
-
-	assert.equal(liveTranslateCalls, 1);
-	resolveHistoricalRequest({"history-pending-1": "历史译文"});
-	await new Promise(resolve => setTimeout(resolve, 0));
-});
-
 test("finishing a manual translation resumes live auto-translation queue work", async () => {
 	const plugin = createPluginInstance();
 	let finishManualRequest = null;
@@ -1342,6 +1266,34 @@ test("live automatic translations request a typing-safe rerender", async () => {
 	assert.equal(rerenderOptions && rerenderOptions.allowWhileTyping, true);
 });
 
+test("live translateMessage forwards the automatic flag to translateText", async () => {
+	const plugin = createPluginInstance();
+	const channel = {id: "channel-live-auto-option"};
+	const message = {
+		id: "live-auto-option-1",
+		channel_id: channel.id,
+		content: "hello world",
+		embeds: [],
+		attachments: [],
+		author: {id: "other-user"}
+	};
+	let translateOptions = null;
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.translateText = (_text, _place, callback, _forcedOutputLanguage, options) => {
+		translateOptions = options;
+		callback("", {id: "en"}, {id: "zh-CN"}, {skipped: true});
+	};
+
+	await plugin.translateMessage(message, channel, {
+		auto: true,
+		silent: true,
+		trackBusy: false
+	});
+
+	assert.equal(translateOptions.auto, true);
+});
+
 test("live batched translation rerenders add no more than 200ms display delay", () => {
 	const plugin = createPluginInstance();
 	const originalSetTimeout = global.setTimeout;
@@ -1364,48 +1316,222 @@ test("live batched translation rerenders add no more than 200ms display delay", 
 	assert.equal(scheduledDelay <= 200, true);
 });
 
-// DEFERRED (#7): the history-defer + new-message-priority retry path does not trigger a retry
-// (retryCount stays 0). Real behavioral gap, deferred per the safe-fix scope.
-test.skip("historical loaded messages are deferred while browsing history, but new messages still run first", async () => {
+test("live auto-translation results are ignored after plugin stop", async () => {
 	const plugin = createPluginInstance();
-	let retryCount = 0;
-	let translatedIds = [];
-	plugin.settings.filters.receivedAutoTranslateLoadedTimeWindow = "24h";
+	const channel = {id: "channel-live-stop"};
+	const message = {
+		id: "live-stop-1",
+		channel_id: channel.id,
+		content: "hello after stop",
+		embeds: [],
+		attachments: [],
+		author: {id: "other-user"}
+	};
+	let finishRequest = null;
+	let applyCount = 0;
+	let cacheWriteCount = 0;
+	let rerenderCount = 0;
 	plugin.shouldAutoTranslateReceivedMessage = () => true;
-	plugin.isViewingMessageHistory = () => true;
-	plugin.scheduleAutoTranslationQueueRetry = () => {
-		retryCount++;
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.getAutoTranslatedResultRejectReason = () => null;
+	plugin.isTranslationResultTooSimilar = () => false;
+	plugin.translateText = (_text, _place, callback) => {
+		finishRequest = callback;
 	};
-	plugin.translateMessage = message => {
-		translatedIds.push(message.id);
-		return Promise.resolve(true);
+	plugin.applyStoredTranslationToMessage = () => {
+		applyCount++;
+		return {};
+	};
+	plugin.persistTranslationCacheEntry = () => {
+		cacheWriteCount++;
+	};
+	plugin.scheduleTranslationRerender = () => {
+		rerenderCount++;
+	};
+	plugin.cancelHistoricalTranslationJobs = () => {};
+	plugin.clearChannelTitleTranslations = () => {};
+	plugin.detachAutoTranslationInputActivityWatcher = () => {};
+	plugin.detachAutoTranslationScrollWatcher = () => {};
+	plugin.clearDisplayedTranslations = () => {};
+	plugin.clearLoadedAutoTranslationStatus = () => {};
+	plugin.forceUpdateAll = () => {};
+
+	plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+	assert.equal(typeof finishRequest, "function");
+
+	plugin.onStop();
+	finishRequest("停止后的旧译文", {id: "en"}, {id: "zh-CN"});
+	await new Promise(resolve => setImmediate(resolve));
+
+	assert.equal(applyCount, 0);
+	assert.equal(cacheWriteCount, 0);
+	assert.equal(rerenderCount, 0);
+});
+
+test("live auto-translation results are ignored after clearing the channel queue", async () => {
+	const plugin = createPluginInstance();
+	const channel = {id: "channel-live-clear"};
+	const message = {
+		id: "live-clear-1",
+		channel_id: channel.id,
+		content: "hello before clear",
+		embeds: [],
+		attachments: [],
+		author: {id: "other-user"}
+	};
+	let finishRequest = null;
+	let applyCount = 0;
+	let cacheWriteCount = 0;
+	let rerenderCount = 0;
+	plugin.shouldAutoTranslateReceivedMessage = () => true;
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.getAutoTranslatedResultRejectReason = () => null;
+	plugin.isTranslationResultTooSimilar = () => false;
+	plugin.translateText = (_text, _place, callback) => {
+		finishRequest = callback;
+	};
+	plugin.applyStoredTranslationToMessage = () => {
+		applyCount++;
+		return {};
+	};
+	plugin.persistTranslationCacheEntry = () => {
+		cacheWriteCount++;
+	};
+	plugin.scheduleTranslationRerender = () => {
+		rerenderCount++;
 	};
 
-	plugin.queueAutoTranslateMessage({
-		id: "history-2",
-		content: "hello",
-		timestamp: new Date().toISOString(),
-		author: {id: "other-user"},
-		embeds: []
-	}, {id: "channel-6"}, {content: "hello"}, {
-		historicalLoad: true,
-		deferWhileReading: true
-	});
-	plugin.queueAutoTranslateMessage({
-		id: "new-1",
-		content: "hello",
-		timestamp: new Date().toISOString(),
-		author: {id: "other-user"},
-		embeds: []
-	}, {id: "channel-6"}, {content: "hello"}, {
-		historicalLoad: false,
-		deferWhileReading: false
+	plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+	assert.equal(typeof finishRequest, "function");
+
+	plugin.clearAutoTranslationQueue(channel.id);
+	finishRequest("清理后的旧译文", {id: "en"}, {id: "zh-CN"});
+	await new Promise(resolve => setImmediate(resolve));
+
+	assert.equal(applyCount, 0);
+	assert.equal(cacheWriteCount, 0);
+	assert.equal(rerenderCount, 0);
+});
+
+test("editing a live source invalidates the stale result and keeps the replacement pending", async () => {
+	const plugin = createPluginInstance();
+	const channel = {id: "channel-live-edit"};
+	const originalMessage = {
+		id: "100",
+		channel_id: channel.id,
+		content: "old live source",
+		embeds: [],
+		attachments: [],
+		author: {id: "other-user"}
+	};
+	const requestCallbacks = [];
+	const appliedTranslations = [];
+	plugin.shouldAutoTranslateReceivedMessage = () => true;
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.getAutoTranslatedResultRejectReason = () => null;
+	plugin.isTranslationResultTooSimilar = () => false;
+	plugin.translateText = (_text, _place, callback) => {
+		requestCallbacks.push(callback);
+	};
+	plugin.applyStoredTranslationToMessage = (message, translation) => {
+		appliedTranslations.push({source: message.content, translated: translation.translatedContent});
+		return {};
+	};
+	plugin.persistTranslationCacheEntry = () => {};
+	plugin.scheduleTranslationRerender = () => {};
+
+	plugin.queueAutoTranslateMessage(originalMessage, channel, {content: originalMessage.content, embeds: []});
+	assert.equal(requestCallbacks.length, 1);
+
+	const channelState = plugin.getAutoTranslationChannelState(channel.id);
+	channelState.initialized = true;
+	channelState.boundaryMessageId = "999";
+	const editedMessage = Object.assign({}, originalMessage, {content: "new live source"});
+	plugin.checkMessage({content: editedMessage}, editedMessage, channel, {
+		skipAutoQueue: false,
+		autoTranslateBoundaryId: "999",
+		historicalLoad: false
 	});
 
-	await new Promise(resolve => setTimeout(resolve, 0));
+	requestCallbacks[0]("旧译文", {id: "en"}, {id: "zh-CN"});
+	await new Promise(resolve => setImmediate(resolve));
 
-	assert.equal(retryCount >= 1, true);
-	assert.deepEqual(translatedIds, ["new-1"]);
+	assert.equal(requestCallbacks.length, 2);
+	assert.deepEqual(appliedTranslations, []);
+	assert.equal(plugin.isMessageTranslationPending(originalMessage.id, channel.id), true);
+
+	requestCallbacks[1]("新译文", {id: "en"}, {id: "zh-CN"});
+	await new Promise(resolve => setImmediate(resolve));
+
+	assert.deepEqual(appliedTranslations, [{source: "new live source", translated: "新译文"}]);
+});
+
+test("direct live auto translation releases its request when translateText throws", async () => {
+	const plugin = createPluginInstance();
+	const channel = {id: "channel-live-throw"};
+	const message = {
+		id: "live-throw-1",
+		channel_id: channel.id,
+		content: "throwing source",
+		embeds: [],
+		attachments: [],
+		author: {id: "other-user"}
+	};
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.translateText = () => {
+		throw new Error("provider setup failed");
+	};
+
+	const result = await plugin.translateMessage(message, channel, {
+		auto: true,
+		silent: true,
+		trackBusy: false
+	});
+	const editedMessage = Object.assign({}, message, {content: "changed after failure"});
+	const editedContentData = plugin.extractOriginalContentData(editedMessage);
+	const editedSignature = plugin.createReceivedTranslationSignature(editedMessage, channel.id, editedContentData);
+
+	assert.equal(result, false);
+	assert.equal(plugin.invalidateLiveTranslationMessage(message.id, channel.id, editedSignature), false);
+});
+
+test("direct live auto translation releases its request when result handling throws", async () => {
+	const plugin = createPluginInstance();
+	const channel = {id: "channel-live-handler-throw"};
+	const message = {
+		id: "live-handler-throw-1",
+		channel_id: channel.id,
+		content: "handler failure source",
+		embeds: [],
+		attachments: [],
+		author: {id: "other-user"}
+	};
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.getAutoTranslatedResultRejectReason = () => null;
+	plugin.isTranslationResultTooSimilar = () => false;
+	plugin.translateText = (_text, _place, callback) => {
+		callback("处理中的译文", {id: "en"}, {id: "zh-CN"});
+	};
+	plugin.applyStoredTranslationToMessage = () => {
+		throw new Error("render state failed");
+	};
+
+	const result = await plugin.translateMessage(message, channel, {
+		auto: true,
+		silent: true,
+		trackBusy: false
+	});
+	const editedMessage = Object.assign({}, message, {content: "changed after handler failure"});
+	const editedContentData = plugin.extractOriginalContentData(editedMessage);
+	const editedSignature = plugin.createReceivedTranslationSignature(editedMessage, channel.id, editedContentData);
+
+	assert.equal(result, false);
+	assert.equal(plugin.invalidateLiveTranslationMessage(message.id, channel.id, editedSignature), false);
 });
 
 test("late auto-translation results are ignored after the channel toggle is disabled", async () => {
@@ -1545,10 +1671,7 @@ test("manual untranslate suppresses cached reply preview translations", async ()
 	assert.equal(event.instance.props.referencedMessage.message.content, "hello world");
 });
 
-// DEFERRED (#2): a stored manual translation (auto:false) is not shown in reply previews once the
-// auto-translate toggle is off; getReplyPreviewDisplayContentForMessage returns the original instead.
-// Real bug, deferred per the safe-fix scope.
-test.skip("manual message translations stay visible in reply previews even when incoming auto-translate is off", () => {
+test("manual message translations stay visible in reply previews even when incoming auto-translate is off", () => {
 	const plugin = createPluginInstance();
 	const referencedMessage = {
 		id: "reply-manual-1",
@@ -1582,4 +1705,68 @@ test.skip("manual message translations stay visible in reply previews even when 
 	plugin.processMessageReply(event);
 
 	assert.equal(event.instance.props.referencedMessage.message.content, "你好，世界");
+});
+
+test("reply preview ignores a late translation after plugin stop", () => {
+	const plugin = createPluginInstance();
+	const message = {
+		id: "reply-stop-late",
+		channel_id: "channel-reply-stop",
+		content: "reply source",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	let translateCallback = null;
+	let rerenderCount = 0;
+	plugin.shouldAutoTranslateReplyPreview = () => true;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.translateText = (_text, _place, callback) => {
+		translateCallback = callback;
+	};
+	plugin.scheduleTranslationRerender = () => {
+		rerenderCount++;
+	};
+
+	plugin.queueReplyPreviewTranslation(message, message.channel_id);
+	plugin.onStop();
+	translateCallback("late reply translation", {id: "en"}, {id: "zh-CN"});
+
+	assert.equal(plugin.getReplyPreviewTranslation(message, message.channel_id), null);
+	assert.equal(rerenderCount, 0);
+});
+
+test("manual message translation ignores a late result after plugin stop", async () => {
+	const plugin = createPluginInstance();
+	const message = {
+		id: "manual-stop-late",
+		channel_id: "channel-manual-stop",
+		content: "manual source",
+		embeds: [],
+		attachments: [],
+		author: {id: "other-user"}
+	};
+	let translateCallback = null;
+	let applyCount = 0;
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.translateText = (_text, _place, callback) => {
+		translateCallback = callback;
+	};
+	plugin.applyStoredTranslationToMessage = () => {
+		applyCount++;
+		return {};
+	};
+	plugin.scheduleTranslationRerender = () => {};
+
+	const translation = plugin.translateMessage(message, {id: message.channel_id}, {
+		manual: true,
+		independentOfTextAreaSwitch: true,
+		trackBusy: false
+	});
+	plugin.onStop();
+	translateCallback("late manual translation", {id: "en"}, {id: "zh-CN"});
+	const result = await translation;
+
+	assert.equal(result, false);
+	assert.equal(applyCount, 0);
 });

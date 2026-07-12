@@ -10,9 +10,9 @@
 
 ## Why Regressions Keep Returning
 
-The current work is a large uncommitted change set on top of `master`. Runtime behavior, architecture extraction, settings migration, documentation, and tests changed together without stable commit checkpoints.
+The recovery started from a large change set where runtime behavior, settings migration, documentation, and tests had changed together without stable checkpoints.
 
-The historical translation path is controlled by many shared closure variables, timers, maps, and boolean flags. It currently has multiple competing completion paths: progressive staging flush, final batch completion, and delayed post-batch rescanning. Tests frequently replace internal plugin methods, so they can pass while the real provider, queue, cache, and Discord render path is wired incorrectly.
+The root architectural defect was two competing historical paths: progressive staging and rescan globals remained active beside the new coordinator. Those legacy branches and their six obsolete skipped tests have now been removed. The remaining risk is physical coupling inside the single distribution file and incomplete DiscordPTB smoke coverage.
 
 ## Recovery Rules
 
@@ -115,58 +115,58 @@ src/providers/batch-response-validator.js
 
 ### Phase 1: Characterization
 
-- [ ] Replace the progressive-display test with an atomic-commit test that asserts exactly one rerender.
-- [ ] Add real parser tests for unknown, duplicate, missing, empty, and malformed IDs.
-- [ ] Add a persistent skip-cache version test using pre-existing user data.
-- [ ] Add render-node reuse coverage that starts with translated CSS class and color variables.
-- [ ] Add integration coverage for channel switching, channel disable, plugin stop, edits, scroll-loaded messages, and short words.
-- [ ] Unskip historical entry-flow and scroll-order tests before implementation is considered complete.
+- [x] Replace the progressive-display test with an atomic-commit test that asserts exactly one rerender.
+- [x] Add real parser tests for unknown, duplicate, missing, empty, and malformed IDs.
+- [x] Add a persistent skip-cache version test using pre-existing user data.
+- [x] Add render-node reuse coverage that starts with translated CSS class and color variables.
+- [x] Add integration coverage for channel switching, channel disable, plugin stop, edits, scroll-loaded messages, and short words.
+- [x] Remove or replace obsolete skipped entry-flow and scroll-order tests with coordinator coverage.
 
 ### Phase 2: Historical Job
 
-- [ ] Introduce one channel-scoped `HistoricalTranslationJob` interface without changing the live path.
-- [ ] Move snapshot IDs, item states, staging results, attempts, counters, and generation into the job.
-- [ ] Replace rerender-driven rescanning with explicit visible-message collection.
-- [ ] Validate response IDs and protected placeholders before accepting any result.
-- [ ] Repair unresolved items with smaller batches, forced single translation, then the global backup provider.
-- [ ] Commit cache and display state only when all items are terminal and the source signatures are current.
-- [ ] Wait for typing and scroll idle before one atomic rerender.
-- [ ] Remove progressive flush, attempted-message maps, post-batch rescan scheduling, and superseded batch globals.
+- [x] Introduce one channel-scoped `HistoricalTranslationJob` interface without changing the live path.
+- [x] Move snapshot IDs, item states, staging results, attempts, counters, and generation into the job.
+- [x] Replace rerender-driven rescanning with explicit visible-message collection.
+- [x] Validate response IDs and protected placeholders before accepting any result.
+- [x] Repair unresolved items with smaller batches, forced single translation, then the global backup provider.
+- [x] Commit cache and display state only when all items are terminal and the source signatures are current.
+- [x] Wait for typing and scroll idle before one atomic rerender.
+- [x] Remove progressive flush, attempted-message maps, post-batch rescan scheduling, and superseded batch globals.
 
 ### Phase 3: Message Lifecycle
 
-- [ ] Invalidate old snapshots and cache entries when another user edits a message.
-- [ ] Re-translate edited received content using a new signature.
-- [ ] Restore editable original text for sent messages and translate the replacement after submit.
-- [ ] Restore original messages, replies, and embeds on plugin stop.
-- [ ] Ignore every late provider callback after stop, disable, channel switch, or source edit.
+- [x] Invalidate old snapshots and cache entries when another user edits a message.
+- [x] Re-translate edited received content using a new signature.
+- [x] Restore editable original text for sent messages and translate the replacement after submit.
+- [x] Restore original messages, replies, and embeds on plugin stop.
+- [x] Ignore every late provider callback after stop, disable, channel switch, or source edit.
 
 ### Phase 4: Translation Correctness
 
-- [ ] Guarantee short conversational words enter translation when source and target differ.
-- [ ] Separate translation instructions from skip decisions.
-- [ ] Version the skip-decision cache and invalidate incompatible old entries.
-- [ ] Validate protected placeholders and glossary terms after every provider response.
-- [ ] Remove translated classes, variables, watermark, and injected blocks when no active translation exists.
-- [ ] Add completeness checks for batch results.
+- [x] Guarantee short conversational words enter translation when source and target differ.
+- [x] Separate translation instructions from skip decisions.
+- [x] Version the skip-decision cache and invalidate incompatible old entries.
+- [x] Validate protected placeholders and glossary terms after every provider response.
+- [x] Remove translated classes, variables, watermark, and injected blocks when no active translation exists.
+- [x] Add completeness checks for batch results.
 
 ### Phase 5: Providers And Settings
 
-- [ ] Add an official OpenAI adapter for OpenAI API models.
-- [ ] Add a native Gemini adapter using Gemini request and response schemas.
-- [ ] Retain a clearly named OpenAI-compatible adapter for third-party and self-hosted endpoints.
-- [ ] Keep Google Free keyless and Google Cloud responsible for official API keys.
-- [ ] Add the language detection strategy selector with local detection and Google Free fallback.
-- [ ] Remove the duplicate global language detection helper while retaining global detection strategy settings.
-- [ ] Consolidate overlapping display settings under one canonical key per behavior.
-- [ ] Update English metadata and the repository-linked author field.
+- [x] Add an official OpenAI adapter for OpenAI API models.
+- [x] Add a native Gemini adapter using Gemini request and response schemas.
+- [x] Retain a clearly named OpenAI-compatible adapter for third-party and self-hosted endpoints.
+- [x] Keep Google Free keyless and Google Cloud responsible for official API keys.
+- [x] Add the language detection strategy selector with local detection and Google Free fallback.
+- [x] Remove the duplicate global language detection helper while retaining global detection strategy settings.
+- [x] Consolidate overlapping display settings under one canonical key per behavior.
+- [x] Update English metadata and the repository-linked author field.
 
 ### Phase 6: Remaining Product Coverage
 
-- [ ] Translate forum and thread titles with the current channel configuration.
+- [x] Translate forum and thread titles with the current channel configuration.
 - [ ] Profile provider latency, queue latency, validation latency, commit wait, and Discord render latency separately.
-- [ ] Add the CSS-only per-message loading indicator for live and historical work.
-- [ ] Complete repository documentation and remove obsolete runtime branches.
+- [x] Add the CSS-only per-message loading indicator for live and historical work.
+- [ ] Complete canonical repository documentation and remove obsolete runtime branches after the `src/` migration is verified.
 
 ### Phase 7: Cleanup
 

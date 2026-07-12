@@ -8,6 +8,7 @@ const {createAiDecisionAllcapsPluginInstance: createPluginInstance} = require(".
 
 function setupEngine(plugin, {plainResult}) {
 	const calls = [];
+	plugin.isEngineConfiguredForRuntime = () => true;
 	plugin.validTranslator = () => true;
 	plugin.deepSeekTranslate = (data, callback) => {
 		calls.push({autoDecision: !!data.autoDecision, text: data.text});
