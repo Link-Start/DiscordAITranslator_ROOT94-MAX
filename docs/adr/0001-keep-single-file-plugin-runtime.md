@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. Proposed to be superseded by [ADR-0002](0002-generate-single-file-plugin-from-modular-source.md) after written architecture review.
 
 ## Context
 
@@ -19,7 +19,7 @@ That would make regressions harder to diagnose and would raise the chance of shi
 
 During the early refactor program, keep `DiscordAITranslator.plugin.js` as the shipped runtime entry point.
 
-Architectural extraction is allowed, but only if it preserves the single-file runtime behavior seen by BetterDiscord users. If the repo later moves to a generated or bundled output, that change must be introduced by a new ADR and validated separately from routine architecture work.
+Architectural extraction is allowed, but only if it preserves the single-file runtime behavior seen by BetterDiscord users. A generated or bundled output requires a separate ADR and independent build verification.
 
 ## Consequences
 

@@ -1,127 +1,347 @@
 # Architecture
 
-## Current Runtime
+## Status
 
-The shipped implementation is `DiscordAITranslator.plugin.js`:
+This document defines the proposed target architecture for the repository. The direction has been approved in conversation, but the written design still requires repository review. The migration has not started until `src/` and the deterministic build exist in Git.
 
-- Approximately 10,688 lines
-- Approximately 582 KB
-- BetterDiscord and BDFDB runtime
-- One generated or hand-maintained distribution file
-- Node.js built-in regression tests using a mocked BDFDB environment
+The current shipped runtime remains `DiscordAITranslator.plugin.js`. It is approximately 10,700 lines and 618 KB. It must remain installable while the source architecture is migrated.
 
-This file is the real runtime. Documentation and roadmap entries do not override tested behavior.
+## Distribution Contract
 
-## Existing Internal Boundaries
+BetterDiscord users install exactly one file:
 
-The single file already contains several logical modules:
+```text
+DiscordAITranslator.plugin.js
+```
 
-- Translation provider registry and adapters
-- Channel enablement state
-- Channel primary provider overrides
-- Sent translation policy
-- Received translation policy and live-only queue runtime
-- Channel-scoped `HistoricalTranslationJob` coordinator
-- Translation cache and reply-preview signatures
-- Translation display logic
-- Forum and thread title display logic
-- Text protection logic
+The repository will contain readable source modules under `src/`. A deterministic build will bundle those modules into the root plugin file. The generated plugin is a distribution artifact and must not be edited manually after the migration begins.
+
+The build contract is:
+
+```text
+src/plugin/index.js
+        -> scripts/build-plugin.mjs
+        -> DiscordAITranslator.plugin.js
+```
+
+The build uses esbuild in CommonJS bundle mode, preserves the BetterDiscord metadata banner, excludes tests and diagnostics, and produces the same bytes from the same source and dependency lockfile.
+
+## Current Architecture
+
+The current single file contains useful logical modules, but they share closure state and one plugin class:
+
+- Provider registry and provider-specific request code
+- Sent and received translation policies
+- Live and historical translation queues
+- Translation cache and skip cache
+- Channel enablement and channel provider overrides
+- Message, reply, embed, and thread-title display patches
 - BetterDiscord settings and channel popout UI
+- Plugin lifecycle and cleanup
 
-These boundaries are useful but remain physically coupled through closure state and one plugin class.
+The central mutable maps are `translatedMessages`, `oldMessages`, queue records, reply-preview records, channel title records, and several generation counters. They are not owned by one module.
 
-## Persistent State
+## Confirmed Architectural Failure
 
-Important persistent data includes:
+Translation data and visible Discord output currently have different owners.
 
-- Global settings and provider credentials
-- Channel and guild language choices
-- Channel automatic translation records
-- Channel primary provider overrides
-- Translation cache
-- Protected terms, wrappers, prefixes, and favorites
+`Messages` can replace message text, while `MessageContent` independently adds translated styling and the watermark. Reply previews, embeds, and thread titles use additional patch paths. A translation can therefore reach any partial state:
 
-Persistent channel records must be normalized on load. Runtime queues and displayed translation maps are not authoritative persistent state.
+- Translation exists in memory but the visible message did not rerender
+- Translated text is visible without the translated watermark
+- The watermark refreshes while the text remains stale
+- Automatic translation is disabled but the old translated React props remain visible
 
-## Translation Flow
+The regression was exposed when a full message-list rerender was replaced with targeted component updates. Unit tests verified the update function call, but not the visible Discord result. Hovering a message causes Discord to rerender that component naturally, which reveals already-stored translation data.
 
-### Received Messages
+The new architecture must treat a data commit and a visible render commit as separate, observable operations.
 
-1. Resolve channel state and effective provider.
-2. Extract original message and embed content.
-3. Build a signature from content, languages, protection policy, channel, primary provider, and backup provider.
-4. Reuse a valid cache entry or evaluate pre-translation skip rules.
-5. Queue live work immediately or collect loaded messages into an immutable historical job.
-6. Translate through the effective primary provider, validate every returned ID and protected placeholder, and repair unresolved historical items.
-7. Apply live display data immediately; commit one historical job atomically after typing and scrolling are idle.
+## Design Principles
 
-### Sent Messages
-
-1. Preserve the submitted channel ID.
-2. Resolve sent input and output languages for that channel.
-3. Apply same-language and source-filter rules.
-4. Translate through the effective channel primary provider.
-5. Build the final Discord message with optional original text.
-
-### Manual Translation
-
-Manual translation is independent from the channel automatic translation switch. Manual results must remain distinguishable from automatic results so channel cleanup and plugin shutdown do not remove the wrong content.
-
-## Known Architectural Risks
-
-- The main file is too large for safe iteration.
-- UI rendering, persistence, provider dispatch, and runtime cleanup still share closure state.
-- Message display still adapts Discord message objects and must retain recoverable original data.
-- The coordinator, provider adapters, settings UI, and display code remain physically coupled in one file.
-- Thread-title patch points are covered by unit tests but still require DiscordPTB smoke validation against the current client build.
-- Provider latency is not yet instrumented by queue, network, validation, commit wait, and Discord render phase.
+1. One module owns the complete display state for every message.
+2. Original Discord content is captured as an immutable snapshot and is never reconstructed from translated props.
+3. Translation policy, provider transport, state commit, and Discord rendering are separate modules.
+4. Message text, translated decoration, loading state, and original restoration are committed through one display transaction.
+5. Runtime state is channel-isolated and generation-bound.
+6. Every item ends as translated, skipped with a reason, failed with a reason, or cancelled.
+7. Discord adapters may read and clone Discord objects, but domain modules never mutate Discord store objects.
+8. Tests exercise module interfaces and rendered output contracts, not only internal function calls.
+9. One migration phase changes one ownership boundary and remains deployable.
+10. Legacy code is deleted only after the replacement passes automated and DiscordPTB verification.
 
 ## Target Source Layout
-
-The future source tree should separate responsibilities while preserving one built plugin file:
 
 ```text
 src/
   plugin/
+    index.js
     lifecycle.js
-    patches.js
-  settings/
-    channel-settings.js
-    global-settings.js
-    state-store.js
+    discord-patches.js
+
+  display/
+    message-state-store.js
+    translation-display-controller.js
+    discord-render-adapter.js
+    message-display-adapter.js
+    reply-display-adapter.js
+    embed-display-adapter.js
+    thread-title-display-adapter.js
+
+  translation/
+    orchestrator.js
+    received-policy.js
+    sent-policy.js
+    language-detection.js
+    prompt-policy.js
+    result-validator.js
+
+  runtime/
+    live-translation-queue.js
+    historical-translation-job.js
+    translation-cache.js
+    lifecycle-generation.js
+
   providers/
-    registry.js
+    provider-registry.js
+    provider-client.js
     google-free.js
     google-cloud.js
+    deepl.js
+    microsoft.js
     openai.js
     gemini.js
     openai-compatible.js
-  translation/
-    sent-policy.js
-    received-policy.js
-    language-detection.js
-    prompt-policy.js
-  runtime/
-    live-queue.js
-    historical-queue.js
-    cache.js
-  display/
-    messages.js
-    replies.js
-    embeds.js
-    thread-titles.js
+
+  settings/
+    schema.js
+    migrations.js
+    settings-store.js
+    channel-settings.js
+    global-settings.js
+
   protection/
     placeholders.js
-    glossary.js
+    protected-terms.js
+
+scripts/
+  build-plugin.mjs
+
+tests/
+  display/
+  translation/
+  runtime/
+  providers/
+  settings/
+  integration/
 ```
 
-This is a target, not the current repository structure.
+The target is 25-35 production modules. Normal modules should remain under 400 lines, no production module should exceed 500 lines without an explicit architecture review, and `src/plugin/index.js` should remain under 250 lines.
+
+## Core Message State
+
+`MessageStateStore` is the only owner of translated message display state.
+
+```js
+{
+  messageId: "123",
+  channelId: "456",
+  generation: 4,
+  source: {
+    content: "Hello",
+    embeds: []
+  },
+  status: "translated",
+  translation: {
+    content: "你好",
+    inputLanguage: "en",
+    outputLanguage: "zh-CN"
+  },
+  reason: null,
+  origin: "automatic"
+}
+```
+
+Allowed statuses are:
+
+```text
+idle -> pending -> translating -> translated
+                              \-> skipped
+                              \-> failed
+                              \-> cancelled
+```
+
+The `source` snapshot is immutable. A translated result never overwrites it. Disabling automatic translation changes what is rendered; it does not need to recover content from a previously mutated Discord object.
+
+## Deep Module Interfaces
+
+### MessageStateStore
+
+Owns immutable source snapshots and current display state.
+
+```text
+captureSource(snapshot)
+markPending(messageId, requestIdentity)
+commitTranslation(result)
+commitBatch(results)
+markSkipped(messageId, reason)
+markFailed(messageId, reason)
+cancelChannel(channelId, generation)
+restoreChannel(channelId)
+getDisplayState(messageId)
+```
+
+Callers do not access internal maps.
+
+### TranslationDisplayController
+
+Converts message states into one display transaction.
+
+```text
+renderMessage(messageId)
+commitMessageResult(result)
+commitHistoricalBatch(results)
+restoreChannel(channelId)
+restoreAll()
+```
+
+A transaction contains message text, watermark, translated style, loading state, original block, and embed/reply updates together.
+
+### DiscordRenderAdapter
+
+Contains all knowledge of Discord and BDFDB rendering internals.
+
+```text
+captureVisibleMessages(channelId)
+applyDisplayTransaction(transaction)
+refreshMessages(channelId, messageIds, anchor)
+refreshThreadTitles(channelId)
+```
+
+No translation policy or provider logic is allowed in this adapter. The adapter reports whether the requested message IDs actually rerendered so state commit and render commit can be measured separately.
+
+### TranslationOrchestrator
+
+Coordinates policy, queues, providers, validation, cache, and display commits.
+
+```text
+translateLive(snapshot, context)
+translateHistorical(snapshots, context)
+translateManual(snapshot, context)
+cancelChannel(channelId, generation)
+```
+
+It returns structured results and never edits React props.
+
+### HistoricalTranslationJob
+
+Owns one immutable, channel-scoped ID snapshot. Provider requests may be split internally, but terminal results are returned as one batch. The job does not render Discord directly.
+
+### ProviderRegistry
+
+Resolves one provider adapter by provider ID. Every adapter returns the same result type and shares timeout, retry, error normalization, and protected-placeholder validation through `provider-client.js`.
+
+## Received Message Flow
+
+```text
+Discord patch
+  -> MessageSnapshot
+  -> MessageStateStore.captureSource
+  -> TranslationOrchestrator
+  -> live queue or HistoricalTranslationJob
+  -> ProviderRegistry
+  -> validated TranslationResult
+  -> MessageStateStore commit
+  -> TranslationDisplayController transaction
+  -> DiscordRenderAdapter refresh
+  -> render acknowledgement or visible failure
+```
+
+Historical results enter the state store together. One historical display transaction then refreshes the exact committed message IDs. New live messages use a separate path and do not wait for historical work.
+
+## Disable And Stop Flow
+
+Disabling one channel:
+
+1. Increment the channel generation.
+2. Cancel pending automatic work for that channel.
+3. Mark automatic message states as hidden while retaining immutable source snapshots.
+4. Build one restore transaction for messages, replies, embeds, and thread titles.
+5. Refresh the affected channel and verify the original state is visible.
+6. Leave manual translations untouched.
+
+Stopping the plugin performs the same operation for every channel before unregistering patches.
+
+## Edit Flow
+
+An edited Discord message creates a new immutable source snapshot and a new signature. Previous pending work and display results for that message are cancelled. Sent-message editing obtains original text from the state store, never from translated React props.
+
+## Settings And Persistence
+
+Persistent data is split by responsibility:
+
+```text
+settings              Global behavior and display preferences
+channelSettings       Channel enablement, languages, and provider override
+providerCredentials   API keys, endpoints, and models
+translationCache      Bounded successful translation cache
+```
+
+The global primary default, global backup provider, detection strategy, and every provider credential remain global. A channel may override only the channel-owned primary provider and language choices defined in `docs/settings.md`.
+
+Runtime queues, message display state, scroll state, and active generations remain in memory and are never stored in the settings document.
+
+Every persistent document has an explicit schema version and one migration entry point. Compatibility reads are removed after the corresponding migration has shipped and been verified.
+
+## Build And Verification
+
+Required commands after the build migration:
+
+```text
+npm run build
+npm run check
+npm test
+npm run verify
+```
+
+`npm run verify` must:
+
+1. Build the plugin from `src/`.
+2. Verify the committed plugin file matches a fresh deterministic build.
+3. Syntax-check the generated plugin.
+4. Run unit, contract, integration, migration, and build tests.
+
+The generated readable release target is 7,000-8,500 lines and 350-450 KB. Size is a guardrail, not a reason to remove required behavior.
+
+## Testing Strategy
+
+Tests are divided by confidence level:
+
+- Domain tests verify state transitions, policy, provider parsing, and cancellation.
+- Display contract tests assert complete display transactions, including text, watermark, styling, loading, and restoration.
+- Discord adapter tests use captured component shapes and verify the exact message IDs requested for refresh.
+- Build tests verify metadata, one-file output, deterministic bytes, and exclusion of test/debug code.
+- DiscordPTB smoke tests verify hover-independent display, disable restoration, atomic historical reveal, scroll stability, edits, titles, stop, and reload.
+
+A test that only asserts `forceAllUpdates` or another refresh helper was called is not sufficient evidence that a visible message changed.
+
+## Observability
+
+Debug builds expose a bounded in-memory transition journal keyed by channel ID and message ID:
+
+```text
+captured -> queued -> provider-started -> provider-finished
+         -> state-committed -> render-requested -> render-confirmed
+```
+
+Skipped and failed items include a stable reason code. Diagnostic data is excluded from release output unless an explicit local debug build is requested.
 
 ## Migration Rules
 
-- Extract one tested boundary at a time.
-- Keep compatibility wrappers until all callers move.
-- Do not combine source extraction with a behavior change.
-- Compare focused tests before and after each extraction.
-- Build output must remain directly installable by BetterDiscord.
-- Delete the old inline implementation only after the generated path passes the complete suite and Discord smoke tests.
+- Freeze new feature work until the display vertical slice passes DiscordPTB verification.
+- Introduce the build pipeline without changing runtime behavior.
+- Move one deep module at a time and retain a compatibility adapter only while callers migrate.
+- Do not create a second competing state map or queue.
+- Do not delete legacy code in the same commit that introduces its replacement.
+- Delete the legacy implementation in the next small commit after parity verification.
+- Keep every migration commit deployable and reversible.
+- Do not mark a phase complete from mocked tests alone when the phase changes Discord rendering.

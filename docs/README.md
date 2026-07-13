@@ -9,14 +9,16 @@ This directory contains the canonical project documentation.
 3. [Provider contracts](providers.md)
 4. [Architecture](architecture.md)
 5. [Recovery plan](recovery-plan.md)
-6. [Architecture decisions](adr/0001-keep-single-file-plugin-runtime.md)
+6. Architecture decisions:
+   - [ADR-0001: keep a single-file runtime during early refactors](adr/0001-keep-single-file-plugin-runtime.md)
+   - [ADR-0002: generate the single-file plugin from modular source](adr/0002-generate-single-file-plugin-from-modular-source.md)
 
 ## Document Rules
 
 - `product.md` describes approved user-visible behavior.
 - `settings.md` decides whether a setting belongs to the current channel or global configuration.
 - `providers.md` describes provider capabilities without embedding UI implementation details.
-- `architecture.md` describes what exists in the current code, including known limitations.
+- `architecture.md` describes the current failure model, the proposed target modules, and migration constraints.
 - `recovery-plan.md` is the current stabilization and refactoring sequence. It overrides ad hoc implementation order.
 - ADRs record durable architectural decisions and are not task trackers.
 
