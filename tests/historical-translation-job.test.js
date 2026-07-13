@@ -16,7 +16,7 @@ function createMessage(id, content) {
 }
 
 test("legacy historical queue runtime is absent after coordinator migration", () => {
-	const source = fs.readFileSync(path.resolve(__dirname, "..", "DiscordAITranslator.plugin.js"), "utf8");
+	const source = fs.readFileSync(path.resolve(__dirname, "..", "src", "legacy", "runtime.js"), "utf8");
 	const removedRuntimeNames = [
 		"canQueueHistoricalItem",
 		"enqueueHistoricalItem",

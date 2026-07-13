@@ -13,7 +13,7 @@ test("plugin metadata uses English description and linked repository author", ()
 });
 
 test("global settings do not retain a duplicate language detection helper", () => {
-	const source = fs.readFileSync(path.resolve(__dirname, "..", "DiscordAITranslator.plugin.js"), "utf8");
+	const source = fs.readFileSync(path.resolve(__dirname, "..", "src", "legacy", "runtime.js"), "utf8");
 	assert.doesNotMatch(source, /const createLanguageDetector\s*=/);
 	assert.doesNotMatch(source, /this\.languageDetectorState/);
 });
@@ -157,7 +157,7 @@ test("message action translator button remains usable while another translation 
 });
 
 test("manual message controls do not use the global translating gate", () => {
-	const source = fs.readFileSync(path.resolve(__dirname, "..", "DiscordAITranslator.plugin.js"), "utf8");
+	const source = fs.readFileSync(path.resolve(__dirname, "..", "src", "legacy", "runtime.js"), "utf8");
 	const manualCalls = [...source.matchAll(/translateMessage\([^\n]+\{manual: true, independentOfTextAreaSwitch: true[^\n]+/g)].map(match => match[0]);
 
 	assert.equal(manualCalls.length >= 3, true);
