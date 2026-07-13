@@ -7,7 +7,9 @@
  * @source https://github.com/ROOT94-MAX/DiscordAITranslator
  * @license GPL-2.0
  */
+var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __name = (target, value) => __defProp(target, "name", { value, configurable: !0 });
 var __commonJS = (cb, mod) => function() {
   try {
     return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -20,10 +22,10 @@ var __commonJS = (cb, mod) => function() {
 var require_runtime = __commonJS({
   "src/legacy/runtime.js"(exports2, module2) {
     module2.exports = ((_) => {
-      let changeLog = {}, normalizeSemverVersion = (version) => {
+      let changeLog = {}, normalizeSemverVersion = /* @__PURE__ */ __name((version) => {
         let withoutPrefix = String(version ?? "").trim().replace(/^(?:v\s*)+/i, ""), match = withoutPrefix.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/);
         return match ? `${match[1]}.${match[2]}.${match[3]}` : withoutPrefix;
-      };
+      }, "normalizeSemverVersion");
       return !window.BDFDB_Global || !window.BDFDB_Global.loaded && !window.BDFDB_Global.started ? class {
         constructor(meta) {
           for (let key in meta) this[key] = meta[key];
@@ -57,12 +59,12 @@ ${this.description}`;
           (!window.BDFDB_Global || !Array.isArray(window.BDFDB_Global.pluginQueue)) && (window.BDFDB_Global = Object.assign({}, window.BDFDB_Global, { pluginQueue: [] })), window.BDFDB_Global.downloadModal || (window.BDFDB_Global.downloadModal = !0, BdApi.UI.showConfirmationModal("Library Missing", `The Library Plugin needed for ${this.name} is missing. Please click "Download Now" to install it.`, {
             confirmText: "Download Now",
             cancelText: "Cancel",
-            onCancel: (_2) => {
+            onCancel: /* @__PURE__ */ __name((_2) => {
               delete window.BDFDB_Global.downloadModal;
-            },
-            onConfirm: (_2) => {
+            }, "onCancel"),
+            onConfirm: /* @__PURE__ */ __name((_2) => {
               delete window.BDFDB_Global.downloadModal, this.downloadLibrary();
-            }
+            }, "onConfirm")
           })), window.BDFDB_Global.pluginQueue.includes(this.name) || window.BDFDB_Global.pluginQueue.push(this.name);
         }
         start() {
@@ -76,8 +78,9 @@ ${this.description}`;
 Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`, template.content.firstElementChild.querySelector("a").addEventListener("click", this.downloadLibrary), template.content.firstElementChild;
         }
       } : (([Plugin, BDFDB]) => {
+        var _a, _b, _c;
         var _this;
-        let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = class extends BdApi.React.Component {
+        let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
           render() {
             let enabled = _this.isTranslationEnabled(this.props.channelId);
             return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.ChannelTextAreaButton, {
@@ -86,29 +89,29 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               iconSVG: translateIcon,
               nativeClass: !0,
               tooltip: {
-                text: (_2) => _this.getTranslateButtonTooltipText(this.props.channelId),
+                text: /* @__PURE__ */ __name((_2) => _this.getTranslateButtonTooltipText(this.props.channelId), "text"),
                 tooltipConfig: { style: "max-width: 400px" }
               },
-              onClick: (_2) => {
+              onClick: /* @__PURE__ */ __name((_2) => {
                 this.props.isActive = !0, BDFDB.ReactUtils.forceUpdate(this), BDFDB.ModalUtils.open(_this, {
                   size: "LARGE",
                   header: BDFDB.LanguageUtils.LanguageStrings.SETTINGS,
                   subHeader: "",
-                  onClose: (_3) => {
+                  onClose: /* @__PURE__ */ __name((_3) => {
                     this.props.isActive = !1, BDFDB.ReactUtils.forceUpdate(this);
-                  },
+                  }, "onClose"),
                   children: BDFDB.ReactUtils.createElement(TranslateSettingsComponent, {
                     guildId: this.props.guildId,
                     channelId: this.props.channelId
                   })
                 });
-              },
-              onContextMenu: (_2) => {
+              }, "onClick"),
+              onContextMenu: /* @__PURE__ */ __name((_2) => {
                 _this.toggleTranslation(this.props.channelId), BDFDB.ReactUtils.forceUpdate(this);
-              }
+              }, "onContextMenu")
             });
           }
-        }, TranslateSettingsComponent = class extends BdApi.React.Component {
+        }, __name(_a, "TranslateButton"), _a), TranslateSettingsComponent = (_b = class extends BdApi.React.Component {
           constructor(props) {
             super(props), this.state = {
               detectorText: "",
@@ -142,17 +145,17 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Select, {
                       value: _this.getEffectivePrimaryEngine(channelId),
                       options: Object.keys(translationEngines).map((engineKey) => ({ value: engineKey, label: _this.getEngineLabel(engineKey) })),
-                      onChange: (engineKey) => {
+                      onChange: /* @__PURE__ */ __name((engineKey) => {
                         _this.setChannelPrimaryEngine(channelId, engineKey), _this.refreshChannelPrimaryEngineRuntime(channelId), _this.setLanguages(), _this.isEngineConfiguredForRuntime(engineKey) || BDFDB.NotificationUtils.toast(`${_this.getEngineLabel(engineKey)}: ${_this.getCustomText("channel_primary_engine_unconfigured_warning")}`, { type: "danger", position: "center" }), BDFDB.ReactUtils.forceUpdate(this);
-                      }
+                      }, "onChange")
                     })
                   }),
                   _this.hasChannelPrimaryEngineOverride(channelId) && BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
                     size: BDFDB.LibraryComponents.Button.Sizes.SMALL,
                     className: BDFDB.disCN.marginleft8,
-                    onClick: (_2) => {
+                    onClick: /* @__PURE__ */ __name((_2) => {
                       _this.clearChannelPrimaryEngineOverride(channelId), _this.refreshChannelPrimaryEngineRuntime(channelId), _this.setLanguages(), BDFDB.ReactUtils.forceUpdate(this);
-                    },
+                    }, "onClick"),
                     children: _this.getCustomText("channel_primary_engine_restore")
                   })
                 ].filter(Boolean)
@@ -193,13 +196,13 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       className: "translator-detector-textinput",
                       placeholder: _this.getCustomText("language_detector_placeholder"),
                       value: this.state.detectorText,
-                      onChange: (value) => this.setState({ detectorText: value })
+                      onChange: /* @__PURE__ */ __name((value) => this.setState({ detectorText: value }), "onChange")
                     }),
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
                       size: BDFDB.LibraryComponents.Button.Sizes.SMALL,
                       className: "translator-detector-input-button",
                       disabled: this.state.detectingLanguage,
-                      onClick: (_2) => this.detectLanguageFromInput(),
+                      onClick: /* @__PURE__ */ __name((_2) => this.detectLanguageFromInput(), "onClick"),
                       children: this.state.detectingLanguage ? _this.getCustomText("language_detector_button_loading") : _this.getCustomText("language_detector_button")
                     })
                   ]
@@ -214,7 +217,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
                       size: BDFDB.LibraryComponents.Button.Sizes.SMALL,
                       className: "translator-detector-apply-button",
-                      onClick: (_2) => this.applyDetectedLanguage(messageTypes.SENT, languageTypes.OUTPUT),
+                      onClick: /* @__PURE__ */ __name((_2) => this.applyDetectedLanguage(messageTypes.SENT, languageTypes.OUTPUT), "onClick"),
                       children: _this.getCustomText("language_detector_apply_sent_output")
                     })
                   ]
@@ -232,10 +235,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                     title: _this.labels[`language_choice_${direction.toLowerCase()}_${place.toLowerCase()}`] + ": ",
                     titleChildren: direction == languageTypes.OUTPUT && [{
-                      text: (_2) => isChannelSpecific ? _this.labels.language_selection_channel : isGuildSpecific ? _this.labels.language_selection_server : _this.labels.language_selection_global,
+                      text: /* @__PURE__ */ __name((_2) => isChannelSpecific ? _this.labels.language_selection_channel : isGuildSpecific ? _this.labels.language_selection_server : _this.labels.language_selection_global, "text"),
                       name: isChannelSpecific || isGuildSpecific ? BDFDB.LibraryComponents.SvgIcon.Names.LOCK_CLOSED : BDFDB.LibraryComponents.SvgIcon.Names.LOCK_OPEN,
                       color: isChannelSpecific ? "var(--status-danger)" : isGuildSpecific ? "var(--status-warning)" : null,
-                      onClick: (_2) => {
+                      onClick: /* @__PURE__ */ __name((_2) => {
                         if (channelLanguages[this.props.channelId] && channelLanguages[this.props.channelId][place])
                           isChannelSpecific = !1, delete channelLanguages[this.props.channelId][place], BDFDB.ObjectUtils.isEmpty(channelLanguages[this.props.channelId]) && delete channelLanguages[this.props.channelId];
                         else if (guildLanguages[this.props.guildId] && guildLanguages[this.props.guildId][place]) {
@@ -246,13 +249,13 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           for (let l in languageTypes) guildLanguages[this.props.guildId][place][languageTypes[l]] = _this.getLanguageChoice(languageTypes[l], place, null);
                         }
                         BDFDB.DataUtils.save(channelLanguages, _this, "channelLanguages"), BDFDB.DataUtils.save(guildLanguages, _this, "guildLanguages"), BDFDB.ReactUtils.forceUpdate(this);
-                      }
+                      }, "onClick")
                     }, {
                       iconSVG: '<svg width="21" height="21" fill="currentColor"><path d="M 0, 10.515 c 0, 2.892, 1.183, 5.521, 3.155, 7.361 L 0, 21.031 h 7.887 V 13.144 l -2.892, 2.892 C 3.549, 14.722, 2.629, 12.75, 2.629, 10.515 c 0 -3.418, 2.235 -6.309, 5.258 -7.492 v -2.629 C 3.418, 1.577, 0, 5.652, 0, 10.515 z M 21.031, 0 H 13.144 v 7.887 l 2.892 -2.892 C 17.482, 6.309, 18.402, 8.281, 18.402, 10.515 c 0, 3.418 -2.235, 6.309 -5.258, 7.492 V 20.768 c 4.469 -1.183, 7.887 -5.258, 7.887 -10.121 c 0 -2.892 -1.183 -5.521 -3.155 -7.361 L 21.031, 0 z"/></svg>',
-                      onClick: (_2) => {
+                      onClick: /* @__PURE__ */ __name((_2) => {
                         let input = _this.getLanguageChoice(languageTypes.INPUT, place, this.props.channelId), output = _this.getLanguageChoice(languageTypes.OUTPUT, place, this.props.channelId);
                         input = input == "auto" ? "en" : input, _this.saveLanguageChoice(output, languageTypes.INPUT, place, this.props.channelId), _this.saveLanguageChoice(input, languageTypes.OUTPUT, place, this.props.channelId), _this.setLanguages(), BDFDB.ReactUtils.forceUpdate(this);
-                      }
+                      }, "onClick")
                     }].map((data) => {
                       let icon = BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Clickable, {
                         className: BDFDB.disCN._translatorconfigbutton,
@@ -278,7 +281,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       maxMenuHeight: typeof window < "u" ? Math.max(150, Math.min(240, Math.floor(window.innerHeight * 0.36))) : 220,
                       value: _this.getLanguageChoice(direction, place, this.props.channelId),
                       options: this.filterLanguages(direction, place),
-                      optionRenderer: (lang) => languages[lang.value] ? BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
+                      optionRenderer: /* @__PURE__ */ __name((lang) => languages[lang.value] ? BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
                         align: BDFDB.LibraryComponents.Flex.Align.CENTER,
                         children: [
                           BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
@@ -300,15 +303,15 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           }),
                           BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FavButton, {
                             isFavorite: languages[lang.value].fav == 0,
-                            onClick: (value) => {
+                            onClick: /* @__PURE__ */ __name((value) => {
                               value ? favorites.push(lang.value) : BDFDB.ArrayUtils.remove(favorites, lang.value, !0), BDFDB.DataUtils.save(favorites.sort(), _this, "favorites"), _this.setLanguages();
-                            }
+                            }, "onClick")
                           })
                         ]
-                      }) : null,
-                      onChange: (value) => {
+                      }) : null, "optionRenderer"),
+                      onChange: /* @__PURE__ */ __name((value) => {
                         _this.saveLanguageChoice(value, direction, place, this.props.channelId), BDFDB.ReactUtils.forceUpdate(this);
-                      }
+                      }, "onChange")
                     })
                   }),
                   direction == languageTypes.OUTPUT && BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
@@ -318,7 +321,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               })
             ].flat(10).filter((n) => n);
           }
-        }, brailleConverter = {
+        }, __name(_b, "TranslateSettings"), _b), brailleConverter = {
           0: "⠴",
           1: "⠂",
           2: "⠆",
@@ -763,23 +766,22 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }, messageTypes = {
           RECEIVED: "received",
           SENT: "sent"
-        }, AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__", HISTORICAL_TERMINAL_ITEM_STATES = /* @__PURE__ */ new Set(["translated", "skipped", "failed", "cancelled"]);
-        class HistoricalTranslationJob {
+        }, AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__", HISTORICAL_TERMINAL_ITEM_STATES = /* @__PURE__ */ new Set(["translated", "skipped", "failed", "cancelled"]), _HistoricalTranslationJob = class _HistoricalTranslationJob {
           constructor(config = {}) {
             this.id = config.id || `historical-${Date.now()}`, this.channelId = config.channelId || null, this.generation = config.generation || 0, this.configurationSignature = config.configurationSignature || null, this.dependencies = Object.assign({
-              prepare: (item) => ({ status: "pending", prepared: item }),
-              translateBatch: () => Promise.resolve(null),
+              prepare: /* @__PURE__ */ __name((item) => ({ status: "pending", prepared: item }), "prepare"),
+              translateBatch: /* @__PURE__ */ __name(() => Promise.resolve(null), "translateBatch"),
               repairBatch: null,
-              validate: (_item, translatedText) => translatedText == null ? { ok: !1 } : { ok: !0, translation: translatedText },
-              repair: () => Promise.resolve({ status: "failed", reason: "unresolved" }),
-              waitForCommit: () => Promise.resolve(),
-              isCurrent: () => !0,
-              commit: () => {
-              },
-              rerender: () => {
-              },
-              onStateChange: () => {
-              }
+              validate: /* @__PURE__ */ __name((_item, translatedText) => translatedText == null ? { ok: !1 } : { ok: !0, translation: translatedText }, "validate"),
+              repair: /* @__PURE__ */ __name(() => Promise.resolve({ status: "failed", reason: "unresolved" }), "repair"),
+              waitForCommit: /* @__PURE__ */ __name(() => Promise.resolve(), "waitForCommit"),
+              isCurrent: /* @__PURE__ */ __name(() => !0, "isCurrent"),
+              commit: /* @__PURE__ */ __name(() => {
+              }, "commit"),
+              rerender: /* @__PURE__ */ __name(() => {
+              }, "rerender"),
+              onStateChange: /* @__PURE__ */ __name(() => {
+              }, "onStateChange")
             }, config.dependencies || {}), this.items = /* @__PURE__ */ new Map(), this.state = "collecting", this.sealed = !1, this.cancelReason = null, this.started = !1, this.repairConcurrency = Math.max(1, parseInt(config.repairConcurrency, 10) || 4), this.repairBatchSize = Math.max(1, parseInt(config.repairBatchSize, 10) || 10);
           }
           add(item) {
@@ -879,7 +881,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }
             if (this.state == "cancelled") return this.createSummary();
             this.state = "repairing", this.dependencies.onStateChange(this);
-            let repairingRecords = [...this.items.values()].filter((record) => record.status == "repairing"), repairIndex = 0, repairNext = async () => {
+            let repairingRecords = [...this.items.values()].filter((record) => record.status == "repairing"), repairIndex = 0, repairNext = /* @__PURE__ */ __name(async () => {
               for (; repairIndex < repairingRecords.length && this.state != "cancelled"; ) {
                 let record = repairingRecords[repairIndex++];
                 if (!record || record.status == "cancelled") continue;
@@ -891,15 +893,16 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                 }
                 record.status != "cancelled" && (this.setPreparedOutcome(record, repairOutcome), HISTORICAL_TERMINAL_ITEM_STATES.has(record.status) || (record.status = "failed", record.reason = "repair_failed"));
               }
-            };
+            }, "repairNext");
             if (await Promise.all(Array.from({ length: Math.min(this.repairConcurrency, repairingRecords.length) }, () => repairNext())), this.state == "cancelled") return this.createSummary();
             if (this.state = "ready", this.dependencies.onStateChange(this), await this.dependencies.waitForCommit(this), this.state == "cancelled" || !this.dependencies.isCurrent(this))
               return this.cancel("stale_generation"), this.createSummary();
             let summary = this.createSummary();
             return await this.dependencies.commit(summary, this), this.state == "cancelled" ? this.createSummary() : (this.dependencies.rerender(summary, this), this.state = "committed", this.dependencies.onStateChange(this), summary);
           }
-        }
-        let protectionLogic = {
+        };
+        __name(_HistoricalTranslationJob, "HistoricalTranslationJob");
+        let HistoricalTranslationJob = _HistoricalTranslationJob, protectionLogic = {
           escapeRegExp(_plugin, string) {
             return (string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
           },
@@ -951,12 +954,12 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           protectAutoDetectedSegments(plugin, string, protectedSegments = {}, count = 0) {
             let result = protectionLogic.protectRegexMatches(plugin, string, /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}\b/gi, protectedSegments, count);
             string = result.string, protectedSegments = result.protectedSegments, count = result.count;
-            let trimTrailing = (fullMatch) => protectionLogic.trimTrailingProtectedPunctuation(plugin, fullMatch);
+            let trimTrailing = /* @__PURE__ */ __name((fullMatch) => protectionLogic.trimTrailingProtectedPunctuation(plugin, fullMatch), "trimTrailing");
             return result = protectionLogic.protectRegexMatches(plugin, string, /\bhttps?:\/\/[^\s<>()\u3000]+/gi, protectedSegments, count, { normalize: trimTrailing }), string = result.string, protectedSegments = result.protectedSegments, count = result.count, result = protectionLogic.protectRegexMatches(plugin, string, /\b(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?:\/[^\s<>()\u3000]*)?/gi, protectedSegments, count, {
-              normalize: (fullMatch) => {
+              normalize: /* @__PURE__ */ __name((fullMatch) => {
                 let trimmed = trimTrailing(fullMatch);
                 return /[./]/.test(trimmed.protectedText || "") ? trimmed : { protectedText: "", trailingText: fullMatch };
-              }
+              }, "normalize")
             }), string = result.string, protectedSegments = result.protectedSegments, count = result.count, result = protectionLogic.protectRegexMatches(plugin, string, /\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b/g, protectedSegments, count), string = result.string, protectedSegments = result.protectedSegments, count = result.count, string = string.replace(/(^|\s)(\/[A-Za-z][A-Za-z0-9_-]{1,32})(?=\s|$)/g, (fullMatch, leading, command) => (protectedSegments[count] = command, `${leading || ""}${protectionLogic.createProtectionPlaceholder(plugin, count++)}`)), { string, protectedSegments, count };
           },
           protectDiscordMarkupSegments(plugin, string, protectedSegments = {}, count = 0) {
@@ -1000,11 +1003,11 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           protectAutoTechnicalTerms(plugin, string, protectedSegments = {}, count = 0) {
             if (!string) return { string, protectedSegments, count };
-            let protectToken = (fullMatch, offset, fullString) => {
+            let protectToken = /* @__PURE__ */ __name((fullMatch, offset, fullString) => {
               if (!fullMatch || fullMatch.length < 2) return fullMatch;
               let left = fullString[offset - 1] || "", right = fullString[offset + fullMatch.length] || "";
               return /[A-Za-z0-9_]/.test(left) || /[A-Za-z0-9_]/.test(right) ? fullMatch : (protectedSegments[count] = fullMatch, protectionLogic.createProtectionPlaceholder(plugin, count++));
-            };
+            }, "protectToken");
             string = string.replace(/\b[A-Za-z0-9_.-]{2,}\/[A-Za-z0-9_.-]{2,}(?:\/[A-Za-z0-9_.-]+)*\b/g, protectToken), string = string.replace(/\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|json|yml|yaml|toml|env|py|java|go|rs|cpp|c|h|css|html|md|txt|zip|rar|7z|exe|dll|png|jpg|jpeg|webp|gif|mp4|mov|psd|fig)\b/gi, protectToken), string = string.replace(/\bv\d+(?:\.\d+){1,4}(?:[-+][A-Za-z0-9.-]+)?\b|\b\d+(?:\.\d+){2,4}(?:[-+][A-Za-z0-9.-]+)?\b/gi, protectToken);
             let originalForShoutCheck = String(string);
             return (() => {
@@ -1890,14 +1893,14 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             if (!normalizedA || !normalizedB) return 0;
             if (normalizedA == normalizedB) return 1;
             if (normalizedA.length < 2 || normalizedB.length < 2) return normalizedA == normalizedB ? 1 : 0;
-            let createBigrams = (value) => {
+            let createBigrams = /* @__PURE__ */ __name((value) => {
               let bigrams = /* @__PURE__ */ new Map();
               for (let index = 0; index < value.length - 1; index++) {
                 let bigram = value.slice(index, index + 2);
                 bigrams.set(bigram, (bigrams.get(bigram) || 0) + 1);
               }
               return bigrams;
-            }, bigramsA = createBigrams(normalizedA), bigramsB = createBigrams(normalizedB), overlap = 0;
+            }, "createBigrams"), bigramsA = createBigrams(normalizedA), bigramsB = createBigrams(normalizedB), overlap = 0;
             for (let [bigram, count] of bigramsA.entries()) bigramsB.has(bigram) && (overlap += Math.min(count, bigramsB.get(bigram)));
             return 2 * overlap / (Math.max(1, normalizedA.length - 1) + Math.max(1, normalizedB.length - 1));
           }
@@ -1981,7 +1984,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             return !(!analysis.totalLetters || analysis.totalLetters < plugin.getAutoTranslateMinimumLengthForAnalysis(analysis) || plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId) || plugin.shouldSkipSameLanguageReceivedMessages() && plugin.isMostlyTargetLanguageMessage(analysis, targetLanguageId) || receivedMessageFilterRuntime.shouldSkipByLocalLanguagePrecheck(plugin, analysisSource.text, analysis, targetLanguageId));
           }
         };
-        return class extends Plugin {
+        return _c = class extends Plugin {
           getVersion() {
             return normalizeSemverVersion(this.version);
           }
@@ -2957,14 +2960,14 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
 					`;
           }
           handleEditedMessageSubmit(methodArguments, originalMethod) {
-            let args = Array.from(methodArguments || []), channelId = args[0], messageId = args[1], payload = args[2], originalText = typeof payload == "string" ? payload : payload && typeof payload.content == "string" ? payload.content : "", submit = (nextText) => {
+            let args = Array.from(methodArguments || []), channelId = args[0], messageId = args[1], payload = args[2], originalText = typeof payload == "string" ? payload : payload && typeof payload.content == "string" ? payload.content : "", submit = /* @__PURE__ */ __name((nextText) => {
               let nextArgs = args.slice();
               return nextArgs[2] = typeof payload == "string" ? nextText : Object.assign({}, payload || {}, { content: nextText }), Promise.resolve(originalMethod(...nextArgs));
-            };
+            }, "submit");
             if (this.clearDisplayedTranslationState(messageId, { clearReplyPreview: !0 }), delete oldMessages[messageId], this.clearCachedTranslation(messageId), !originalText || !channelId || !this.isTranslationEnabled(channelId)) return submit(originalText);
             let sentRequest = this.createSentAutomaticTranslationRequest(channelId, originalText, messageId);
             return new Promise((resolve, reject) => {
-              let finishSubmit = (nextText) => this.completeSentAutomaticTranslationRequest(sentRequest, nextText, submit).then(resolve, reject);
+              let finishSubmit = /* @__PURE__ */ __name((nextText) => this.completeSentAutomaticTranslationRequest(sentRequest, nextText, submit).then(resolve, reject), "finishSubmit");
               this.shouldAutoTranslateSentMessage(originalText, channelId, (shouldTranslate) => {
                 if (!shouldTranslate || !this.isSentAutomaticTranslationRequestCurrent(sentRequest)) return finishSubmit(originalText);
                 this.translateText(originalText, messageTypes.SENT, (translation, input, output) => {
@@ -2974,21 +2977,21 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             });
           }
           onStart() {
-            pluginRuntimeActive = !0, liveTranslationRuntimeGeneration++, liveTranslationRequests = {}, sentAutomaticTranslationRuntimeGeneration++, sentAutomaticTranslationRequests = {}, pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: (e) => {
+            pluginRuntimeActive = !0, liveTranslationRuntimeGeneration++, liveTranslationRequests = {}, sentAutomaticTranslationRuntimeGeneration++, sentAutomaticTranslationRequests = {}, pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
               e.methodArguments[1] && oldMessages[e.methodArguments[1]] && oldMessages[e.methodArguments[1]].content ? e.methodArguments[2] = oldMessages[e.methodArguments[1]].content : e.methodArguments[1] && (e.methodArguments[2] = this.getEditableSentMessageText(e.methodArguments[1], e.methodArguments[2]));
-            } }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "editMessage", { instead: (e) => this.handleEditedMessageSubmit(e.methodArguments, (...args) => e.originalMethod(...args)) }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageToolbarUtils, "useMessageMenu", { after: (e) => {
+            }, "before") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "editMessage", { instead: /* @__PURE__ */ __name((e) => this.handleEditedMessageSubmit(e.methodArguments, (...args) => e.originalMethod(...args)), "instead") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageToolbarUtils, "useMessageMenu", { after: /* @__PURE__ */ __name((e) => {
               if (e.instance.props.message && e.instance.props.channel) {
                 let channelId = e.instance.props.channel && e.instance.props.channel.id || null, translated = !!this.getActiveMessageTranslation(e.instance.props.message, channelId), [children, index] = BDFDB.ContextMenuUtils.findItem(e.returnValue, { id: ["copy-text", "pin", "unpin"] });
                 index == -1 && ([children, index] = BDFDB.ContextMenuUtils.findItem(e.returnValue, { id: ["edit", "add-reaction", "add-reaction-1", "quote"] })), children.splice(index + 1, 0, BDFDB.ContextMenuUtils.createItem(BDFDB.LibraryComponents.MenuItems.MenuItem, {
                   label: translated ? this.labels.context_messageuntranslateoption : this.labels.context_messagetranslateoption,
                   id: BDFDB.ContextMenuUtils.createItemId(this.name, translated ? "untranslate-message" : "translate-message"),
-                  icon: (_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
+                  icon: /* @__PURE__ */ __name((_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
                     icon: translated ? translateIconUntranslate : translateIcon
-                  }),
-                  action: (_2) => this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false})
+                  }), "icon"),
+                  action: /* @__PURE__ */ __name((_2) => this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false}), "action")
                 })), this.injectMessageLanguageActions(children, index + 1, e.instance.props.message, e.instance.props.channel);
               }
-            } }), this.forceUpdateAll();
+            }, "after") }), this.forceUpdateAll();
           }
           onStop() {
             pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleTranslationSequence++, this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), manualTranslationScrollLockTimer && clearTimeout(manualTranslationScrollLockTimer), manualTranslationScrollLockTimer = null, manualTranslationScrollAnchor = null, deferredSettingsRerenderTimer = null, this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), this.forceUpdateAll();
@@ -2997,8 +3000,8 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             let settingsPanel;
             return settingsPanel = BDFDB.PluginUtils.createSettingsPanel(this, {
               collapseStates,
-              children: (_2) => {
-                let settingsItems = [], recommendedEngines = ["microsoft", "googlecloud", "googleapi", "deepseek", "openai", "gemini", "oaicompat"], getSettingsPanelRoot = () => document.querySelector(".translator-settings-panel-root"), isScrollableElement = (node) => {
+              children: /* @__PURE__ */ __name((_2) => {
+                let settingsItems = [], recommendedEngines = ["microsoft", "googlecloud", "googleapi", "deepseek", "openai", "gemini", "oaicompat"], getSettingsPanelRoot = /* @__PURE__ */ __name(() => document.querySelector(".translator-settings-panel-root"), "getSettingsPanelRoot"), isScrollableElement = /* @__PURE__ */ __name((node) => {
                   if (!node || node == document || node == document.body || node == document.documentElement || typeof node.scrollTop != "number" || typeof node.scrollHeight != "number" || typeof node.clientHeight != "number" || node.scrollHeight <= node.clientHeight + 1) return !1;
                   let overflowY = "";
                   try {
@@ -3007,10 +3010,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   } catch {
                   }
                   return overflowY != "visible" && overflowY != "clip" || node.scrollTop > 0;
-                }, getSettingsPanelScrollElements = (root) => {
-                  let scrollers = [], addScroller = (node) => {
+                }, "isScrollableElement"), getSettingsPanelScrollElements = /* @__PURE__ */ __name((root) => {
+                  let scrollers = [], addScroller = /* @__PURE__ */ __name((node) => {
                     node && isScrollableElement(node) && !scrollers.includes(node) && scrollers.push(node);
-                  }, current = root;
+                  }, "addScroller"), current = root;
                   for (; current && current.parentElement; )
                     addScroller(current), current = current.parentElement;
                   addScroller(current);
@@ -3020,7 +3023,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   } catch {
                   }
                   return scrollers;
-                }, captureSettingsPanelScrollState = () => {
+                }, "getSettingsPanelScrollElements"), captureSettingsPanelScrollState = /* @__PURE__ */ __name(() => {
                   let root = getSettingsPanelRoot();
                   if (!root) return null;
                   let scrollers = getSettingsPanelScrollElements(root);
@@ -3033,7 +3036,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     windowX: typeof window < "u" ? window.scrollX : 0,
                     windowY: typeof window < "u" ? window.scrollY : 0
                   } : null;
-                }, applySettingsPanelScrollState = (scrollState) => {
+                }, "captureSettingsPanelScrollState"), applySettingsPanelScrollState = /* @__PURE__ */ __name((scrollState) => {
                   if (!(!scrollState || !scrollState.items)) {
                     for (let item of scrollState.items) {
                       if (!item || !item.scroller) continue;
@@ -3042,21 +3045,21 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     }
                     typeof window < "u" && window.scrollTo(scrollState.windowX || 0, scrollState.windowY || 0);
                   }
-                }, restoreSettingsPanelScrollState = (scrollState) => {
+                }, "applySettingsPanelScrollState"), restoreSettingsPanelScrollState = /* @__PURE__ */ __name((scrollState) => {
                   scrollState && (applySettingsPanelScrollState(scrollState), requestAnimationFrame(() => {
                     applySettingsPanelScrollState(scrollState), requestAnimationFrame(() => applySettingsPanelScrollState(scrollState));
                   }));
-                }, refreshPanel = () => {
+                }, "restoreSettingsPanelScrollState"), refreshPanel = /* @__PURE__ */ __name(() => {
                   let scrollState = captureSettingsPanelScrollState();
                   BDFDB.PluginUtils.refreshSettingsPanel(this, settingsPanel, collapseStates), restoreSettingsPanelScrollState(scrollState);
-                }, saveAuthField = (engineKey, field, value) => {
+                }, "refreshPanel"), saveAuthField = /* @__PURE__ */ __name((engineKey, field, value) => {
                   authKeys[engineKey] || (authKeys[engineKey] = {}), authKeys[engineKey][field] = (value || "").trim ? (value || "").trim() : value, BDFDB.DataUtils.save(authKeys, this, "authKeys"), this.SettingsUpdated = !0;
-                }, saveReceivedFilterSetting = (key, value) => {
+                }, "saveAuthField"), saveReceivedFilterSetting = /* @__PURE__ */ __name((key, value) => {
                   saveFilterSetting(key, value);
-                }, infoText = (text) => BDFDB.ReactUtils.createElement("div", {
+                }, "saveReceivedFilterSetting"), infoText = /* @__PURE__ */ __name((text) => BDFDB.ReactUtils.createElement("div", {
                   className: "translator-settings-note",
                   children: text
-                }), isChineseUi = this.isChineseUiLanguage(), isRussianUi = this.isRussianUiLanguage(), compactText = (zh, en, ru = null) => isChineseUi ? zh : isRussianUi && ru || en, getEnginePortalConfig = (engineKey) => {
+                }), "infoText"), isChineseUi = this.isChineseUiLanguage(), isRussianUi = this.isRussianUiLanguage(), compactText = /* @__PURE__ */ __name((zh, en, ru = null) => isChineseUi ? zh : isRussianUi && ru || en, "compactText"), getEnginePortalConfig = /* @__PURE__ */ __name((engineKey) => {
                   let portal = enginePortals[engineKey];
                   return portal ? {
                     primaryUrl: portal.primaryUrl,
@@ -3065,20 +3068,20 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     secondaryLabel: isChineseUi ? portal.secondaryLabelZh : portal.secondaryLabelEn,
                     hint: isChineseUi ? portal.hintZh : portal.hintEn
                   } : null;
-                }, defaultSecondaryButtonColor = BDFDB.LibraryComponents.Button.Colors.PRIMARY || BDFDB.LibraryComponents.Button.Colors.GREY || void 0, createActionButton = ({ label, onClick, color = void 0, look = null, className = null }) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
+                }, "getEnginePortalConfig"), defaultSecondaryButtonColor = BDFDB.LibraryComponents.Button.Colors.PRIMARY || BDFDB.LibraryComponents.Button.Colors.GREY || void 0, createActionButton = /* @__PURE__ */ __name(({ label, onClick, color = void 0, look = null, className = null }) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
                   size: BDFDB.LibraryComponents.Button.Sizes.SMALL,
                   color: color === null ? void 0 : color || defaultSecondaryButtonColor,
                   look: look || void 0,
                   className,
                   onClick,
                   children: label
-                }), stableSelectScrollState = null, stableSelectScrollIntoViewOriginal = null, stableSelectScrollLockTimer = null, restoreStableSelectScrollIntoView = (_3) => {
+                }), "createActionButton"), stableSelectScrollState = null, stableSelectScrollIntoViewOriginal = null, stableSelectScrollLockTimer = null, restoreStableSelectScrollIntoView = /* @__PURE__ */ __name((_3) => {
                   try {
                     stableSelectScrollIntoViewOriginal && typeof Element < "u" && Element.prototype.scrollIntoView != stableSelectScrollIntoViewOriginal && (Element.prototype.scrollIntoView = stableSelectScrollIntoViewOriginal);
                   } catch {
                   }
                   stableSelectScrollIntoViewOriginal = null;
-                }, lockStableSelectScrollIntoView = (duration = 900) => {
+                }, "restoreStableSelectScrollIntoView"), lockStableSelectScrollIntoView = /* @__PURE__ */ __name((duration = 900) => {
                   try {
                     if (typeof Element > "u" || !Element.prototype || typeof Element.prototype.scrollIntoView != "function") return;
                     stableSelectScrollIntoViewOriginal || (stableSelectScrollIntoViewOriginal = Element.prototype.scrollIntoView, Element.prototype.scrollIntoView = function() {
@@ -3087,19 +3090,19 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     }), stableSelectScrollLockTimer && clearTimeout(stableSelectScrollLockTimer), stableSelectScrollLockTimer = setTimeout(restoreStableSelectScrollIntoView, duration);
                   } catch {
                   }
-                }, restoreStableSelectScroll = (scrollState, repeat = !1) => {
+                }, "lockStableSelectScrollIntoView"), restoreStableSelectScroll = /* @__PURE__ */ __name((scrollState, repeat = !1) => {
                   if (!scrollState) return;
-                  let apply = (_3) => restoreSettingsPanelScrollState(scrollState);
+                  let apply = /* @__PURE__ */ __name((_3) => restoreSettingsPanelScrollState(scrollState), "apply");
                   requestAnimationFrame(apply), setTimeout(apply, 0), repeat && [16, 40, 80, 160, 320, 520].forEach((delay) => setTimeout(apply, delay));
-                }, createStableSelect = (props) => {
-                  let getScrollState = (_3) => stableSelectScrollState || captureSettingsPanelScrollState(), rememberScroll = (_3) => (stableSelectScrollState = captureSettingsPanelScrollState(), stableSelectScrollState), rememberAndSoftRestore = (repeat = !1) => {
+                }, "restoreStableSelectScroll"), createStableSelect = /* @__PURE__ */ __name((props) => {
+                  let getScrollState = /* @__PURE__ */ __name((_3) => stableSelectScrollState || captureSettingsPanelScrollState(), "getScrollState"), rememberScroll = /* @__PURE__ */ __name((_3) => (stableSelectScrollState = captureSettingsPanelScrollState(), stableSelectScrollState), "rememberScroll"), rememberAndSoftRestore = /* @__PURE__ */ __name((repeat = !1) => {
                     let scrollState = rememberScroll();
                     return lockStableSelectScrollIntoView(repeat ? 1200 : 700), restoreStableSelectScroll(scrollState, repeat), scrollState;
-                  }, callHandler = (name, event) => {
+                  }, "rememberAndSoftRestore"), callHandler = /* @__PURE__ */ __name((name, event) => {
                     if (props && typeof props[name] == "function") return props[name](event);
-                  }, captureOnly = (_3) => {
+                  }, "callHandler"), captureOnly = /* @__PURE__ */ __name((_3) => {
                     rememberScroll(), lockStableSelectScrollIntoView(900);
-                  }, selectProps = Object.assign({
+                  }, "captureOnly"), selectProps = Object.assign({
                     menuShouldScrollIntoView: !1,
                     menuShouldBlockScroll: !1,
                     captureMenuScroll: !1,
@@ -3133,19 +3136,19 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     onFocusCapture: captureOnly,
                     children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Select, selectProps)
                   });
-                }, createSegmentedSelector = ({ options, value, onChange, className = "" }) => BDFDB.ReactUtils.createElement("div", {
+                }, "createStableSelect"), createSegmentedSelector = /* @__PURE__ */ __name(({ options, value, onChange, className = "" }) => BDFDB.ReactUtils.createElement("div", {
                   className: BDFDB.DOMUtils.formatClassName("translator-segmented-group", className),
                   children: options.map((option) => BDFDB.ReactUtils.createElement("button", {
                     type: "button",
                     disabled: !!option.disabled,
                     className: BDFDB.DOMUtils.formatClassName("translator-segmented-button", option.value == value && "translator-segmented-button-active", option.disabled && "translator-segmented-button-disabled"),
-                    onClick: (_3) => !option.disabled && onChange(option.value),
+                    onClick: /* @__PURE__ */ __name((_3) => !option.disabled && onChange(option.value), "onClick"),
                     children: option.label
                   }))
-                }), ensureSecretInputState = () => (this.secretInputState || (this.secretInputState = {}), this.secretInputState), isSecretFieldVisible = (fieldKey) => !!ensureSecretInputState()[fieldKey], toggleSecretFieldVisibility = (fieldKey) => {
+                }), "createSegmentedSelector"), ensureSecretInputState = /* @__PURE__ */ __name(() => (this.secretInputState || (this.secretInputState = {}), this.secretInputState), "ensureSecretInputState"), isSecretFieldVisible = /* @__PURE__ */ __name((fieldKey) => !!ensureSecretInputState()[fieldKey], "isSecretFieldVisible"), toggleSecretFieldVisibility = /* @__PURE__ */ __name((fieldKey) => {
                   let secretState = ensureSecretInputState();
                   secretState[fieldKey] = !secretState[fieldKey], refreshPanel();
-                }, createSecretToggleIcon = (visible) => BDFDB.ReactUtils.createElement("svg", {
+                }, "toggleSecretFieldVisibility"), createSecretToggleIcon = /* @__PURE__ */ __name((visible) => BDFDB.ReactUtils.createElement("svg", {
                   viewBox: "0 0 24 24",
                   width: 18,
                   height: 18,
@@ -3160,7 +3163,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     BDFDB.ReactUtils.createElement("circle", { cx: "12", cy: "12", r: "2.6", key: "pupil" }),
                     !visible && BDFDB.ReactUtils.createElement("path", { d: "M4 19.2 19.2 4", key: "slash" })
                   ].filter(Boolean)
-                }), createSecretInput = ({ fieldKey, placeholder, value, onChange }) => BDFDB.ReactUtils.createElement("div", {
+                }), "createSecretToggleIcon"), createSecretInput = /* @__PURE__ */ __name(({ fieldKey, placeholder, value, onChange }) => BDFDB.ReactUtils.createElement("div", {
                   className: "translator-secret-input-row",
                   children: [
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
@@ -3175,11 +3178,11 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       className: "translator-secret-toggle",
                       "aria-label": isSecretFieldVisible(fieldKey) ? this.getCustomText("hide_secret_label") : this.getCustomText("show_secret_label"),
                       title: isSecretFieldVisible(fieldKey) ? this.getCustomText("hide_secret_label") : this.getCustomText("show_secret_label"),
-                      onClick: (_3) => toggleSecretFieldVisibility(fieldKey),
+                      onClick: /* @__PURE__ */ __name((_3) => toggleSecretFieldVisibility(fieldKey), "onClick"),
                       children: createSecretToggleIcon(isSecretFieldVisible(fieldKey))
                     })
                   ]
-                }), createExceptionScopeSwitches = (sentKey, receivedKey, sentLabelKey, receivedLabelKey) => BDFDB.ReactUtils.createElement("div", {
+                }), "createSecretInput"), createExceptionScopeSwitches = /* @__PURE__ */ __name((sentKey, receivedKey, sentLabelKey, receivedLabelKey) => BDFDB.ReactUtils.createElement("div", {
                   className: "translator-settings-switch-group",
                   children: [
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
@@ -3188,9 +3191,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       label: this.getCustomText(sentLabelKey),
                       tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
                       value: this.getExceptionScopeSetting(sentKey, !0),
-                      onChange: (value) => {
+                      onChange: /* @__PURE__ */ __name((value) => {
                         this.settings.exceptions || (this.settings.exceptions = {}), this.settings.exceptions[sentKey] = !!value, BDFDB.DataUtils.save(!!value, this, "exceptions", sentKey), this.SettingsUpdated = !0;
-                      }
+                      }, "onChange")
                     }),
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
                       type: "Switch",
@@ -3198,12 +3201,12 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       label: this.getCustomText(receivedLabelKey),
                       tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
                       value: this.getExceptionScopeSetting(receivedKey, !0),
-                      onChange: (value) => {
+                      onChange: /* @__PURE__ */ __name((value) => {
                         this.settings.exceptions || (this.settings.exceptions = {}), this.settings.exceptions[receivedKey] = !!value, BDFDB.DataUtils.save(!!value, this, "exceptions", receivedKey), this.SettingsUpdated = !0;
-                      }
+                      }, "onChange")
                     })
                   ]
-                }), createStackedTokenInput = ({ items, maxLength, placeholder, emptyText, onChange }) => BDFDB.ReactUtils.createElement(class extends BdApi.React.Component {
+                }), "createExceptionScopeSwitches"), createStackedTokenInput = /* @__PURE__ */ __name(({ items, maxLength, placeholder, emptyText, onChange }) => BDFDB.ReactUtils.createElement(class extends BdApi.React.Component {
                   constructor(props) {
                     super(props), this.state = {
                       value: "",
@@ -3248,7 +3251,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                               BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
                                 className: "translator-token-badge-delete",
                                 name: BDFDB.LibraryComponents.SvgIcon.Names.CLOSE,
-                                onClick: (_3) => this.removeItem(item)
+                                onClick: /* @__PURE__ */ __name((_3) => this.removeItem(item), "onClick")
                               })
                             ]
                           })) : BDFDB.ReactUtils.createElement("div", {
@@ -3262,17 +3265,17 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                             value: this.state.value,
                             placeholder,
                             maxLength,
-                            onChange: (value) => this.setState({ value }),
-                            onKeyDown: (event) => {
+                            onChange: /* @__PURE__ */ __name((value) => this.setState({ value }), "onChange"),
+                            onKeyDown: /* @__PURE__ */ __name((event) => {
                               event.which == 13 && (event.preventDefault(), this.commitValue());
-                            },
-                            onBlur: (_3) => this.commitValue()
+                            }, "onKeyDown"),
+                            onBlur: /* @__PURE__ */ __name((_3) => this.commitValue(), "onBlur")
                           })
                         })
                       ]
                     });
                   }
-                }, { items, maxLength, placeholder, emptyText, onChange }), createDisablePrefixForm = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                }, { items, maxLength, placeholder, emptyText, onChange }), "createStackedTokenInput"), createDisablePrefixForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title: this.getCustomText("disable_prefix_title"),
                   className: BDFDB.disCN.marginbottom8,
                   children: [
@@ -3281,12 +3284,12 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       placeholder: this.getCustomText("disable_prefix_placeholder"),
                       maxLength: this.defaults.exceptions.wordStart.max,
                       items: this.settings.exceptions.wordStart,
-                      onChange: (value) => {
+                      onChange: /* @__PURE__ */ __name((value) => {
                         this.SettingsUpdated = !0, BDFDB.DataUtils.save(value, this, "exceptions", "wordStart");
-                      }
+                      }, "onChange")
                     })
                   ]
-                }), createProtectedTermsForm = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                }), "createDisablePrefixForm"), createProtectedTermsForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title: this.getCustomText("protected_terms_title"),
                   className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.marginbottom8, "translator-advanced-protection-section translator-advanced-protection-terms"),
                   children: [
@@ -3297,13 +3300,13 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       emptyText: this.getCustomText("protected_terms_placeholder"),
                       maxLength: this.defaults.exceptions.protectedTerms.max,
                       items: this.settings.exceptions.protectedTerms || [],
-                      onChange: (value) => {
+                      onChange: /* @__PURE__ */ __name((value) => {
                         let nextValue = BDFDB.ArrayUtils.is(value) ? [].concat(value) : [];
                         this.settings.exceptions.protectedTerms = nextValue, this.SettingsUpdated = !0, BDFDB.DataUtils.save(nextValue, this, "exceptions", "protectedTerms");
-                      }
+                      }, "onChange")
                     })
                   ]
-                }), createWrapperPairsForm = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                }), "createProtectedTermsForm"), createWrapperPairsForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title: this.getCustomText("wrapper_pairs_title"),
                   className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.marginbottom8, "translator-advanced-protection-section translator-advanced-protection-wrapper"),
                   children: [
@@ -3314,13 +3317,13 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       emptyText: this.getCustomText("wrapper_pairs_placeholder"),
                       maxLength: this.defaults.exceptions.wrapperPairs.max,
                       items: this.getWrapperPairItemsForSettings(),
-                      onChange: (value) => {
+                      onChange: /* @__PURE__ */ __name((value) => {
                         let nextValue = (BDFDB.ArrayUtils.is(value) ? value : []).filter((rule) => !this.isDiscordSpoilerWrapperRule(rule));
                         this.settings.exceptions.wrapperPairs = [].concat(nextValue), this.SettingsUpdated = !0, BDFDB.DataUtils.save(nextValue, this, "exceptions", "wrapperPairs");
-                      }
+                      }, "onChange")
                     })
                   ]
-                }), createTranslatePrefixForm = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                }), "createWrapperPairsForm"), createTranslatePrefixForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title: this.getCustomText("translate_prefix_title"),
                   className: BDFDB.disCN.marginbottom8,
                   children: [
@@ -3333,9 +3336,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
                             placeholder: this.getCustomText("translate_prefix_placeholder"),
                             value: entry.prefix,
-                            onChange: (value) => {
+                            onChange: /* @__PURE__ */ __name((value) => {
                               this.settings.prefixes.translationPrefixData[index].prefix = value, BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0;
-                            }
+                            }, "onChange")
                           })
                         }),
                         BDFDB.ReactUtils.createElement("div", {
@@ -3346,9 +3349,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                               value: key,
                               label: this.getLanguageDisplayName(languages[key])
                             })).sort((a, b) => a.label.localeCompare(b.label)),
-                            onChange: (value) => {
+                            onChange: /* @__PURE__ */ __name((value) => {
                               this.settings.prefixes.translationPrefixData[index].language = value, BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0;
-                            }
+                            }, "onChange")
                           })
                         }),
                         BDFDB.ReactUtils.createElement("div", {
@@ -3356,9 +3359,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
                             color: BDFDB.LibraryComponents.Button.Colors.RED,
                             size: BDFDB.LibraryComponents.Button.Sizes.TINY,
-                            onClick: (_3) => {
+                            onClick: /* @__PURE__ */ __name((_3) => {
                               this.settings.prefixes.translationPrefixData.splice(index, 1), BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0, refreshPanel();
-                            },
+                            }, "onClick"),
                             children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
                               name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
                               width: 16,
@@ -3371,35 +3374,35 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
                       type: "Button",
                       color: BDFDB.LibraryComponents.Button.Colors.GREEN,
-                      onClick: (_3) => {
+                      onClick: /* @__PURE__ */ __name((_3) => {
                         this.settings.prefixes.translationPrefixData || (this.settings.prefixes.translationPrefixData = []), this.settings.prefixes.translationPrefixData.push({
                           prefix: "$en",
                           language: "en"
                         }), BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0, refreshPanel();
-                      },
+                      }, "onClick"),
                       children: this.getCustomText("add_prefix_button")
                     })
                   ]
-                }), saveTranslatedTextColor = (color) => {
+                }), "createTranslatePrefixForm"), saveTranslatedTextColor = /* @__PURE__ */ __name((color) => {
                   color = (color || "").trim() || "#7cc7ff", this.settings.general.translatedTextColor = color, BDFDB.ArrayUtils.is(this.settings.general.customTranslatedTextColors) || (this.settings.general.customTranslatedTextColors = []), !this.getTranslatedTextColorPresets().includes(color) && !this.settings.general.customTranslatedTextColors.includes(color) && this.settings.general.customTranslatedTextColors.unshift(color), this.settings.general.customTranslatedTextColors = this.settings.general.customTranslatedTextColors.filter((value, index, array) => value && array.indexOf(value) == index).slice(0, 12), BDFDB.DataUtils.save(this.settings.general, this, "general"), this.SettingsUpdated = !0, refreshPanel();
-                }, removeTranslatedTextColor = (color) => {
+                }, "saveTranslatedTextColor"), removeTranslatedTextColor = /* @__PURE__ */ __name((color) => {
                   color = (color || "").trim(), !(!color || this.getTranslatedTextColorPresets().includes(color)) && (this.settings.general.customTranslatedTextColors = (this.settings.general.customTranslatedTextColors || []).filter((savedColor) => savedColor != color), this.getTranslatedTextColor() == color && (this.settings.general.translatedTextColor = this.getTranslatedTextColorPresets()[0] || "#7cc7ff"), BDFDB.DataUtils.save(this.settings.general, this, "general"), this.SettingsUpdated = !0, refreshPanel());
-                }, resetTranslatedTextColor = () => {
+                }, "removeTranslatedTextColor"), resetTranslatedTextColor = /* @__PURE__ */ __name(() => {
                   let defaultColor = this.getTranslatedTextColorPresets()[0] || "#7cc7ff", colorState = ensureTranslatedTextColorState();
                   colorState.showCustom = !1, colorState.customValue = defaultColor, this.settings.general.translatedTextColor = defaultColor, BDFDB.DataUtils.save(this.settings.general, this, "general"), this.SettingsUpdated = !0, refreshPanel();
-                }, ensureTranslatedTextColorState = () => (this.translatedTextColorState || (this.translatedTextColorState = {
+                }, "resetTranslatedTextColor"), ensureTranslatedTextColorState = /* @__PURE__ */ __name(() => (this.translatedTextColorState || (this.translatedTextColorState = {
                   showCustom: !1,
                   customValue: this.getTranslatedTextColor()
-                }), this.translatedTextColorState.customValue || (this.translatedTextColorState.customValue = this.getTranslatedTextColor()), this.translatedTextColorState), getCustomTranslatedTextColors = () => BDFDB.ArrayUtils.is(this.settings.general.customTranslatedTextColors) ? this.settings.general.customTranslatedTextColors : [], createColorChip = (color, active) => {
+                }), this.translatedTextColorState.customValue || (this.translatedTextColorState.customValue = this.getTranslatedTextColor()), this.translatedTextColorState), "ensureTranslatedTextColorState"), getCustomTranslatedTextColors = /* @__PURE__ */ __name(() => BDFDB.ArrayUtils.is(this.settings.general.customTranslatedTextColors) ? this.settings.general.customTranslatedTextColors : [], "getCustomTranslatedTextColors"), createColorChip = /* @__PURE__ */ __name((color, active) => {
                   let isCustomColor = getCustomTranslatedTextColors().includes(color) && !this.getTranslatedTextColorPresets().includes(color);
                   return BDFDB.ReactUtils.createElement("button", {
                     type: "button",
                     className: BDFDB.DOMUtils.formatClassName("translator-color-chip", active && "translator-color-chip-active"),
                     title: isCustomColor ? `${color} · ${compactText("点击选择，点 × 删除", "Click to select, click × to delete", "Нажмите для выбора, × для удаления")}` : color,
-                    onClick: (_3) => {
+                    onClick: /* @__PURE__ */ __name((_3) => {
                       let colorState = ensureTranslatedTextColorState();
                       colorState.showCustom = !1, colorState.customValue = color, saveTranslatedTextColor(color);
-                    },
+                    }, "onClick"),
                     children: [
                       BDFDB.ReactUtils.createElement("span", {
                         className: "translator-color-chip-code",
@@ -3412,14 +3415,14 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       isCustomColor && BDFDB.ReactUtils.createElement("span", {
                         className: "translator-color-chip-delete",
                         title: compactText("删除这个自定义颜色", "Delete this custom color", "Удалить этот цвет"),
-                        onClick: (event) => {
+                        onClick: /* @__PURE__ */ __name((event) => {
                           event.preventDefault(), event.stopPropagation(), removeTranslatedTextColor(color);
-                        },
+                        }, "onClick"),
                         children: "×"
                       })
                     ].filter(Boolean)
                   });
-                }, createColorOptionLabel = (color) => BDFDB.ReactUtils.createElement("div", {
+                }, "createColorChip"), createColorOptionLabel = /* @__PURE__ */ __name((color) => BDFDB.ReactUtils.createElement("div", {
                   className: "translator-settings-color-option",
                   children: [
                     BDFDB.ReactUtils.createElement("span", {
@@ -3430,7 +3433,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       style: { background: color }
                     })
                   ]
-                }), createInlineHeader = (title, actions = []) => BDFDB.ReactUtils.createElement("div", {
+                }), "createColorOptionLabel"), createInlineHeader = /* @__PURE__ */ __name((title, actions = []) => BDFDB.ReactUtils.createElement("div", {
                   className: "translator-settings-inline-header",
                   children: [
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
@@ -3443,15 +3446,15 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       children: actions
                     }) : null
                   ].filter(Boolean)
-                }), createSubsectionTitle = (title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
+                }), "createInlineHeader"), createSubsectionTitle = /* @__PURE__ */ __name((title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
                   className: BDFDB.disCN.marginbottom8,
                   tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
                   children: title
-                }), createDivider = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
+                }), "createSubsectionTitle"), createDivider = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
                   className: BDFDB.disCNS.dividerdefault + BDFDB.disCN.marginbottom8
-                }), createSpaciousDivider = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
+                }), "createDivider"), createSpaciousDivider = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
                   className: BDFDB.DOMUtils.formatClassName(BDFDB.disCNS.dividerdefault + BDFDB.disCN.marginbottom8, "translator-settings-divider-spacious")
-                }), createEnginePortalButtons = (engineKey) => {
+                }), "createSpaciousDivider"), createEnginePortalButtons = /* @__PURE__ */ __name((engineKey) => {
                   let portal = getEnginePortalConfig(engineKey);
                   return portal ? {
                     portal,
@@ -3459,16 +3462,16 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       portal.primaryUrl && createActionButton({
                         label: portal.primaryLabel,
                         color: BDFDB.LibraryComponents.Button.Colors.BRAND,
-                        onClick: (_3) => BDFDB.DiscordUtils.openLink(portal.primaryUrl)
+                        onClick: /* @__PURE__ */ __name((_3) => BDFDB.DiscordUtils.openLink(portal.primaryUrl), "onClick")
                       }),
                       portal.secondaryUrl && portal.secondaryLabel && createActionButton({
                         label: portal.secondaryLabel,
                         color: BDFDB.LibraryComponents.Button.Colors.BRAND,
-                        onClick: (_3) => BDFDB.DiscordUtils.openLink(portal.secondaryUrl)
+                        onClick: /* @__PURE__ */ __name((_3) => BDFDB.DiscordUtils.openLink(portal.secondaryUrl), "onClick")
                       })
                     ].filter(Boolean)
                   } : { portal: null, buttons: [] };
-                }, createEngineSupportPanel = (engineKey) => {
+                }, "createEnginePortalButtons"), createEngineSupportPanel = /* @__PURE__ */ __name((engineKey) => {
                   let portalData = createEnginePortalButtons(engineKey);
                   return !portalData.buttons.length ? null : BDFDB.ReactUtils.createElement("div", {
                     className: "translator-settings-support-panel",
@@ -3477,7 +3480,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       children: portalData.buttons
                     })
                   });
-                }, createFetchedModelSelector = (engineKey) => {
+                }, "createEngineSupportPanel"), createFetchedModelSelector = /* @__PURE__ */ __name((engineKey) => {
                   let state = this.modelCatalogState && this.modelCatalogState[engineKey];
                   return !state || !state.items || !state.items.length ? null : BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                     title: this.getCustomText("model_catalog_title"),
@@ -3486,9 +3489,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       createStableSelect({
                         value: authKeys[engineKey] && authKeys[engineKey].model || "",
                         options: state.items.map((modelId) => ({ value: modelId, label: modelId })),
-                        onChange: (value) => {
+                        onChange: /* @__PURE__ */ __name((value) => {
                           saveAuthField(engineKey, "model", value), refreshPanel();
-                        }
+                        }, "onChange")
                       }),
                       BDFDB.ReactUtils.createElement("div", {
                         className: "translator-settings-meta",
@@ -3496,34 +3499,34 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       })
                     ]
                   });
-                }, updateEngineSetting = (field, value) => {
+                }, "createFetchedModelSelector"), updateEngineSetting = /* @__PURE__ */ __name((field, value) => {
                   this.settings.engines[field] = value, BDFDB.DataUtils.save(this.settings.engines, this, "engines"), this.setLanguages(), this.SettingsUpdated = !0, refreshPanel();
-                }, saveFilterSetting = (key, value) => {
+                }, "updateEngineSetting"), saveFilterSetting = /* @__PURE__ */ __name((key, value) => {
                   this.settings.filters || (this.settings.filters = {}), this.settings.filters[key] = value, BDFDB.DataUtils.save(value, this, "filters", key), this.SettingsUpdated = !0;
-                }, createLanguageOptions = (direction) => Object.keys(languages).filter((key) => !languages[key].special && (direction == languageTypes.INPUT || !languages[key].auto)).map((key) => ({
+                }, "saveFilterSetting"), createLanguageOptions = /* @__PURE__ */ __name((direction) => Object.keys(languages).filter((key) => !languages[key].special && (direction == languageTypes.INPUT || !languages[key].auto)).map((key) => ({
                   value: key,
                   label: this.getLanguageDisplayName(languages[key])
-                })).sort((a, b) => a.value == "auto" ? -1 : b.value == "auto" ? 1 : a.label.localeCompare(b.label)), createLanguageSelector = (place, direction, title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                })).sort((a, b) => a.value == "auto" ? -1 : b.value == "auto" ? 1 : a.label.localeCompare(b.label)), "createLanguageOptions"), createLanguageSelector = /* @__PURE__ */ __name((place, direction, title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title,
                   className: BDFDB.disCN.marginbottom8,
                   children: createStableSelect({
                     value: this.settings.choices[place][direction],
                     options: createLanguageOptions(direction),
-                    onChange: (value) => {
+                    onChange: /* @__PURE__ */ __name((value) => {
                       this.settings.choices[place][direction] = value, BDFDB.DataUtils.save(this.settings.choices, this, "choices"), this.setLanguages(), this.SettingsUpdated = !0, refreshPanel();
-                    }
+                    }, "onChange")
                   })
-                }), createGeneralSwitch = (key) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsSaveItem, {
+                }), "createLanguageSelector"), createGeneralSwitch = /* @__PURE__ */ __name((key) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsSaveItem, {
                   type: "Switch",
                   plugin: this,
                   keys: ["general", key],
                   className: "translator-settings-switch-row",
                   label: this.getGeneralSettingLabel(key),
                   value: this.settings.general[key]
-                }), createGeneralSwitchGroup = (keys) => BDFDB.ReactUtils.createElement("div", {
+                }), "createGeneralSwitch"), createGeneralSwitchGroup = /* @__PURE__ */ __name((keys) => BDFDB.ReactUtils.createElement("div", {
                   className: "translator-settings-switch-group",
                   children: keys.map(createGeneralSwitch)
-                }), createUiLanguageSelector = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                }), "createGeneralSwitchGroup"), createUiLanguageSelector = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title: this.getCustomText("plugin_language_title"),
                   className: BDFDB.disCN.marginbottom8,
                   children: [
@@ -3531,12 +3534,12 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     createStableSelect({
                       value: this.settings.general.interfaceLanguage || "system",
                       options: this.getPluginLanguageOptions(),
-                      onChange: (value) => {
+                      onChange: /* @__PURE__ */ __name((value) => {
                         this.settings.general.interfaceLanguage = value || "system", BDFDB.DataUtils.save(this.settings.general, this, "general"), this.SettingsUpdated = !0, this.labels = this.setLabelsByLanguage(), refreshPanel();
-                      }
+                      }, "onChange")
                     })
                   ]
-                }), createTranslatedTextColorInput = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                }), "createUiLanguageSelector"), createTranslatedTextColorInput = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title: this.getCustomText("translated_text_color_title"),
                   className: BDFDB.disCN.marginbottom8,
                   children: (() => {
@@ -3551,9 +3554,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           BDFDB.ReactUtils.createElement("button", {
                             type: "button",
                             className: "translator-color-chip translator-color-chip-add",
-                            onClick: (_3) => {
+                            onClick: /* @__PURE__ */ __name((_3) => {
                               colorState.showCustom = !colorState.showCustom, colorState.customValue = currentColor, refreshPanel();
-                            },
+                            }, "onClick"),
                             children: "+"
                           })
                         ]
@@ -3565,40 +3568,40 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                             type: "color",
                             className: "translator-native-color-input",
                             defaultValue: /^#[0-9a-f]{6}$/i.test(colorState.customValue || "") ? colorState.customValue : "#7cc7ff",
-                            onInput: (event) => {
+                            onInput: /* @__PURE__ */ __name((event) => {
                               let nextColor = event && event.target && event.target.value || colorState.customValue;
                               colorState.customValue = nextColor;
                               let row = event && event.target && event.target.closest && event.target.closest(".translator-color-custom-row"), textInput = row && row.querySelector && row.querySelector(".translator-color-custom-input");
                               textInput && textInput.value != nextColor && (textInput.value = nextColor);
-                            },
-                            onChange: (event) => {
+                            }, "onInput"),
+                            onChange: /* @__PURE__ */ __name((event) => {
                               colorState.customValue = event && event.target && event.target.value || colorState.customValue;
-                            }
+                            }, "onChange")
                           }),
                           BDFDB.ReactUtils.createElement("input", {
                             type: "text",
                             className: "translator-color-custom-input",
                             placeholder: "#7cc7ff",
                             defaultValue: colorState.customValue,
-                            onInput: (event) => {
+                            onInput: /* @__PURE__ */ __name((event) => {
                               colorState.customValue = event && event.target && event.target.value || "";
-                            }
+                            }, "onInput")
                           }),
                           createActionButton({
                             label: this.getCustomText("translated_text_color_save_button"),
                             look: BDFDB.LibraryComponents.Button.Looks.OUTLINED,
                             className: "translator-settings-field-action",
-                            onClick: (_3) => {
+                            onClick: /* @__PURE__ */ __name((_3) => {
                               let customColor = (colorState.customValue || "").trim();
                               if (!this.isValidCssColorValue(customColor)) return BDFDB.NotificationUtils.toast(this.getCustomText("translated_text_color_invalid"), { type: "danger", position: "center" });
                               colorState.showCustom = !1, colorState.customValue = customColor, saveTranslatedTextColor(customColor);
-                            }
+                            }, "onClick")
                           })
                         ]
                       })
                     ].filter(Boolean);
                   })()
-                }), createSourceLanguageFilter = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                }), "createTranslatedTextColorInput"), createSourceLanguageFilter = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title: this.getCustomText("source_filter_title"),
                   className: BDFDB.disCN.marginbottom8,
                   children: [
@@ -3618,9 +3621,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                               value: key,
                               label: this.getLanguageDisplayName(languages[key])
                             })).sort((a, b) => a.label.localeCompare(b.label)),
-                            onChange: (value) => {
+                            onChange: /* @__PURE__ */ __name((value) => {
                               this.settings.filters.autoTranslateSourceLanguages[index] = value, BDFDB.DataUtils.save(this.settings.filters.autoTranslateSourceLanguages, this, "filters", "autoTranslateSourceLanguages"), this.SettingsUpdated = !0;
-                            }
+                            }, "onChange")
                           })
                         }),
                         BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
@@ -3630,9 +3633,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
                             color: BDFDB.LibraryComponents.Button.Colors.RED,
                             size: BDFDB.LibraryComponents.Button.Sizes.TINY,
-                            onClick: (_3) => {
+                            onClick: /* @__PURE__ */ __name((_3) => {
                               this.settings.filters.autoTranslateSourceLanguages.splice(index, 1), BDFDB.DataUtils.save(this.settings.filters.autoTranslateSourceLanguages, this, "filters", "autoTranslateSourceLanguages"), this.SettingsUpdated = !0, refreshPanel();
-                            },
+                            }, "onClick"),
                             children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
                               name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
                               width: 16,
@@ -3645,13 +3648,13 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
                       type: "Button",
                       color: BDFDB.LibraryComponents.Button.Colors.GREEN,
-                      onClick: (_3) => {
+                      onClick: /* @__PURE__ */ __name((_3) => {
                         this.settings.filters || (this.settings.filters = {}), this.settings.filters.autoTranslateSourceLanguages || (this.settings.filters.autoTranslateSourceLanguages = []), this.settings.filters.autoTranslateSourceLanguages.push("en"), BDFDB.DataUtils.save(this.settings.filters.autoTranslateSourceLanguages, this, "filters", "autoTranslateSourceLanguages"), this.SettingsUpdated = !0, refreshPanel();
-                      },
+                      }, "onClick"),
                       children: this.getCustomText("source_filter_add")
                     })
                   ]
-                }), createReceivedSourceLanguageFilter = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                }), "createSourceLanguageFilter"), createReceivedSourceLanguageFilter = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title: this.getCustomText("received_source_filter_title"),
                   className: BDFDB.disCN.marginbottom8,
                   children: [
@@ -3671,9 +3674,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                               value: key,
                               label: this.getLanguageDisplayName(languages[key])
                             })).sort((a, b) => a.label.localeCompare(b.label)),
-                            onChange: (value) => {
+                            onChange: /* @__PURE__ */ __name((value) => {
                               this.settings.filters.receivedAutoTranslateSourceLanguages[index] = value, BDFDB.DataUtils.save(this.settings.filters.receivedAutoTranslateSourceLanguages, this, "filters", "receivedAutoTranslateSourceLanguages"), this.SettingsUpdated = !0;
-                            }
+                            }, "onChange")
                           })
                         }),
                         BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
@@ -3683,9 +3686,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
                             color: BDFDB.LibraryComponents.Button.Colors.RED,
                             size: BDFDB.LibraryComponents.Button.Sizes.TINY,
-                            onClick: (_3) => {
+                            onClick: /* @__PURE__ */ __name((_3) => {
                               this.settings.filters.receivedAutoTranslateSourceLanguages.splice(index, 1), BDFDB.DataUtils.save(this.settings.filters.receivedAutoTranslateSourceLanguages, this, "filters", "receivedAutoTranslateSourceLanguages"), this.SettingsUpdated = !0, refreshPanel();
-                            },
+                            }, "onClick"),
                             children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
                               name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
                               width: 16,
@@ -3698,13 +3701,13 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
                       type: "Button",
                       color: BDFDB.LibraryComponents.Button.Colors.GREEN,
-                      onClick: (_3) => {
+                      onClick: /* @__PURE__ */ __name((_3) => {
                         this.settings.filters || (this.settings.filters = {}), this.settings.filters.receivedAutoTranslateSourceLanguages || (this.settings.filters.receivedAutoTranslateSourceLanguages = []), this.settings.filters.receivedAutoTranslateSourceLanguages.push("en"), BDFDB.DataUtils.save(this.settings.filters.receivedAutoTranslateSourceLanguages, this, "filters", "receivedAutoTranslateSourceLanguages"), this.SettingsUpdated = !0, refreshPanel();
-                      },
+                      }, "onClick"),
                       children: this.getCustomText("received_source_filter_add")
                     })
                   ]
-                }), createAutoTranslateDecisionSettings = () => {
+                }), "createReceivedSourceLanguageFilter"), createAutoTranslateDecisionSettings = /* @__PURE__ */ __name(() => {
                   let aiCapable = this.isAiAutoTranslateDecisionAvailable(), currentMode = this.getAutoTranslateDecisionMode();
                   return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                     title: this.getCustomText("auto_translate_decision_title"),
@@ -3718,9 +3721,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           { value: "basic", label: this.getCustomText("auto_translate_decision_basic") },
                           { value: "ai", label: aiCapable ? this.getCustomText("auto_translate_decision_ai") : this.getCustomText("auto_translate_decision_ai_disabled"), disabled: !aiCapable }
                         ],
-                        onChange: (value) => {
+                        onChange: /* @__PURE__ */ __name((value) => {
                           this.settings.filters || (this.settings.filters = {}), this.settings.filters.autoTranslateDecisionMode = value, BDFDB.DataUtils.save(value, this, "filters", "autoTranslateDecisionMode"), this.SettingsUpdated = !0, refreshPanel();
-                        }
+                        }, "onChange")
                       }),
                       BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                         title: compactText("语言检测策略", "Language detection strategy", "Стратегия определения языка"),
@@ -3733,9 +3736,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                               { value: "google_free", label: compactText("仅 Google Free", "Google Free only", "Только Google Free") },
                               { value: "local_only", label: compactText("仅本地检测", "Local only", "Только локально") }
                             ],
-                            onChange: (value) => {
+                            onChange: /* @__PURE__ */ __name((value) => {
                               this.settings.filters || (this.settings.filters = {}), this.settings.filters.languageDetectionStrategy = value, BDFDB.DataUtils.save(value, this, "filters", "languageDetectionStrategy"), this.SettingsUpdated = !0;
-                            }
+                            }, "onChange")
                           }),
                           infoText(compactText("本地检测只在高置信时返回；默认策略拿不准会回退到免密钥的 Google 检测。", "Local detection returns only high-confidence results; the default falls back to keyless Google detection when uncertain.", "Локальное определение возвращает только уверенные результаты; иначе используется Google без ключа."))
                         ]
@@ -3745,29 +3748,29 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                         label: compactText("本地预检测:翻前用本地语种识别跳过同语言消息", "Local pre-check: skip same-language messages before requesting translation", "Локальная проверка: пропускать сообщения на целевом языке до запроса"),
                         tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
                         value: this.useLocalLanguagePrecheck(),
-                        onChange: (value) => {
+                        onChange: /* @__PURE__ */ __name((value) => {
                           saveFilterSetting("useLocalLanguagePrecheck", value), refreshPanel();
-                        }
+                        }, "onChange")
                       }),
                       infoText(compactText("仅在高置信时跳过,拿不准仍照常翻译;关闭后完全交给翻译服务商判定。", "Only skips when highly confident; uncertain text still gets translated. Turn off to rely entirely on the translation provider.", "Пропускает только при высокой уверенности; иначе переводит как обычно.")),
                       currentMode == "ai" && aiCapable && infoText(this.getCustomText("auto_translate_ai_prompt_hint")),
                       currentMode == "ai" && aiCapable && BDFDB.ReactUtils.createElement("textarea", {
                         className: "translator-ai-prompt-textarea",
                         defaultValue: this.getAiAutoTranslatePrompt(),
-                        onInput: (event) => {
+                        onInput: /* @__PURE__ */ __name((event) => {
                           let value = event && event.target ? event.target.value : "";
                           this.settings.filters || (this.settings.filters = {}), this.settings.filters.aiAutoTranslatePrompt = value, BDFDB.DataUtils.save(value, this, "filters", "aiAutoTranslatePrompt"), this.SettingsUpdated = !0;
-                        },
-                        onChange: (event) => {
+                        }, "onInput"),
+                        onChange: /* @__PURE__ */ __name((event) => {
                           let value = event && event.target ? event.target.value : "";
                           this.settings.filters || (this.settings.filters = {}), this.settings.filters.aiAutoTranslatePrompt = value, BDFDB.DataUtils.save(value, this, "filters", "aiAutoTranslatePrompt"), this.SettingsUpdated = !0;
-                        }
+                        }, "onChange")
                       })
                     ].filter(Boolean)
                   });
-                }, createEngineOptions = (keys) => keys.filter((key) => translationEngines[key]).map((key) => ({ value: key, label: this.getEngineLabel(key) })), createPrimaryOptions = () => createEngineOptions(recommendedEngines.concat(Object.keys(translationEngines).filter((key) => !recommendedEngines.includes(key)))), createBackupOptions = () => [{ value: "----", label: this.getCustomText("backup_engine_none") }].concat(
+                }, "createAutoTranslateDecisionSettings"), createEngineOptions = /* @__PURE__ */ __name((keys) => keys.filter((key) => translationEngines[key]).map((key) => ({ value: key, label: this.getEngineLabel(key) })), "createEngineOptions"), createPrimaryOptions = /* @__PURE__ */ __name(() => createEngineOptions(recommendedEngines.concat(Object.keys(translationEngines).filter((key) => !recommendedEngines.includes(key)))), "createPrimaryOptions"), createBackupOptions = /* @__PURE__ */ __name(() => [{ value: "----", label: this.getCustomText("backup_engine_none") }].concat(
                   Object.keys(translationEngines).filter((key) => key != this.settings.engines.translator).map((key) => ({ value: key, label: this.getEngineLabel(key) }))
-                ), createEngineFields = (engineKey) => {
+                ), "createBackupOptions"), createEngineFields = /* @__PURE__ */ __name((engineKey) => {
                   let engine = translationEngines[engineKey];
                   if (!engine) return [infoText(this.getCustomText("engine_unknown_hint"))];
                   if (engineKey == "googleapi") return [createEngineSupportPanel(engineKey)];
@@ -3777,9 +3780,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     label: this.getCustomText("paid_version_label"),
                     tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
                     value: authKeys[engineKey] && authKeys[engineKey].paid,
-                    onChange: (value) => {
+                    onChange: /* @__PURE__ */ __name((value) => {
                       authKeys[engineKey] || (authKeys[engineKey] = {}), authKeys[engineKey].paid = value, BDFDB.DataUtils.save(authKeys, this, "authKeys"), this.SettingsUpdated = !0;
-                    }
+                    }, "onChange")
                   })), engine.key && (items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
                     className: BDFDB.disCN.marginbottom8,
                     tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
@@ -3788,7 +3791,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     fieldKey: `${engineKey}-key`,
                     placeholder: engine.key,
                     value: authKeys[engineKey] && authKeys[engineKey].key,
-                    onChange: (value) => saveAuthField(engineKey, "key", value)
+                    onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "key", value), "onChange")
                   }))), engine.endpoint && (items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
                     className: BDFDB.disCN.marginbottom8,
                     tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
@@ -3797,27 +3800,27 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     className: BDFDB.disCN.marginbottom8,
                     placeholder: engine.endpoint,
                     value: authKeys[engineKey] && authKeys[engineKey].endpoint,
-                    onChange: (value) => saveAuthField(engineKey, "endpoint", value)
+                    onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "endpoint", value), "onChange")
                   }))), engine.model) {
                     let modelCatalogState = this.modelCatalogState && this.modelCatalogState[engineKey], modelActions = [];
                     this.isValidatableEngine(engineKey) && modelActions.push(createActionButton({
                       label: this.getCustomText("model_detect_button"),
                       color: defaultSecondaryButtonColor,
                       className: "translator-settings-field-action",
-                      onClick: async (_3) => {
+                      onClick: /* @__PURE__ */ __name(async (_3) => {
                         let result = await this.validateEngineConfig(engineKey);
                         result && result.normalized && refreshPanel();
-                      }
+                      }, "onClick")
                     })), this.supportsModelCatalog(engineKey) && modelActions.push(createActionButton({
                       label: modelCatalogState && modelCatalogState.loading ? this.getCustomText("model_fetch_loading") : this.getCustomText("model_fetch_button"),
                       color: defaultSecondaryButtonColor,
                       className: "translator-settings-field-action",
-                      onClick: (_3) => this.fetchModelCatalog(engineKey, refreshPanel)
+                      onClick: /* @__PURE__ */ __name((_3) => this.fetchModelCatalog(engineKey, refreshPanel), "onClick")
                     })), items.push(createInlineHeader(this.getCustomText("model_id_label"), modelActions)), items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
                       className: BDFDB.disCN.marginbottom8,
                       placeholder: engine.model,
                       value: authKeys[engineKey] && authKeys[engineKey].model,
-                      onChange: (value) => saveAuthField(engineKey, "model", value)
+                      onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "model", value), "onChange")
                     })), modelCatalogState && modelCatalogState.loading && items.push(BDFDB.ReactUtils.createElement("div", {
                       className: BDFDB.disCN.marginbottom8,
                       style: { opacity: 0.8, lineHeight: "1.5" },
@@ -3842,12 +3845,12 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                         { value: "westeurope", label: "West Europe" },
                         { value: "japaneast", label: "Japan East" }
                       ],
-                      onChange: (value) => saveAuthField(engineKey, "region", value)
+                      onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "region", value), "onChange")
                     })
                   }));
                   let supportPanel = createEngineSupportPanel(engineKey);
                   return supportPanel && items.push(supportPanel), items.length || items.push(infoText(this.getCustomText("engine_no_extra_fields"))), items;
-                }, createOtherServiceAuthSection = () => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
+                }, "createEngineFields"), createOtherServiceAuthSection = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
                   title: this.getCustomText("other_service_title"),
                   collapseStates,
                   children: [
@@ -3858,14 +3861,14 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       children: createEngineFields(key)
                     }))
                   ]
-                }), createProtectionSection = () => [
+                }), "createOtherServiceAuthSection"), createProtectionSection = /* @__PURE__ */ __name(() => [
                   createProtectedTermsForm(),
                   createSpaciousDivider(),
                   createWrapperPairsForm()
-                ], createPrefixSection = () => [
+                ], "createProtectionSection"), createPrefixSection = /* @__PURE__ */ __name(() => [
                   createDisablePrefixForm(),
                   createTranslatePrefixForm()
-                ];
+                ], "createPrefixSection");
                 return settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
                   title: this.getCustomText("section_service_title"),
                   collapseStates,
@@ -3876,7 +3879,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       children: createStableSelect({
                         value: this.settings.engines.translator,
                         options: createPrimaryOptions(),
-                        onChange: (value) => updateEngineSetting("translator", value)
+                        onChange: /* @__PURE__ */ __name((value) => updateEngineSetting("translator", value), "onChange")
                       })
                     }),
                     ...createEngineFields(this.settings.engines.translator),
@@ -3892,7 +3895,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           children: createStableSelect({
                             value: this.settings.engines.backup,
                             options: createBackupOptions(),
-                            onChange: (value) => updateEngineSetting("backup", value)
+                            onChange: /* @__PURE__ */ __name((value) => updateEngineSetting("backup", value), "onChange")
                           })
                         }),
                         this.settings.engines.backup == "----" ? infoText(this.getCustomText("backup_engine_none_hint")) : createEngineFields(this.settings.engines.backup)
@@ -3945,7 +3948,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   className: "translator-settings-panel-root",
                   children: settingsItems.flat(10).filter((n) => n)
                 });
-              }
+              }, "children")
             });
           }
           onSettingsClosed() {
@@ -4636,12 +4639,12 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               BDFDB.ContextMenuUtils.createItem(BDFDB.LibraryComponents.MenuItems.MenuItem, {
                 label: this.getCustomText("context_detect_message_language"),
                 id: BDFDB.ContextMenuUtils.createItemId(this.name, "detect-message-language"),
-                action: (_2) => this.handleMessageLanguageAction(message, channel, !1)
+                action: /* @__PURE__ */ __name((_2) => this.handleMessageLanguageAction(message, channel, !1), "action")
               }),
               BDFDB.ContextMenuUtils.createItem(BDFDB.LibraryComponents.MenuItems.MenuItem, {
                 label: this.getCustomText("context_reply_in_detected_language"),
                 id: BDFDB.ContextMenuUtils.createItemId(this.name, "reply-in-detected-language"),
-                action: (_2) => this.handleMessageLanguageAction(message, channel, !0)
+                action: /* @__PURE__ */ __name((_2) => this.handleMessageLanguageAction(message, channel, !0), "action")
               })
             );
           }
@@ -4671,9 +4674,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             return "";
           }
           getReferencedPreviewContentCandidates(message) {
-            let candidates = [], addCandidate = (value) => {
+            let candidates = [], addCandidate = /* @__PURE__ */ __name((value) => {
               value = this.normalizeExtractedMessageText(value).trim(), value && !candidates.includes(value) && candidates.push(value);
-            }, referencedSources = [
+            }, "addCandidate"), referencedSources = [
               message && message.referencedMessage,
               message && message.referencedMessage && message.referencedMessage.message,
               message && message.referenced_message,
@@ -4690,7 +4693,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             if (!trimmedContent) return content;
             let candidates = this.getReferencedPreviewContentCandidates(message);
             if (!candidates.length) return content;
-            let normalize = (value) => this.normalizeComparisonText(value || ""), lines = content.split(/\r?\n/);
+            let normalize = /* @__PURE__ */ __name((value) => this.normalizeComparisonText(value || ""), "normalize"), lines = content.split(/\r?\n/);
             for (let candidate of candidates) {
               let normalizedCandidate = normalize(candidate);
               if (!normalizedCandidate) continue;
@@ -5113,9 +5116,9 @@ __________________ __________________ __________________
             if (node == null) return node;
             if (BDFDB.ArrayUtils.is(node)) return node.map((child) => this.wrapReplyPreviewJumpPause(child));
             if (!(BDFDB.ReactUtils && typeof BDFDB.ReactUtils.isValidElement == "function" ? BDFDB.ReactUtils.isValidElement(node) : !!(node && typeof node == "object" && node.props)) || !node.props) return node;
-            let props = Object.assign({}, node.props), oldMouseDownCapture = props.onMouseDownCapture, oldClickCapture = props.onClickCapture, pause = (event) => {
+            let props = Object.assign({}, node.props), oldMouseDownCapture = props.onMouseDownCapture, oldClickCapture = props.onClickCapture, pause = /* @__PURE__ */ __name((event) => {
               this.pauseHistoricalAutoTranslationForNavigation(1800);
-            };
+            }, "pause");
             return props.onMouseDownCapture = (event) => {
               pause(event), typeof oldMouseDownCapture == "function" && oldMouseDownCapture(event);
             }, props.onClickCapture = (event) => {
@@ -5216,7 +5219,7 @@ __________________ __________________ __________________
           }
           restoreMessageAnchorState(anchorState) {
             if (!anchorState) return;
-            let restore = () => this.restoreMessageAnchorPosition(anchorState);
+            let restore = /* @__PURE__ */ __name(() => this.restoreMessageAnchorPosition(anchorState), "restore");
             requestAnimationFrame(() => requestAnimationFrame(restore)), setTimeout(restore, 60), setTimeout(restore, 180), setTimeout(restore, 420), setTimeout(restore, 900);
           }
           lockManualTranslationScroll(messageId) {
@@ -5241,7 +5244,7 @@ __________________ __________________ __________________
           }
           restoreMessageScrollerState(scrollerState) {
             if (!scrollerState) return;
-            let restore = () => {
+            let restore = /* @__PURE__ */ __name(() => {
               if (scrollerState.userScrollIntentSequence != autoTranslationUserScrollIntentSequence) return;
               let messagesScroller = this.getMessagesScroller();
               if (!messagesScroller) return;
@@ -5255,7 +5258,7 @@ __________________ __________________ __________________
               }
               let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
               messagesScroller.scrollTop = Math.max(0, Math.min(scrollerState.scrollTop, maxScrollTop));
-            };
+            }, "restore");
             requestAnimationFrame(() => requestAnimationFrame(restore));
           }
           rerenderMessagesWithScrollPreserved() {
@@ -5615,7 +5618,7 @@ __________________ __________________ __________________
           }
           getMessageTimestampMs(message) {
             if (!message) return null;
-            let directTimestamp = ((value) => {
+            let directTimestamp = (/* @__PURE__ */ __name((value) => {
               if (!value) return null;
               if (value instanceof Date) return value.getTime();
               if (typeof value == "number" && isFinite(value)) return value > 1e12 ? value : value * 1e3;
@@ -5629,7 +5632,7 @@ __________________ __________________ __________________
                 if (typeof primitive == "number" && isFinite(primitive)) return primitive > 1e12 ? primitive : primitive * 1e3;
               }
               return null;
-            })(message.timestamp || message.createdAt || message.created_at);
+            }, "normalizeTimestamp"))(message.timestamp || message.createdAt || message.created_at);
             if (directTimestamp) return directTimestamp;
             if (message.id)
               try {
@@ -5660,7 +5663,7 @@ __________________ __________________ __________________
           }
           attachAutoTranslationInputActivityWatcher() {
             if (!(autoTranslationInputActivityHandler || typeof document > "u")) {
-              autoTranslationInputActivityHandler = (event) => {
+              autoTranslationInputActivityHandler = /* @__PURE__ */ __name((event) => {
                 let target = event && event.target;
                 if (!target) return;
                 let isTextInput = !1;
@@ -5669,7 +5672,7 @@ __________________ __________________ __________________
                 } catch {
                 }
                 isTextInput && (lastAutoTranslationInputActivityTime = Date.now());
-              };
+              }, "autoTranslationInputActivityHandler");
               for (let eventName of ["beforeinput", "input", "keydown"]) document.addEventListener(eventName, autoTranslationInputActivityHandler, !0);
             }
           }
@@ -5701,17 +5704,17 @@ __________________ __________________ __________________
             if (typeof document > "u") return;
             let messagesScroller = document.querySelector(BDFDB.dotCN.messagesscroller);
             if (messagesScroller && !(autoTranslationScrollWatcherAttached && autoTranslationScrollWatcherElement == messagesScroller)) {
-              this.detachAutoTranslationScrollWatcher(), autoTranslationScrollActivityHandler = (_2) => {
+              this.detachAutoTranslationScrollWatcher(), autoTranslationScrollActivityHandler = /* @__PURE__ */ __name((_2) => {
                 let now = Date.now(), channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
                 autoTranslationScrollIntentPending ? (this.clearAutoTranslationScrollIntent(), autoTranslationUserScrollChannelId = channelId || null, lastAutoTranslationUserScrollTime = now, this.scheduleAutoTranslationScrollIdleFinish(channelId)) : channelId && autoTranslationUserScrollChannelId == channelId && lastAutoTranslationUserScrollTime && now - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY && (lastAutoTranslationUserScrollTime = now, this.scheduleAutoTranslationScrollIdleFinish(channelId));
-              }, autoTranslationScrollIntentHandler = (event) => {
+              }, "autoTranslationScrollActivityHandler"), autoTranslationScrollIntentHandler = /* @__PURE__ */ __name((event) => {
                 event && event.type == "keydown" && !["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key) || (autoTranslationUserScrollIntentSequence++, this.markAutoTranslationScrollIntent());
-              }, autoTranslationScrollIntentEndHandler = (_2) => {
+              }, "autoTranslationScrollIntentHandler"), autoTranslationScrollIntentEndHandler = /* @__PURE__ */ __name((_2) => {
                 this.clearAutoTranslationScrollIntent();
-              }, autoTranslationScrollEndHandler = (_2) => {
+              }, "autoTranslationScrollIntentEndHandler"), autoTranslationScrollEndHandler = /* @__PURE__ */ __name((_2) => {
                 let channelId = autoTranslationUserScrollChannelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
                 this.finishAutoTranslationScrollActivity(channelId);
-              }, autoTranslationScrollWatcherElement = messagesScroller, autoTranslationScrollWatcherAttached = !0, messagesScroller.addEventListener("scroll", autoTranslationScrollActivityHandler, { passive: !0 }), messagesScroller.addEventListener("scrollend", autoTranslationScrollEndHandler, { passive: !0 });
+              }, "autoTranslationScrollEndHandler"), autoTranslationScrollWatcherElement = messagesScroller, autoTranslationScrollWatcherAttached = !0, messagesScroller.addEventListener("scroll", autoTranslationScrollActivityHandler, { passive: !0 }), messagesScroller.addEventListener("scrollend", autoTranslationScrollEndHandler, { passive: !0 });
               for (let eventName of ["wheel", "touchmove", "pointerdown", "keydown"]) messagesScroller.addEventListener(eventName, autoTranslationScrollIntentHandler, { passive: eventName != "keydown" });
               for (let eventName of ["pointerup", "pointercancel"]) messagesScroller.addEventListener(eventName, autoTranslationScrollIntentEndHandler, { passive: !0 });
             }
@@ -5737,12 +5740,12 @@ __________________ __________________ __________________
             return receivedTranslationRuntime.scheduleAutoTranslationBackoff(this, ms);
           }
           requestWithTimeout(url, options, callback, timeoutMs = 3e4) {
-            let done = !1, timer = null, finish = (error, response, body) => {
+            let done = !1, timer = null, finish = /* @__PURE__ */ __name((error, response, body) => {
               if (done) return;
               done = !0, timer && BDFDB.TimeUtils.clear(timer);
               let statusCode = response && response.statusCode;
               statusCode == 429 ? this.scheduleAutoTranslationBackoff(5e3) : statusCode && statusCode >= 500 && this.scheduleAutoTranslationBackoff(2e3), callback(error, response, body);
-            };
+            }, "finish");
             timer = BDFDB.TimeUtils.timeout((_2) => finish(null, { statusCode: 504 }, ""), timeoutMs);
             try {
               BDFDB.LibraryRequires.request(url, options, finish);
@@ -6064,16 +6067,16 @@ __________________ __________________ __________________
               configurationSignature: this.createHistoricalTranslationJobConfigurationSignature(channelId),
               repairBatchSize: 10,
               dependencies: {
-                prepare: (source) => this.prepareHistoricalTranslationJobItem(source, job),
-                translateBatch: (preparedItems) => this.translateHistoricalTranslationJobBatch(preparedItems, job),
-                repairBatch: (preparedItems) => this.repairHistoricalTranslationJobBatch(preparedItems, job),
-                validate: (prepared, rawTranslation) => this.validateHistoricalTranslationJobResult(prepared, rawTranslation, job),
-                repair: (prepared) => this.repairHistoricalTranslationJobItem(prepared, job),
-                waitForCommit: () => this.waitForHistoricalTranslationCommit(job),
-                isCurrent: () => this.isHistoricalTranslationJobCurrent(job),
-                commit: (summary) => this.commitHistoricalTranslationJob(summary, job),
-                rerender: () => this.rerenderHistoricalTranslationJob(job),
-                onStateChange: () => this.updateHistoricalTranslationJobStatus(job)
+                prepare: /* @__PURE__ */ __name((source) => this.prepareHistoricalTranslationJobItem(source, job), "prepare"),
+                translateBatch: /* @__PURE__ */ __name((preparedItems) => this.translateHistoricalTranslationJobBatch(preparedItems, job), "translateBatch"),
+                repairBatch: /* @__PURE__ */ __name((preparedItems) => this.repairHistoricalTranslationJobBatch(preparedItems, job), "repairBatch"),
+                validate: /* @__PURE__ */ __name((prepared, rawTranslation) => this.validateHistoricalTranslationJobResult(prepared, rawTranslation, job), "validate"),
+                repair: /* @__PURE__ */ __name((prepared) => this.repairHistoricalTranslationJobItem(prepared, job), "repair"),
+                waitForCommit: /* @__PURE__ */ __name(() => this.waitForHistoricalTranslationCommit(job), "waitForCommit"),
+                isCurrent: /* @__PURE__ */ __name(() => this.isHistoricalTranslationJobCurrent(job), "isCurrent"),
+                commit: /* @__PURE__ */ __name((summary) => this.commitHistoricalTranslationJob(summary, job), "commit"),
+                rerender: /* @__PURE__ */ __name(() => this.rerenderHistoricalTranslationJob(job), "rerender"),
+                onStateChange: /* @__PURE__ */ __name(() => this.updateHistoricalTranslationJobStatus(job), "onStateChange")
               }
             }), entry.jobs.push(job), job;
           }
@@ -6089,9 +6092,9 @@ __________________ __________________ __________________
             if (!entry || entry.startToken) return;
             let token = {};
             entry.startToken = token;
-            let startSnapshot = (_2) => {
+            let startSnapshot = /* @__PURE__ */ __name((_2) => {
               entry.startToken !== token || historicalTranslationJobQueues.get(channelId) !== entry || (entry.startToken = null, this.finishHistoricalTranslationSnapshot(channelId));
-            };
+            }, "startSnapshot");
             typeof queueMicrotask == "function" ? queueMicrotask(startSnapshot) : Promise.resolve().then(startSnapshot);
           }
           finishHistoricalTranslationSnapshot(channelId) {
@@ -6197,12 +6200,12 @@ __________________ __________________ __________________
           }
           waitForHistoricalTranslationCommit(job) {
             return typeof document > "u" ? Promise.resolve() : new Promise((resolve) => {
-              let waitUntilIdle = (_2) => {
+              let waitUntilIdle = /* @__PURE__ */ __name((_2) => {
                 if (!this.isHistoricalTranslationJobCurrent(job)) return resolve();
                 let now = Date.now(), userScrollingThisChannel = autoTranslationUserScrollChannelId == job.channelId && now - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY;
                 if (now - lastAutoTranslationInputActivityTime >= 300 && !userScrollingThisChannel) return resolve();
                 setTimeout(waitUntilIdle, 120);
-              };
+              }, "waitUntilIdle");
               waitUntilIdle();
             });
           }
@@ -6314,7 +6317,7 @@ Rules:
 6. Do not add explanations. Do not output any language other than the target language except preserved protected content.
 
 Messages JSON:
-${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatchTranslationResponse(content, payloadItems.map((item) => item.id)));
+${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => resolve(this.parseAiBatchTranslationResponse(content, payloadItems.map((item) => item.id))), "finish");
               if (engineKey == "openai")
                 return this.requestWithTimeout(apiEndpoint, {
                   method: "post",
@@ -6353,10 +6356,10 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
                 icon: hint && ((_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuHint, {
                   hint
                 })),
-                icon: (_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
+                icon: /* @__PURE__ */ __name((_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
                   icon: translated ? translateIconUntranslate : translateIcon
-                }),
-                action: (_2) => this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false})
+                }), "icon"),
+                action: /* @__PURE__ */ __name((_2) => this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false}), "action")
               })), this.injectMessageLanguageActions(children, index > -1 ? index + 1 : 0, e.instance.props.message, e.instance.props.channel), this.injectSearchItem(e, !1, e.instance.props.channel.id);
             }
           }
@@ -6370,16 +6373,16 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
               children.splice(index > -1 ? index + 1 : 0, 0, BDFDB.ContextMenuUtils.createItem(BDFDB.LibraryComponents.MenuItems.MenuGroup, {
                 children: BDFDB.ContextMenuUtils.createItem(BDFDB.LibraryComponents.MenuItems.MenuItem, {
                   id: BDFDB.ContextMenuUtils.createItemId(this.name, "search-translation"),
-                  icon: (_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
+                  icon: /* @__PURE__ */ __name((_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
                     icon: translateIcon
-                  }),
+                  }), "icon"),
                   disabled: isTranslating,
                   label: this.labels.context_translator,
                   persisting: !0,
-                  action: (event) => {
+                  action: /* @__PURE__ */ __name((event) => {
                     let item = BDFDB.DOMUtils.getParent(BDFDB.dotCN.menuitem, event.target);
                     if (item) {
-                      let createTooltip = (_2) => {
+                      let createTooltip = /* @__PURE__ */ __name((_2) => {
                         BDFDB.TooltipUtils.create(item, foundTranslation ? [
                           `${BDFDB.LanguageUtils.LibraryStrings.from} ${this.getLanguageDisplayName(foundInput)}:`,
                           text,
@@ -6390,12 +6393,12 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
                           color: foundTranslation ? "primary" : "red",
                           className: "googletranslate-tooltip"
                         });
-                      };
+                      }, "createTooltip");
                       foundTranslation && foundInput && foundOutput ? document.querySelector(".googletranslate-tooltip") ? copied ? (BDFDB.ContextMenuUtils.close(e.instance), BDFDB.DiscordUtils.openLink(this.getGoogleTranslatePageURL(foundInput.id, foundOutput.id, text))) : (copied = !0, BDFDB.LibraryModules.WindowUtils.copy(foundTranslation), BDFDB.NotificationUtils.toast(BDFDB.LanguageUtils.LibraryStringsFormat("clipboard_success", BDFDB.LanguageUtils.LanguageStrings.TEXT), { type: "success" })) : createTooltip() : translating || (translating = !0, this.translateText(text, ownMessage ? messageTypes.SENT : messageTypes.RECEIVED, (translation, input, output) => {
                         translation && (foundTranslation = translation, foundInput = input, foundOutput = output), createTooltip();
                       }, null, { channelId: channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId() }));
                     }
-                  }
+                  }, "action")
                 })
               }));
             }
@@ -6409,15 +6412,15 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
               render() {
                 return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
                   key: translated ? "untranslate-message" : "translate-message",
-                  text: (_2) => translated ? _this.labels.context_messageuntranslateoption : _this.labels.context_messagetranslateoption,
+                  text: /* @__PURE__ */ __name((_2) => translated ? _this.labels.context_messageuntranslateoption : _this.labels.context_messagetranslateoption, "text"),
                   tooltipConfig: { className: BDFDB.disCN.messagetoolbartooltip },
                   children: BDFDB.ReactUtils.createElement("div", {
                     className: BDFDB.disCNS.messagetoolbarhoverbutton + BDFDB.disCN.messagetoolbarbutton,
-                    onClick: (_2) => {
+                    onClick: /* @__PURE__ */ __name((_2) => {
                       _this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false}).then((_3) => {
                         translated = !!_this.getActiveMessageTranslation(e.instance.props.message, channelId), BDFDB.ReactUtils.forceUpdate(this);
                       });
-                    },
+                    }, "onClick"),
                     children: BDFDB.ReactUtils.createElement("div", {
                       className: BDFDB.disCNS.messagetoolbaricon + BDFDB.disCN.messagetoolbarbuttoncontent,
                       children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
@@ -6432,7 +6435,7 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
             }));
           }
           processChannelTextAreaContainer(e) {
-            e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.NORMAL && e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.SIDEBAR || BDFDB.PatchUtils.patch(this, e.instance.props, "onSubmit", { instead: (e2) => {
+            e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.NORMAL && e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.SIDEBAR || BDFDB.PatchUtils.patch(this, e.instance.props, "onSubmit", { instead: /* @__PURE__ */ __name((e2) => {
               if (e2.methodArguments[0].value) {
                 let text = e2.methodArguments[0].value, prefixMap = {}, prefixData = this.settings.prefixes && this.settings.prefixes.translationPrefixData || [];
                 for (let entry of prefixData)
@@ -6459,7 +6462,7 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
                   });
                 } else if (this.isTranslationEnabled(e.instance.props.channel.id)) {
                   e2.stopOriginalMethodCall();
-                  let originalValue = e2.methodArguments[0].value, channelId = e.instance.props.channel.id, sentRequest = this.createSentAutomaticTranslationRequest(channelId, originalValue), submit = (nextValue) => e2.originalMethod(Object.assign({}, e2.methodArguments[0], { value: nextValue }));
+                  let originalValue = e2.methodArguments[0].value, channelId = e.instance.props.channel.id, sentRequest = this.createSentAutomaticTranslationRequest(channelId, originalValue), submit = /* @__PURE__ */ __name((nextValue) => e2.originalMethod(Object.assign({}, e2.methodArguments[0], { value: nextValue })), "submit");
                   return this.shouldAutoTranslateSentMessage(originalValue, e.instance.props.channel.id, (shouldTranslate) => {
                     if (!shouldTranslate || !this.isSentAutomaticTranslationRequestCurrent(sentRequest)) return this.completeSentAutomaticTranslationRequest(sentRequest, originalValue, submit);
                     this.translateText(originalValue, messageTypes.SENT, (translation, input, output) => {
@@ -6472,7 +6475,7 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
                 }
               }
               return e2.callOriginalMethodAfterwards();
-            } }, { noCache: !0 });
+            }, "instead") }, { noCache: !0 });
           }
           processChannelTextAreaEditor(e) {
           }
@@ -6952,9 +6955,9 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
           }
           translateMessage(message, channel, options = {}) {
             return new Promise((callback) => {
-              let liveRequest = options.auto && options.liveRequest || null, manualRequestKey = null, manualRequest = null, finish = (result) => {
+              let liveRequest = options.auto && options.liveRequest || null, manualRequestKey = null, manualRequest = null, finish = /* @__PURE__ */ __name((result) => {
                 liveRequest && this.finishLiveTranslationRequest(liveRequest), manualRequestKey && manualMessageTranslationRequests[manualRequestKey] === manualRequest && delete manualMessageTranslationRequests[manualRequestKey], callback(result);
-              };
+              }, "finish");
               if (!message) return finish(null);
               let channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), isManualTranslation = !!options.manual || !options.auto;
               isManualTranslation && (manualRequestKey = `${channelId || "__global"}:${String(message.id)}`);
@@ -7044,7 +7047,7 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
             });
           }
           translateText(text, place, callback, forcedOutputLanguage = null, options = {}) {
-            let showToast = options.showToast !== !1, showFailureToast = options.showFailureToast !== !1, trackBusy = options.trackBusy !== !1, toast = null, toastInterval, finished = !1, retriedAfterSkip = !1, skipSafetyNetHandler = null, finishTranslation = (translation) => {
+            let showToast = options.showToast !== !1, showFailureToast = options.showFailureToast !== !1, trackBusy = options.trackBusy !== !1, toast = null, toastInterval, finished = !1, retriedAfterSkip = !1, skipSafetyNetHandler = null, finishTranslation = /* @__PURE__ */ __name((translation) => {
               let isSkip = this.isSkipTranslationSignal(translation);
               !isSkip && translation && (translation = this.addExceptions(translation, protectedSegments));
               let wrongTarget = !isSkip && !!translation && !this.isTranslationLikelyInTargetLanguage(translation, output && output.id);
@@ -7054,13 +7057,13 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
               }
               if (trackBusy && (isTranslating = !1), toast && toast.close(), BDFDB.TimeUtils.clear(toastInterval), finished) return;
               finished = !0;
-              let complete = (...args) => {
+              let complete = /* @__PURE__ */ __name((...args) => {
                 callback(...args), trackBusy && this.processAutoTranslationQueue();
-              };
+              }, "complete");
               if (isSkip) return complete("", input, output, { skipped: !0 });
               if (translation && wrongTarget) return complete("", input, output, { failed: !0, wrongTargetLanguage: !0 });
               complete(translation == text ? "" : translation, input, output, { failed: !translation });
-            }, [newText, protectedSegments, translate] = this.removeExceptions(text.trim(), place), channelId = options.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), primaryEngineKey = this.getEffectivePrimaryEngine(channelId), backupEngineKey = this.getEffectiveBackupEngine(channelId), input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, place, channelId)]), output = forcedOutputLanguage ? Object.assign({}, languages[forcedOutputLanguage] || { id: forcedOutputLanguage, name: forcedOutputLanguage }) : Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, place, channelId)]);
+            }, "finishTranslation"), [newText, protectedSegments, translate] = this.removeExceptions(text.trim(), place), channelId = options.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), primaryEngineKey = this.getEffectivePrimaryEngine(channelId), backupEngineKey = this.getEffectiveBackupEngine(channelId), input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, place, channelId)]), output = forcedOutputLanguage ? Object.assign({}, languages[forcedOutputLanguage] || { id: forcedOutputLanguage, name: forcedOutputLanguage }) : Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, place, channelId)]);
             if (translate && input.id != output.id) {
               let specialCase = this.checkForSpecialCase(newText, input);
               if (specialCase)
@@ -7095,12 +7098,12 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
                 }
                 finishTranslation(newText);
               } else {
-                let startTranslating = (engine) => {
+                let startTranslating = /* @__PURE__ */ __name((engine) => {
                   trackBusy && (isTranslating = !0), toast && toast.close(), BDFDB.TimeUtils.clear(toastInterval), showToast && (toast = BDFDB.NotificationUtils.toast(`${this.labels.toast_translating} (${translationEngines[engine].name}) - ${BDFDB.LanguageUtils.LibraryStrings.please_wait}`, {
                     timeout: 0,
                     ellipsis: !0,
                     position: "center",
-                    onClose: (_2) => BDFDB.TimeUtils.clear(toastInterval)
+                    onClose: /* @__PURE__ */ __name((_2) => BDFDB.TimeUtils.clear(toastInterval), "onClose")
                   }));
                   let timeoutTicks = Math.max(40, Math.min(120, Math.ceil((newText || "").length / 25)));
                   toastInterval = BDFDB.TimeUtils.interval((_2, count) => {
@@ -7109,17 +7112,17 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
                       position: "center"
                     }));
                   }, 500);
-                }, aiPrompt = this.getAiAutoTranslatePrompt({ input, output }), normalizeProviderTranslation = (translation) => !translation || this.isSkipTranslationSignal(translation) || this.hasAllProtectionPlaceholders(translation, protectedSegments) ? translation : "", dispatchEngine = (useAutoDecision2) => {
-                  let aiDecisionFor = (engineKey) => !!useAutoDecision2 && this.supportsAiAutoTranslateDecisionEngine(engineKey);
+                }, "startTranslating"), aiPrompt = this.getAiAutoTranslatePrompt({ input, output }), normalizeProviderTranslation = /* @__PURE__ */ __name((translation) => !translation || this.isSkipTranslationSignal(translation) || this.hasAllProtectionPlaceholders(translation, protectedSegments) ? translation : "", "normalizeProviderTranslation"), dispatchEngine = /* @__PURE__ */ __name((useAutoDecision2) => {
+                  let aiDecisionFor = /* @__PURE__ */ __name((engineKey) => !!useAutoDecision2 && this.supportsAiAutoTranslateDecisionEngine(engineKey), "aiDecisionFor");
                   this.validTranslator(primaryEngineKey, input, output, specialCase) ? (startTranslating(primaryEngineKey), this[translationEngines[primaryEngineKey].funcName].apply(this, [{ input, output, text: newText, specialCase, engine: translationEngines[primaryEngineKey], autoDecision: aiDecisionFor(primaryEngineKey), decisionPrompt: aiPrompt }, (translation) => {
                     translation = normalizeProviderTranslation(translation), !translation && this.validTranslator(backupEngineKey, input, output, specialCase) ? (startTranslating(backupEngineKey), this[translationEngines[backupEngineKey].funcName].apply(this, [{ input, output, text: newText, specialCase, engine: translationEngines[backupEngineKey], autoDecision: aiDecisionFor(backupEngineKey), decisionPrompt: aiPrompt }, (backupTranslation) => finishTranslation(normalizeProviderTranslation(backupTranslation))])) : finishTranslation(translation);
                   }])) : this.validTranslator(backupEngineKey, input, output, specialCase) ? (startTranslating(backupEngineKey), this[translationEngines[backupEngineKey].funcName].apply(this, [{ input, output, text: newText, specialCase, engine: translationEngines[backupEngineKey], autoDecision: aiDecisionFor(backupEngineKey), decisionPrompt: aiPrompt }, (backupTranslation) => finishTranslation(normalizeProviderTranslation(backupTranslation))])) : finishTranslation();
-                };
-                skipSafetyNetHandler = (skipTranslation) => {
+                }, "dispatchEngine");
+                skipSafetyNetHandler = /* @__PURE__ */ __name((skipTranslation) => {
                   this.isReceivedMessageForeignAsync(newText, output && output.id, (isForeign) => {
                     isForeign ? dispatchEngine(!1) : finishTranslation(skipTranslation);
                   });
-                };
+                }, "skipSafetyNetHandler");
                 let useAutoDecision = options.auto && !options.forcePlainTranslation && place == messageTypes.RECEIVED && this.shouldUseAiAutoTranslateDecision(channelId) && !this.isClearlyForeignLanguageMessage(newText, output && output.id);
                 dispatchEngine(useAutoDecision);
               }
@@ -7147,9 +7150,9 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
             return new Promise((resolve) => {
               if (!this.supportsModelCatalog(engineKey)) return resolve({ ok: !1, items: [] });
               this.modelCatalogState || (this.modelCatalogState = {});
-              let updateState = (patch) => {
+              let updateState = /* @__PURE__ */ __name((patch) => {
                 this.modelCatalogState[engineKey] = Object.assign({}, this.modelCatalogState[engineKey], patch), typeof onUpdate == "function" && onUpdate();
-              }, engineLabel = this.getEngineLabel(engineKey), auth = authKeys[engineKey] || {}, apiKey = (auth.key || "").trim();
+              }, "updateState"), engineLabel = this.getEngineLabel(engineKey), auth = authKeys[engineKey] || {}, apiKey = (auth.key || "").trim();
               if (!apiKey)
                 return BDFDB.NotificationUtils.toast(`${engineLabel}: ${this.getCustomText("validate_missing_key")}`, { type: "danger", position: "center" }), resolve({ ok: !1, items: [] });
               if (engineKey == "oaicompat" && (!(auth.endpoint || "").trim() || (auth.endpoint || "").trim() == translationEngines.oaicompat.endpoint))
@@ -7217,12 +7220,12 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
           validateEngineConfig(engineKey) {
             return new Promise((resolve) => {
               if (!this.isValidatableEngine(engineKey)) return resolve({ ok: !1, normalized: !1 });
-              let engineLabel = this.getEngineLabel(engineKey), runningToast = null, finish = (ok, message, normalized2 = !1) => {
+              let engineLabel = this.getEngineLabel(engineKey), runningToast = null, finish = /* @__PURE__ */ __name((ok, message, normalized2 = !1) => {
                 runningToast && runningToast.close(), BDFDB.NotificationUtils.toast(message, {
                   type: ok ? "success" : "danger",
                   position: "center"
                 }), resolve({ ok, normalized: normalized2 });
-              }, auth = authKeys[engineKey] || {}, apiKey = (auth.key || "").trim();
+              }, "finish"), auth = authKeys[engineKey] || {}, apiKey = (auth.key || "").trim();
               if (!apiKey) return finish(!1, `${engineLabel}: ${this.getCustomText("validate_missing_key")}`);
               if (engineKey == "oaicompat" && (!(auth.endpoint || "").trim() || (auth.endpoint || "").trim() == translationEngines.oaicompat.endpoint)) return finish(!1, `${engineLabel}: ${this.getCustomText("validate_missing_endpoint")}`);
               if (engineKey == "oaicompat" && (!(auth.model || "").trim() || (auth.model || "").trim() == translationEngines.oaicompat.model)) return finish(!1, `${engineLabel}: ${this.getCustomText("validate_missing_model")}`);
@@ -7237,13 +7240,13 @@ ${JSON.stringify(payloadItems)}`, finish = (content) => resolve(this.parseAiBatc
                 ellipsis: !0,
                 position: "center"
               });
-              let successMessage = (translatedText) => {
+              let successMessage = /* @__PURE__ */ __name((translatedText) => {
                 let suffix = normalized ? ` ${this.getCustomText("validate_saved_endpoint")}` : "", preview = translatedText ? ` (${translatedText.slice(0, 48)})` : "";
                 return `${engineLabel}: ${this.getCustomText("validate_success")}.${suffix}${preview}`;
-              }, failMessage = (statusCode, body) => {
+              }, "successMessage"), failMessage = /* @__PURE__ */ __name((statusCode, body) => {
                 let details = this.getValidationErrorDetails(body);
                 return `${engineLabel}: ${this.getCustomText("validate_failed")}${statusCode ? ` (${statusCode})` : ""}${details ? ` - ${details}` : ""}`;
-              };
+              }, "failMessage");
               switch (engineKey) {
                 case "googlecloud": {
                   let model = (auth.model || "").trim(), form = {
@@ -7629,7 +7632,7 @@ ${sample.text}`
             return this.chatCompletionsTranslate("oaicompat", data, callback);
           }
           iTranslateTranslate(data, callback) {
-            let translate = (_2) => {
+            let translate = /* @__PURE__ */ __name((_2) => {
               BDFDB.LibraryRequires.request("https://web-api.itranslateapp.com/v3/texts/translate", {
                 method: "post",
                 headers: {
@@ -7663,7 +7666,7 @@ ${sample.text}`
                     position: "center"
                   }), callback("");
               });
-            };
+            }, "translate");
             authKeys.itranslate && authKeys.itranslate.key || data.engine.APIkey ? translate() : BDFDB.LibraryRequires.request("https://www.itranslate.com/js/webapp/main.js", { gzip: !0 }, (error, response, body) => {
               if (!error && body) {
                 let APIkey = /var API_KEY = "(.+)"/.exec(body);
@@ -7701,7 +7704,7 @@ ${sample.text}`
             });
           }
           papagoTranslate(data, callback) {
-            let credentials = (authKeys.papago && authKeys.papago.key || "").split(" "), doTranslate = (langCode) => {
+            let credentials = (authKeys.papago && authKeys.papago.key || "").split(" "), doTranslate = /* @__PURE__ */ __name((langCode) => {
               BDFDB.LibraryRequires.request("https://openapi.naver.com/v1/papago/n2mt", {
                 method: "post",
                 headers: {
@@ -7731,7 +7734,7 @@ ${sample.text}`
                     position: "center"
                   }), callback("");
               });
-            };
+            }, "doTranslate");
             data.input.auto ? BDFDB.LibraryRequires.request("https://openapi.naver.com/v1/papago/detectLangs", {
               method: "post",
               headers: {
@@ -7797,23 +7800,29 @@ ${sample.text}`
               var e2 = a2 & 2147483648, f2 = b2 & 2147483648, c2 = a2 & 1073741824, d2 = b2 & 1073741824, g = (a2 & 1073741823) + (b2 & 1073741823);
               return c2 & d2 ? g ^ 2147483648 ^ e2 ^ f2 : c2 | d2 ? g & 1073741824 ? g ^ 3221225472 ^ e2 ^ f2 : g ^ 1073741824 ^ e2 ^ f2 : g ^ e2 ^ f2;
             }
+            __name(h, "h");
             function k(a2, b2, c2, d2, e2, f2, g) {
               return a2 = h(a2, h(h(b2 & c2 | ~b2 & d2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
             }
+            __name(k, "k");
             function l(a2, b2, c2, d2, e2, f2, g) {
               return a2 = h(a2, h(h(b2 & d2 | c2 & ~d2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
             }
+            __name(l, "l");
             function m(a2, b2, d2, c2, e2, f2, g) {
               return a2 = h(a2, h(h(b2 ^ d2 ^ c2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
             }
+            __name(m, "m");
             function n(a2, b2, d2, c2, e2, f2, g) {
               return a2 = h(a2, h(h(d2 ^ (b2 | ~c2), e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
             }
+            __name(n, "n");
             function p(a2) {
               var b2 = "", d2 = "", c2;
               for (c2 = 0; 3 >= c2; c2++) d2 = a2 >>> 8 * c2 & 255, d2 = "0" + d2.toString(16), b2 += d2.substr(d2.length - 2, 2);
               return b2;
             }
+            __name(p, "p");
             var f = [], q, r, s, t, a, b, c, d;
             for (e = (function(a2) {
               a2 = a2.replace(/\r\n/g, `
@@ -9004,7 +9013,7 @@ ${sample.text}`
                 };
             }
           }
-        };
+        }, __name(_c, "Translator"), _c;
       })(window.BDFDB_Global.PluginUtils.buildPlugin(changeLog));
     })();
   }

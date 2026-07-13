@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const {createPluginInstance} = require("./helpers/createPluginInstance");
 
 const root = path.resolve(__dirname, "..");
 
@@ -22,4 +23,10 @@ test("the generated plugin keeps metadata and excludes development artifacts", a
 	assert.doesNotMatch(generated, /sourceMappingURL=/);
 	assert.doesNotMatch(generated, /tests\//);
 	assert.doesNotMatch(generated, /TRANSLATOR_DISPLAY_DEBUG_JOURNAL/);
+});
+
+test("the generated plugin preserves the loaded plugin class name", () => {
+	const plugin = createPluginInstance({callSetLanguages: false});
+
+	assert.equal(plugin.constructor.name, "Translator");
 });
