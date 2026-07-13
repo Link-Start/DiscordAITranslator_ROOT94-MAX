@@ -614,12 +614,20 @@ module.exports = (_ => {
 		var replyPreviewRenderMessageIds = {};
 		var lastAutoTranslationChannelId = null;
 		var lastAutoTranslationUserScrollTime = 0;
+		var autoTranslationUserScrollChannelId = null;
+		var autoTranslationUserScrollIntentSequence = 0;
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		var autoTranslationBackoffUntil = 0;
 		var autoTranslationScrollWatcherAttached = false;
 		var autoTranslationScrollWatcherElement = null;
 		var autoTranslationScrollActivityHandler = null;
+		var autoTranslationScrollIntentHandler = null;
+		var autoTranslationScrollIntentEndHandler = null;
+		var autoTranslationScrollEndHandler = null;
+		var autoTranslationScrollIntentPending = false;
+		var autoTranslationScrollIntentTimer = null;
+		var autoTranslationScrollIdleTimer = null;
 		var deferredTranslationRerenderPending = false;
 		var historicalTranslationJobQueues = new Map();
 		var historicalTranslationJobSequence = 0;
@@ -646,8 +654,7 @@ module.exports = (_ => {
 		const SENT_ORIGINAL_MATCH_TTL = 2 * 60 * 1000;
 		const MAX_SENT_ORIGINAL_ENTRIES = 200;
 		const AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900;
-		const HISTORICAL_AUTO_TRANSLATION_COLLECT_DELAY = 450;
-		const HISTORICAL_AUTO_TRANSLATION_MAX_COLLECT_DELAY = 1800;
+		const AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300;
 		const HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100;
 		const DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50;
 		const LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1;
@@ -693,6 +700,7 @@ module.exports = (_ => {
 				}, config.dependencies || {});
 				this.items = new Map();
 				this.state = "collecting";
+				this.sealed = false;
 				this.cancelReason = null;
 				this.started = false;
 				this.repairConcurrency = Math.max(1, parseInt(config.repairConcurrency, 10) || 4);
@@ -700,7 +708,7 @@ module.exports = (_ => {
 			}
 
 			add(item) {
-				if (this.state != "collecting") return false;
+				if (this.state != "collecting" || this.sealed) return false;
 				const source = item && item.message ? item : {message: item};
 				const messageId = source.message && source.message.id;
 				if (!messageId || this.items.has(String(messageId))) return false;
@@ -711,6 +719,13 @@ module.exports = (_ => {
 					translation: null,
 					reason: null
 				});
+				this.dependencies.onStateChange(this);
+				return true;
+			}
+
+			seal() {
+				if (this.state != "collecting" || this.sealed) return false;
+				this.sealed = true;
 				this.dependencies.onStateChange(this);
 				return true;
 			}
@@ -773,6 +788,7 @@ module.exports = (_ => {
 
 			async start() {
 				if (this.started) return this.runningPromise;
+				this.sealed = true;
 				this.started = true;
 				this.state = "translating";
 				this.dependencies.onStateChange(this);
@@ -1334,6 +1350,7 @@ module.exports = (_ => {
 					channel,
 					originalContentData: normalizedOriginalContentData,
 					historicalLoad: !!queueOptions.historicalLoad,
+					deferHistoricalSnapshotStart: !!queueOptions.deferHistoricalSnapshotStart,
 					deferWhileReading: !!queueOptions.deferWhileReading,
 					cachedTranslation: queueOptions.cachedTranslation || null,
 					liveRequest: null
@@ -1444,7 +1461,8 @@ module.exports = (_ => {
 					plugin.checkMessage(entry, message, context.channel, {
 						skipAutoQueue: context.skipInitialLoadedMessages,
 						autoTranslateBoundaryId: context.autoTranslateBoundaryId,
-						historicalLoad
+						historicalLoad,
+						deferHistoricalSnapshotStart: historicalLoad
 					});
 					return context.highestMessageId;
 				}
@@ -1457,7 +1475,8 @@ module.exports = (_ => {
 					plugin.checkMessage(message[index], childMessage, context.channel, {
 						skipAutoQueue: context.skipInitialLoadedMessages,
 						autoTranslateBoundaryId: context.autoTranslateBoundaryId,
-						historicalLoad
+						historicalLoad,
+						deferHistoricalSnapshotStart: historicalLoad
 					});
 				}
 				return context.highestMessageId;
@@ -1468,6 +1487,7 @@ module.exports = (_ => {
 					if (context.shouldInitializeAutoTranslation) context.channelState.initialized = true;
 				}
 				if (context.historicalLoadedPass || context.collectedHistoricalMessages) {
+					if (context.collectedHistoricalMessages && !plugin.isUserActivelyScrollingMessages(context.channelId)) plugin.finishHistoricalTranslationSnapshot(context.channelId);
 					const historicalEntry = plugin.getHistoricalTranslationJobQueue(context.channelId, false);
 					const hasQueuedHistoricalForChannel = !!(historicalEntry && (historicalEntry.runningPromise || historicalEntry.jobs.length));
 					if (!hasQueuedHistoricalForChannel) plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: context.channelId, batch: loadedAutoTranslationStatus.batch || 1, total: 0, processed: 0});
@@ -1497,7 +1517,8 @@ module.exports = (_ => {
 					forceQueue: sourceChanged || pendingSourceChanged || liveSourceChanged,
 					skipAutoQueue: !!options.skipAutoQueue,
 					isNewerThanBoundary: plugin.isMessageIdNewer(message.id, autoTranslateBoundaryId),
-					historicalLoad: !!options.historicalLoad
+					historicalLoad: !!options.historicalLoad,
+					deferHistoricalSnapshotStart: !!options.deferHistoricalSnapshotStart
 				};
 			},
 			resolveCheckMessageDisplay(plugin, stream, message, context) {
@@ -1530,6 +1551,7 @@ module.exports = (_ => {
 					const liveMessage = !context.historicalLoad && (context.isNewerThanBoundary || plugin.isLikelyLiveAutoTranslateMessage(message, context.channelId));
 					plugin.queueAutoTranslateMessage(message, channel || {id: context.channelId}, context.originalContentData, {
 						historicalLoad: context.historicalLoad && !liveMessage,
+						deferHistoricalSnapshotStart: context.deferHistoricalSnapshotStart,
 						deferWhileReading: false,
 						cachedTranslation: context.historicalLoad && !liveMessage ? outcome.cachedTranslation : null
 					});
@@ -1742,15 +1764,12 @@ module.exports = (_ => {
 				return translation;
 			},
 			prepareMessageContentDisplay(plugin, e) {
-				const message = e.instance.props.message;
+				let message = e.instance.props.message;
 				const channelId = plugin.getMessageChannelId(message);
-				const hadDisplayedTranslation = !!translatedMessages[message.id];
 				let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, message, channelId);
-				if (!translation && hadDisplayedTranslation) {
-					if (oldMessages[message.id]) {
-						e.instance.props.message = new BDFDB.DiscordObjects.Message(oldMessages[message.id]);
-						delete oldMessages[message.id];
-					}
+				if (!translation && oldMessages[message.id]) {
+					message = e.instance.props.message = new BDFDB.DiscordObjects.Message(oldMessages[message.id]);
+					delete oldMessages[message.id];
 				}
 				if (!translation) translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId);
 				return {message, channelId, translation};
@@ -2539,7 +2558,8 @@ module.exports = (_ => {
 						"MessageReply",
 						"MessageButtons",
 						"MessageContent",
-						"ThreadCard"
+						"ThreadCard",
+						"ThreadSidebar"
 					]
 				};
 
@@ -6225,7 +6245,10 @@ module.exports = (_ => {
 			}
 
 			pauseHistoricalAutoTranslationForNavigation (duration = 1800) {
+				const channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+				autoTranslationUserScrollChannelId = channelId || null;
 				lastAutoTranslationUserScrollTime = Date.now() + Math.max(0, duration - AUTO_TRANSLATION_SCROLL_IDLE_DELAY);
+				if (channelId) this.scheduleAutoTranslationScrollIdleFinish(channelId, duration);
 			}
 
 			wrapReplyPreviewJumpPause (node) {
@@ -6372,20 +6395,23 @@ module.exports = (_ => {
 				};
 			}
 
+			restoreMessageAnchorPosition (anchorState) {
+				if (!anchorState) return;
+				const messagesScroller = this.getMessagesScroller();
+				const element = this.findMessageElementById(anchorState.messageId);
+				if (!messagesScroller || !element) return;
+				const scrollerRect = messagesScroller.getBoundingClientRect();
+				const elementRect = element.getBoundingClientRect();
+				const desiredTop = scrollerRect.top + (typeof anchorState.relativeTop == "number" ? anchorState.relativeTop : elementRect.top - scrollerRect.top);
+				const delta = elementRect.top - desiredTop;
+				if (Math.abs(delta) < 1) return;
+				const maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
+				messagesScroller.scrollTop = Math.max(0, Math.min(messagesScroller.scrollTop + delta, maxScrollTop));
+			}
+
 			restoreMessageAnchorState (anchorState) {
 				if (!anchorState) return;
-				const restore = () => {
-					const messagesScroller = this.getMessagesScroller();
-					const element = this.findMessageElementById(anchorState.messageId);
-					if (!messagesScroller || !element) return;
-					const scrollerRect = messagesScroller.getBoundingClientRect();
-					const elementRect = element.getBoundingClientRect();
-					const desiredTop = scrollerRect.top + (typeof anchorState.relativeTop == "number" ? anchorState.relativeTop : elementRect.top - scrollerRect.top);
-					const delta = elementRect.top - desiredTop;
-					if (Math.abs(delta) < 1) return;
-					const maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
-					messagesScroller.scrollTop = Math.max(0, Math.min(messagesScroller.scrollTop + delta, maxScrollTop));
-				};
+				const restore = () => this.restoreMessageAnchorPosition(anchorState);
 				requestAnimationFrame(() => requestAnimationFrame(restore));
 				setTimeout(restore, 60);
 				setTimeout(restore, 180);
@@ -6422,6 +6448,7 @@ module.exports = (_ => {
 				return {
 					scrollTop: messagesScroller.scrollTop,
 					keepBottom,
+					userScrollIntentSequence: autoTranslationUserScrollIntentSequence,
 					anchor: keepBottom ? null : this.captureMessageAnchorState()
 				};
 			}
@@ -6429,6 +6456,7 @@ module.exports = (_ => {
 			restoreMessageScrollerState (scrollerState) {
 				if (!scrollerState) return;
 				const restore = () => {
+					if (scrollerState.userScrollIntentSequence != autoTranslationUserScrollIntentSequence) return;
 					const messagesScroller = this.getMessagesScroller();
 					if (!messagesScroller) return;
 					if (scrollerState.keepBottom) {
@@ -6436,19 +6464,17 @@ module.exports = (_ => {
 						return;
 					}
 					if (scrollerState.anchor) {
-						this.restoreMessageAnchorState(scrollerState.anchor);
+						this.restoreMessageAnchorPosition(scrollerState.anchor);
 						return;
 					}
 					const maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
 					messagesScroller.scrollTop = Math.max(0, Math.min(scrollerState.scrollTop, maxScrollTop));
 				};
 				requestAnimationFrame(() => requestAnimationFrame(restore));
-				setTimeout(restore, 80);
-				setTimeout(restore, 240);
-				setTimeout(restore, 600);
 			}
 
 			rerenderMessagesWithScrollPreserved () {
+				this.attachAutoTranslationScrollWatcher();
 				const manualAnchor = this.getActiveManualTranslationScrollAnchor();
 				const scrollerState = manualAnchor ? null : this.captureMessageScrollerState();
 				BDFDB.PatchUtils.forceAllUpdates(this, TRANSLATION_MESSAGE_PATCH_TYPES);
@@ -7053,6 +7079,41 @@ module.exports = (_ => {
 				autoTranslationInputActivityHandler = null;
 			}
 
+			clearAutoTranslationScrollIntent () {
+				if (autoTranslationScrollIntentTimer) clearTimeout(autoTranslationScrollIntentTimer);
+				autoTranslationScrollIntentTimer = null;
+				autoTranslationScrollIntentPending = false;
+			}
+
+			markAutoTranslationScrollIntent () {
+				this.clearAutoTranslationScrollIntent();
+				autoTranslationScrollIntentPending = true;
+				autoTranslationScrollIntentTimer = setTimeout(() => {
+					autoTranslationScrollIntentTimer = null;
+					autoTranslationScrollIntentPending = false;
+				}, AUTO_TRANSLATION_SCROLL_INTENT_WINDOW);
+			}
+
+			finishAutoTranslationScrollActivity (channelId) {
+				if (autoTranslationScrollIdleTimer) clearTimeout(autoTranslationScrollIdleTimer);
+				autoTranslationScrollIdleTimer = null;
+				this.clearAutoTranslationScrollIntent();
+				if (!channelId || autoTranslationUserScrollChannelId == channelId) {
+					lastAutoTranslationUserScrollTime = 0;
+					autoTranslationUserScrollChannelId = null;
+				}
+				if (channelId) this.finishHistoricalTranslationSnapshot(channelId);
+			}
+
+			scheduleAutoTranslationScrollIdleFinish (channelId, delay = AUTO_TRANSLATION_SCROLL_IDLE_DELAY) {
+				if (!channelId) return;
+				if (autoTranslationScrollIdleTimer) clearTimeout(autoTranslationScrollIdleTimer);
+				autoTranslationScrollIdleTimer = setTimeout(() => {
+					autoTranslationScrollIdleTimer = null;
+					this.finishAutoTranslationScrollActivity(channelId);
+				}, delay);
+			}
+
 			attachAutoTranslationScrollWatcher () {
 				if (typeof document == "undefined") return;
 				const messagesScroller = document.querySelector(BDFDB.dotCN.messagesscroller);
@@ -7060,23 +7121,67 @@ module.exports = (_ => {
 				if (autoTranslationScrollWatcherAttached && autoTranslationScrollWatcherElement == messagesScroller) return;
 				this.detachAutoTranslationScrollWatcher();
 				autoTranslationScrollActivityHandler = _ => {
-					lastAutoTranslationUserScrollTime = Date.now();
+					const now = Date.now();
+					const channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+					if (autoTranslationScrollIntentPending) {
+						this.clearAutoTranslationScrollIntent();
+						autoTranslationUserScrollChannelId = channelId || null;
+						lastAutoTranslationUserScrollTime = now;
+						this.scheduleAutoTranslationScrollIdleFinish(channelId);
+					}
+					else if (channelId && autoTranslationUserScrollChannelId == channelId && lastAutoTranslationUserScrollTime && now - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY) {
+						lastAutoTranslationUserScrollTime = now;
+						this.scheduleAutoTranslationScrollIdleFinish(channelId);
+					}
+				};
+				autoTranslationScrollIntentHandler = event => {
+					if (event && event.type == "keydown" && !["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) return;
+					autoTranslationUserScrollIntentSequence++;
+					this.markAutoTranslationScrollIntent();
+				};
+				autoTranslationScrollIntentEndHandler = _ => {
+					this.clearAutoTranslationScrollIntent();
+				};
+				autoTranslationScrollEndHandler = _ => {
+					const channelId = autoTranslationUserScrollChannelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+					this.finishAutoTranslationScrollActivity(channelId);
 				};
 				autoTranslationScrollWatcherElement = messagesScroller;
 				autoTranslationScrollWatcherAttached = true;
 				messagesScroller.addEventListener("scroll", autoTranslationScrollActivityHandler, {passive: true});
+				messagesScroller.addEventListener("scrollend", autoTranslationScrollEndHandler, {passive: true});
+				for (const eventName of ["wheel", "touchmove", "pointerdown", "keydown"]) messagesScroller.addEventListener(eventName, autoTranslationScrollIntentHandler, {passive: eventName != "keydown"});
+				for (const eventName of ["pointerup", "pointercancel"]) messagesScroller.addEventListener(eventName, autoTranslationScrollIntentEndHandler, {passive: true});
 			}
 
 			detachAutoTranslationScrollWatcher () {
-				if (autoTranslationScrollWatcherElement && autoTranslationScrollActivityHandler) autoTranslationScrollWatcherElement.removeEventListener("scroll", autoTranslationScrollActivityHandler);
+				if (autoTranslationScrollIdleTimer) clearTimeout(autoTranslationScrollIdleTimer);
+				autoTranslationScrollIdleTimer = null;
+				this.clearAutoTranslationScrollIntent();
+				lastAutoTranslationUserScrollTime = 0;
+				autoTranslationUserScrollChannelId = null;
+				if (autoTranslationScrollWatcherElement) {
+					if (autoTranslationScrollActivityHandler) autoTranslationScrollWatcherElement.removeEventListener("scroll", autoTranslationScrollActivityHandler);
+					if (autoTranslationScrollEndHandler) autoTranslationScrollWatcherElement.removeEventListener("scrollend", autoTranslationScrollEndHandler);
+					if (autoTranslationScrollIntentHandler) for (const eventName of ["wheel", "touchmove", "pointerdown", "keydown"]) autoTranslationScrollWatcherElement.removeEventListener(eventName, autoTranslationScrollIntentHandler);
+					if (autoTranslationScrollIntentEndHandler) for (const eventName of ["pointerup", "pointercancel"]) autoTranslationScrollWatcherElement.removeEventListener(eventName, autoTranslationScrollIntentEndHandler);
+				}
 				autoTranslationScrollWatcherAttached = false;
 				autoTranslationScrollWatcherElement = null;
 				autoTranslationScrollActivityHandler = null;
+				autoTranslationScrollIntentHandler = null;
+				autoTranslationScrollIntentEndHandler = null;
+				autoTranslationScrollEndHandler = null;
 			}
 
 			isViewingMessageHistory () {
 				const scrollerState = this.captureMessageScrollerState();
 				return !!(scrollerState && !scrollerState.keepBottom);
+			}
+
+			isUserActivelyScrollingMessages (channelId = null) {
+				channelId = channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+				return !!channelId && autoTranslationUserScrollChannelId == channelId && !!lastAutoTranslationUserScrollTime && Date.now() - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY;
 			}
 
 			scheduleAutoTranslationQueueRetry () {
@@ -7489,7 +7594,7 @@ module.exports = (_ => {
 				if (!channelId) return null;
 				let entry = historicalTranslationJobQueues.get(channelId);
 				if (!entry && create) {
-					entry = {channelId, generation: 0, jobs: [], runningPromise: null, startTimer: null, collectionStartedAt: null, lastCollectedAt: null};
+					entry = {channelId, generation: 0, jobs: [], runningPromise: null, startToken: null};
 					historicalTranslationJobQueues.set(channelId, entry);
 				}
 				return entry || null;
@@ -7528,50 +7633,51 @@ module.exports = (_ => {
 				if (!this.isTranslationEnabled(channelId)) return false;
 				const entry = this.getHistoricalTranslationJobQueue(channelId);
 				let job = entry.jobs[entry.jobs.length - 1];
-				if (job && job.state == "collecting" && job.items.size >= this.getReceivedAutoTranslateLoadedLimit()) return false;
-				if (!job || job.state != "collecting") job = this.createCollectedHistoricalTranslationJob(channelId);
+				if (job && job.state == "collecting" && !job.sealed && job.items.size >= this.getReceivedAutoTranslateLoadedLimit()) return false;
+				if (!job || job.state != "collecting" || job.sealed) job = this.createCollectedHistoricalTranslationJob(channelId);
 				if (!job.add(queueItem)) return false;
 				queuedAutoTranslations[queueItem.message.id] = {type: "historical", channelId, jobId: job.id};
-				this.scheduleHistoricalTranslationJobStart(channelId);
+				if (!queueItem.deferHistoricalSnapshotStart) this.scheduleHistoricalTranslationJobStart(channelId);
 				this.updateHistoricalTranslationJobStatus(job);
 				return true;
 			}
 
-			scheduleHistoricalTranslationJobStart (channelId, collectionUpdated = true) {
+			scheduleHistoricalTranslationJobStart (channelId) {
 				const entry = this.getHistoricalTranslationJobQueue(channelId, false);
-				if (!entry) return;
-				const now = Date.now();
-				if (collectionUpdated) {
-					if (entry.collectionStartedAt == null) entry.collectionStartedAt = now;
-					entry.lastCollectedAt = now;
-				}
-				if (entry.runningPromise) return;
-				const hasCollectingJob = entry.jobs.some(job => job && job.state == "collecting");
-				if (!hasCollectingJob) return;
-				if (entry.collectionStartedAt == null) entry.collectionStartedAt = now;
-				if (entry.lastCollectedAt == null) entry.lastCollectedAt = now;
-				if (entry.startTimer) clearTimeout(entry.startTimer);
-				const quietDeadline = entry.lastCollectedAt + HISTORICAL_AUTO_TRANSLATION_COLLECT_DELAY;
-				const maximumDeadline = entry.collectionStartedAt + HISTORICAL_AUTO_TRANSLATION_MAX_COLLECT_DELAY;
-				const delay = Math.max(0, Math.min(quietDeadline, maximumDeadline) - now);
-				entry.startTimer = setTimeout(_ => {
-					entry.startTimer = null;
-					this.startCollectedHistoricalTranslationJobs(channelId);
-				}, delay);
+				if (!entry || entry.startToken) return;
+				const token = {};
+				entry.startToken = token;
+				const startSnapshot = _ => {
+					if (entry.startToken !== token || historicalTranslationJobQueues.get(channelId) !== entry) return;
+					entry.startToken = null;
+					this.finishHistoricalTranslationSnapshot(channelId);
+				};
+				if (typeof queueMicrotask == "function") queueMicrotask(startSnapshot);
+				else Promise.resolve().then(startSnapshot);
 			}
 
-			startCollectedHistoricalTranslationJobs (channelId) {
+			finishHistoricalTranslationSnapshot (channelId) {
+				const entry = this.getHistoricalTranslationJobQueue(channelId, false);
+				if (!entry) return false;
+				const job = [...entry.jobs].reverse().find(candidate => candidate && candidate.state == "collecting" && !candidate.sealed);
+				if (!job) return false;
+				job.seal();
+				if (!entry.runningPromise) this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false});
+				return true;
+			}
+
+			startCollectedHistoricalTranslationJobs (channelId, options = {}) {
 				const entry = this.getHistoricalTranslationJobQueue(channelId, false);
 				if (!entry) return Promise.resolve(null);
-				if (entry.startTimer) {
-					clearTimeout(entry.startTimer);
-					entry.startTimer = null;
-				}
+				const config = Object.assign({sealCurrent: true}, options);
+				entry.startToken = null;
 				if (entry.runningPromise) return entry.runningPromise;
-				const job = entry.jobs.find(candidate => candidate && candidate.state == "collecting");
+				let job = entry.jobs.find(candidate => candidate && candidate.state == "collecting" && candidate.sealed);
+				if (!job && config.sealCurrent) {
+					job = entry.jobs.find(candidate => candidate && candidate.state == "collecting");
+					if (job) job.seal();
+				}
 				if (!job) return Promise.resolve(null);
-				entry.collectionStartedAt = null;
-				entry.lastCollectedAt = null;
 				const runningPromise = Promise.resolve(job.start()).finally(_ => {
 					for (const record of job.items.values()) {
 						const messageId = record && record.source && record.source.message && record.source.message.id;
@@ -7580,8 +7686,8 @@ module.exports = (_ => {
 					}
 					if (entry.runningPromise == runningPromise) entry.runningPromise = null;
 					entry.jobs = entry.jobs.filter(candidate => candidate != job);
-					if (entry.jobs.length) this.scheduleHistoricalTranslationJobStart(channelId, false);
-					else if (!entry.startTimer && historicalTranslationJobQueues.get(channelId) === entry) historicalTranslationJobQueues.delete(channelId);
+					if (entry.jobs.some(candidate => candidate && candidate.state == "collecting" && candidate.sealed)) this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false});
+					else if (!entry.jobs.length && !entry.startToken && historicalTranslationJobQueues.get(channelId) === entry) historicalTranslationJobQueues.delete(channelId);
 				});
 				entry.runningPromise = runningPromise;
 				return runningPromise;
@@ -7643,10 +7749,7 @@ module.exports = (_ => {
 				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : [...historicalTranslationJobQueues.values()];
 				for (const entry of entries) {
 					entry.generation++;
-					if (entry.startTimer) clearTimeout(entry.startTimer);
-					entry.startTimer = null;
-					entry.collectionStartedAt = null;
-					entry.lastCollectedAt = null;
+					entry.startToken = null;
 					for (const job of entry.jobs) {
 						job.cancel(reason);
 						for (const record of job.items.values()) if (record.source && record.source.message) delete queuedAutoTranslations[record.source.message.id];
@@ -7716,7 +7819,8 @@ module.exports = (_ => {
 					const waitUntilIdle = _ => {
 						if (!this.isHistoricalTranslationJobCurrent(job)) return resolve();
 						const now = Date.now();
-						if (now - lastAutoTranslationInputActivityTime >= 300 && now - lastAutoTranslationUserScrollTime >= AUTO_TRANSLATION_SCROLL_IDLE_DELAY) return resolve();
+						const userScrollingThisChannel = autoTranslationUserScrollChannelId == job.channelId && now - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY;
+						if (now - lastAutoTranslationInputActivityTime >= 300 && !userScrollingThisChannel) return resolve();
 						setTimeout(waitUntilIdle, 120);
 					};
 					waitUntilIdle();
@@ -8153,14 +8257,16 @@ module.exports = (_ => {
 
 			processMessageContent (e) {
 				if (!e.instance.props.message || !e.returnvalue || !e.returnvalue.props) return;
-				const message = e.instance.props.message;
+				let message = e.instance.props.message;
 				if (this.isRenderingReplyPreviewMessage(message)) {
 					let children = this.ensureElementChildrenArray(e.returnvalue);
 					this.cleanupInjectedMessageChildren(children);
 					e.returnvalue = this.stripTranslatorStylingFromReplyPreviewNode(e.returnvalue);
 					return;
 				}
-				const {translation} = translationDisplayLogic.prepareMessageContentDisplay(this, e);
+				const displayState = translationDisplayLogic.prepareMessageContentDisplay(this, e);
+				message = displayState.message;
+				const translation = displayState.translation;
 				translationDisplayLogic.applyMessageContentRenderDecorations(this, e, message, translation);
 			}
 
@@ -8208,13 +8314,15 @@ module.exports = (_ => {
 			}
 
 			clearChannelTitleTranslations (channelId = null) {
+				const hadTranslatedTitle = channelId ? !!translatedChannelTitles[channelId] : !!Object.keys(translatedChannelTitles).length;
 				this.cancelPendingChannelTitleTranslation(channelId);
 				if (!channelId) translatedChannelTitles = {};
 				else delete translatedChannelTitles[channelId];
+				if (hadTranslatedTitle) this.forceUpdateChannelTitleComponents();
 			}
 
 			queueChannelTitleTranslation (channel) {
-				if (!this.isTranslatableChannelTitle(channel) || !this.isTranslationEnabled(channel.id)) return false;
+				if (!pluginRuntimeActive || !this.isTranslatableChannelTitle(channel) || !this.isTranslationEnabled(channel.id)) return false;
 				const channelId = channel.id;
 				const signature = this.getChannelTitleTranslationSignature(channel);
 				if (!signature || translatedChannelTitles[channelId] && translatedChannelTitles[channelId].signature == signature) return false;
@@ -8246,14 +8354,24 @@ module.exports = (_ => {
 				}
 				if (!node || typeof node != "object" || !node.props) return node;
 				if (Object.prototype.hasOwnProperty.call(node.props, "children")) node.props.children = this.replaceChannelTitleInRenderTree(node.props.children, originalTitle, translatedTitle);
-				for (const key of ["text", "title", "aria-label"]) if (node.props[key] == originalTitle) node.props[key] = translatedTitle;
+				for (const key of ["text", "title", "aria-label", "threadName", "channelName"]) if (node.props[key] == originalTitle) node.props[key] = translatedTitle;
 				return node;
 			}
 
 			getChannelFromTitlePatchEvent (e) {
 				const props = e && e.instance && e.instance.props || {};
-				for (const channel of [props.channel, props.thread, props.activeChannel]) if (channel && channel.id) return channel;
-				const channelId = props.channelId || props.threadId || props.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+				for (const channel of [props.thread, props.activeThread, props.sidebarChannel]) if (channel && channel.id) return channel;
+				const threadId = props.threadId || props.activeThreadId || props.sidebarChannelId;
+				if (threadId) {
+					const thread = BDFDB.LibraryStores.ChannelStore.getChannel(threadId);
+					if (thread) return thread;
+				}
+				if (props.channelId) {
+					const explicitChannel = BDFDB.LibraryStores.ChannelStore.getChannel(props.channelId);
+					if (this.isTranslatableChannelTitle(explicitChannel)) return explicitChannel;
+				}
+				for (const channel of [props.channel, props.activeChannel]) if (channel && channel.id) return channel;
+				const channelId = props.channelId || props.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
 				return channelId && BDFDB.LibraryStores.ChannelStore.getChannel(channelId) || null;
 			}
 
@@ -8269,12 +8387,13 @@ module.exports = (_ => {
 			}
 
 			forceUpdateChannelTitleComponents () {
-				BDFDB.PatchUtils.forceAllUpdates(this, ["HeaderBarChannelName", "HeaderBarTitle", "ThreadCard", "ChannelThreadItem"]);
+				BDFDB.PatchUtils.forceAllUpdates(this, ["HeaderBarChannelName", "HeaderBarTitle", "ThreadCard", "ThreadSidebar", "ChannelThreadItem"]);
 			}
 
 			processHeaderBarChannelName (e) {this.processChannelTitlePatch(e);}
 			processHeaderBarTitle (e) {this.processChannelTitlePatch(e);}
 			processThreadCard (e) {this.processChannelTitlePatch(e);}
+			processThreadSidebar (e) {this.processChannelTitlePatch(e);}
 			processChannelThreadItem (e) {this.processChannelTitlePatch(e);}
 
 			normalizeStoredChannelPrimaryEngineOverrides (overrides) {

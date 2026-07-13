@@ -45,6 +45,112 @@ test("translation refresh updates message components without remounting the chat
 	assert.deepEqual(targetedUpdates, [["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"]]);
 });
 
+function createScrollRestoreHarness() {
+	const realDocument = global.document;
+	const realRequestAnimationFrame = global.requestAnimationFrame;
+	const realSetTimeout = global.setTimeout;
+	const frameCallbacks = [];
+	const timerCallbacks = [];
+	const eventHandlers = {};
+	const scroller = {
+		scrollTop: 200,
+		scrollHeight: 2000,
+		clientHeight: 500,
+		addEventListener: (eventName, handler) => {
+			eventHandlers[eventName] = handler;
+		},
+		removeEventListener: () => {},
+		getBoundingClientRect: () => ({top: 0, bottom: 500}),
+		querySelectorAll: () => []
+	};
+	global.document = {
+		querySelector: selector => selector == ".messages-scroller" ? scroller : null
+	};
+	global.requestAnimationFrame = callback => {
+		frameCallbacks.push(callback);
+		return frameCallbacks.length;
+	};
+	global.setTimeout = callback => {
+		timerCallbacks.push(callback);
+		return timerCallbacks.length;
+	};
+	const plugin = createBasePluginInstance({
+		callSetLanguages: false,
+		bdfdb: {
+			dotCN: {messagesscroller: ".messages-scroller"}
+		}
+	});
+
+	return {
+		plugin,
+		scroller,
+		timerCallbacks,
+		userScroll() {
+			if (eventHandlers.wheel) eventHandlers.wheel({type: "wheel"});
+			if (eventHandlers.scroll) eventHandlers.scroll({type: "scroll"});
+		},
+		layoutScroll() {
+			if (eventHandlers.scroll) eventHandlers.scroll({type: "scroll"});
+		},
+		runScheduledCallbacks() {
+			while (frameCallbacks.length || timerCallbacks.length) {
+				while (frameCallbacks.length) frameCallbacks.shift()();
+				while (timerCallbacks.length) timerCallbacks.shift()();
+			}
+		},
+		restore() {
+			global.document = realDocument;
+			global.requestAnimationFrame = realRequestAnimationFrame;
+			global.setTimeout = realSetTimeout;
+		}
+	};
+}
+
+test("automatic translation refresh never pulls the scroller back after user scrolling resumes", () => {
+	const harness = createScrollRestoreHarness();
+	try {
+		harness.plugin.rerenderMessagesWithScrollPreserved();
+		harness.scroller.scrollTop = 700;
+		harness.userScroll();
+
+		harness.runScheduledCallbacks();
+
+		assert.equal(harness.scroller.scrollTop, 700);
+	}
+	finally {
+		harness.restore();
+	}
+});
+
+test("layout-induced scroll events do not cancel the single anchor correction", () => {
+	const harness = createScrollRestoreHarness();
+	try {
+		harness.plugin.rerenderMessagesWithScrollPreserved();
+		harness.scroller.scrollTop = 350;
+		harness.layoutScroll();
+
+		harness.runScheduledCallbacks();
+
+		assert.equal(harness.scroller.scrollTop, 200);
+	}
+	finally {
+		harness.restore();
+	}
+});
+
+test("automatic translation scroll preservation uses no delayed timeout corrections", () => {
+	const harness = createScrollRestoreHarness();
+	try {
+		const scrollerState = harness.plugin.captureMessageScrollerState();
+		harness.plugin.restoreMessageScrollerState(scrollerState);
+
+		assert.equal(harness.timerCallbacks.length, 0);
+	}
+	finally {
+		harness.restore();
+	}
+});
+
 test("normal and prefixed sent translations keep the submitted channel id", async () => {
 	let submitPatch = null;
 	const translateCalls = [];

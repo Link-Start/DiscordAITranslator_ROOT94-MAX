@@ -743,6 +743,81 @@ test("toggling a channel off clears only automatic displayed message translation
 	assert.deepEqual(autoTargetEvent.returnvalue.props.children, []);
 });
 
+test("toggling a channel off restores a rendered automatic translation back to its original message", () => {
+	const {plugin} = createChannelTogglePluginWithExplicitChannels();
+	const originalMessage = {
+		id: "toggle-rendered-auto-target",
+		channel_id: "channel-target",
+		content: "Welcome to the learning hub",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	plugin.applyStoredTranslationToMessage(originalMessage, {
+		channelId: "channel-target",
+		auto: true,
+		content: "欢迎来到学习中心",
+		translatedContent: "欢迎来到学习中心",
+		originalContent: originalMessage.content,
+		embeds: {}
+	});
+	const renderedTranslatedMessage = Object.assign({}, originalMessage, {
+		content: "欢迎来到学习中心"
+	});
+
+	plugin.toggleTranslation("channel-target");
+	const event = {
+		instance: {props: {message: renderedTranslatedMessage}},
+		returnvalue: {props: {children: []}}
+	};
+	plugin.processMessageContent(event);
+
+	assert.equal(event.instance.props.message.content, "Welcome to the learning hub");
+});
+
+test("restored original content is used when an enabled channel queues translation again", () => {
+	const plugin = createPluginInstance();
+	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
+	plugin.isTranslationEnabled = () => true;
+	plugin.isOwnMessage = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.shouldAutoTranslateReceivedMessage = () => true;
+	plugin.isLikelyLiveAutoTranslateMessage = () => false;
+	const originalMessage = {
+		id: "restore-before-requeue",
+		channel_id: "channel-target",
+		content: "Welcome to the learning hub",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	plugin.applyStoredTranslationToMessage(originalMessage, {
+		channelId: "channel-target",
+		auto: true,
+		content: "欢迎来到学习中心",
+		translatedContent: "欢迎来到学习中心",
+		originalContent: originalMessage.content,
+		embeds: {}
+	});
+	plugin.clearDisplayedAutoTranslations("channel-target");
+	let queuedContent = null;
+	plugin.queueAutoTranslateMessage = message => {
+		queuedContent = message.content;
+		return true;
+	};
+	const event = {
+		instance: {
+			props: {
+				message: Object.assign({}, originalMessage, {content: "欢迎来到学习中心"})
+			}
+		},
+		returnvalue: {props: {children: []}}
+	};
+
+	plugin.processMessageContent(event);
+
+	assert.equal(event.instance.props.message.content, originalMessage.content);
+	assert.equal(queuedContent, originalMessage.content);
+});
+
 test("toggling a channel off clears only automatic reply preview translations in that channel", () => {
 	const {plugin} = createChannelTogglePluginWithExplicitChannels();
 	plugin.settings.general.showOriginalInReplyPreview = true;
