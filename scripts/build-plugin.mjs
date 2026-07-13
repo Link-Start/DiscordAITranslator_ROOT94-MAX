@@ -32,6 +32,7 @@ export async function createPluginBundle({debug = false} = {}) {
 		target: "es2020",
 		charset: "utf8",
 		legalComments: "none",
+		keepNames: true,
 		minify: false,
 		minifySyntax: true,
 		sourcemap: false,
