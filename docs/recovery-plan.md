@@ -80,7 +80,7 @@ tests/received-display-ownership.test.js
 - Modify: `package.json`
 - Create: `package-lock.json`
 
-- [ ] **Step 1: Write the failing build-contract test**
+- [x] **Step 1: Write the failing build-contract test**
 
 Create `tests/build-contract.test.js`:
 
@@ -112,7 +112,7 @@ test("the generated plugin keeps metadata and excludes development artifacts", a
 });
 ```
 
-- [ ] **Step 2: Run the test and verify it fails for the missing build module**
+- [x] **Step 2: Run the test and verify it fails for the missing build module**
 
 Run:
 
@@ -122,7 +122,7 @@ node --test tests/build-contract.test.js
 
 Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `scripts/build-plugin.mjs`.
 
-- [ ] **Step 3: Install the pinned build dependency**
+- [x] **Step 3: Install the pinned build dependency**
 
 Run:
 
@@ -132,7 +132,7 @@ npm install --save-dev esbuild@0.28.1
 
 Expected: `package.json` gains `devDependencies.esbuild` and npm creates `package-lock.json`.
 
-- [ ] **Step 4: Create canonical plugin metadata**
+- [x] **Step 4: Create canonical plugin metadata**
 
 Create `src/plugin/metadata.json`:
 
@@ -158,7 +158,7 @@ DiscordAITranslator.debug.plugin.js
 *.bak
 ```
 
-- [ ] **Step 5: Move the current runtime without changing its implementation**
+- [x] **Step 5: Move the current runtime without changing its implementation**
 
 Run:
 
@@ -175,7 +175,7 @@ Create `src/plugin/index.js`:
 module.exports = require("../legacy/runtime");
 ```
 
-- [ ] **Step 6: Implement the deterministic build script**
+- [x] **Step 6: Implement the deterministic build script**
 
 Create `scripts/build-plugin.mjs`:
 
@@ -240,7 +240,7 @@ if (isMain) {
 }
 ```
 
-- [ ] **Step 7: Update package scripts**
+- [x] **Step 7: Update package scripts**
 
 Set `package.json` scripts to:
 
@@ -255,7 +255,7 @@ Set `package.json` scripts to:
 }
 ```
 
-- [ ] **Step 8: Generate the root plugin and run the build contract**
+- [x] **Step 8: Generate the root plugin and run the build contract**
 
 Run:
 
@@ -266,7 +266,7 @@ node --test tests/build-contract.test.js
 
 Expected: both build-contract tests PASS.
 
-- [ ] **Step 9: Run the complete existing suite**
+- [x] **Step 9: Run the complete existing suite**
 
 Run:
 
@@ -276,12 +276,14 @@ npm run verify
 
 Expected: the existing 203 tests plus the 2 build tests PASS. Any behavior failure means the build migration changed runtime semantics and must be fixed before continuing.
 
-- [ ] **Step 10: Commit the build skeleton**
+- [x] **Step 10: Commit the build skeleton**
 
 ```powershell
 git add .gitignore package.json package-lock.json scripts src DiscordAITranslator.plugin.js tests/build-contract.test.js
 git commit -m "build: generate plugin from modular source"
 ```
+
+**Task 1 evidence:** Red contract observed `ERR_MODULE_NOT_FOUND`; final build contract `2/2`; full verification `205/205`; active esbuild binary URL and SHA-512 locked; spec and quality reviews approved. Commits: `0b412bb`, `182c7eb`, `5c4ebed`, `fc1e4ea`, `8477fb2`.
 
 ## Task 2: Add The Message State Store
 
