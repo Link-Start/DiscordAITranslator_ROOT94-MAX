@@ -647,6 +647,7 @@ module.exports = (_ => {
 		const MAX_SENT_ORIGINAL_ENTRIES = 200;
 		const AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900;
 		const HISTORICAL_AUTO_TRANSLATION_COLLECT_DELAY = 450;
+		const HISTORICAL_AUTO_TRANSLATION_MAX_COLLECT_DELAY = 1800;
 		const HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100;
 		const DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50;
 		const LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1;
@@ -654,6 +655,7 @@ module.exports = (_ => {
 		const LOADED_AUTO_TRANSLATE_RANGE_MODES = {COUNT: "count", TIME: "time"};
 		const AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD = 80;
 		const MANUAL_TRANSLATION_SCROLL_LOCK_MS = 4500;
+		const TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"];
 		const DISCORD_EPOCH = 1420070400000;
 		
 		const defaultLanguages = {
@@ -6449,7 +6451,7 @@ module.exports = (_ => {
 			rerenderMessagesWithScrollPreserved () {
 				const manualAnchor = this.getActiveManualTranslationScrollAnchor();
 				const scrollerState = manualAnchor ? null : this.captureMessageScrollerState();
-				BDFDB.MessageUtils.rerenderAll(true);
+				BDFDB.PatchUtils.forceAllUpdates(this, TRANSLATION_MESSAGE_PATCH_TYPES);
 				if (manualAnchor) this.restoreMessageAnchorState(manualAnchor);
 				else this.restoreMessageScrollerState(scrollerState);
 			}
@@ -7487,7 +7489,7 @@ module.exports = (_ => {
 				if (!channelId) return null;
 				let entry = historicalTranslationJobQueues.get(channelId);
 				if (!entry && create) {
-					entry = {channelId, generation: 0, jobs: [], runningPromise: null, startTimer: null};
+					entry = {channelId, generation: 0, jobs: [], runningPromise: null, startTimer: null, collectionStartedAt: null, lastCollectedAt: null};
 					historicalTranslationJobQueues.set(channelId, entry);
 				}
 				return entry || null;
@@ -7535,13 +7537,27 @@ module.exports = (_ => {
 				return true;
 			}
 
-			scheduleHistoricalTranslationJobStart (channelId) {
+			scheduleHistoricalTranslationJobStart (channelId, collectionUpdated = true) {
 				const entry = this.getHistoricalTranslationJobQueue(channelId, false);
-				if (!entry || entry.runningPromise || entry.startTimer) return;
+				if (!entry) return;
+				const now = Date.now();
+				if (collectionUpdated) {
+					if (entry.collectionStartedAt == null) entry.collectionStartedAt = now;
+					entry.lastCollectedAt = now;
+				}
+				if (entry.runningPromise) return;
+				const hasCollectingJob = entry.jobs.some(job => job && job.state == "collecting");
+				if (!hasCollectingJob) return;
+				if (entry.collectionStartedAt == null) entry.collectionStartedAt = now;
+				if (entry.lastCollectedAt == null) entry.lastCollectedAt = now;
+				if (entry.startTimer) clearTimeout(entry.startTimer);
+				const quietDeadline = entry.lastCollectedAt + HISTORICAL_AUTO_TRANSLATION_COLLECT_DELAY;
+				const maximumDeadline = entry.collectionStartedAt + HISTORICAL_AUTO_TRANSLATION_MAX_COLLECT_DELAY;
+				const delay = Math.max(0, Math.min(quietDeadline, maximumDeadline) - now);
 				entry.startTimer = setTimeout(_ => {
 					entry.startTimer = null;
 					this.startCollectedHistoricalTranslationJobs(channelId);
-				}, HISTORICAL_AUTO_TRANSLATION_COLLECT_DELAY);
+				}, delay);
 			}
 
 			startCollectedHistoricalTranslationJobs (channelId) {
@@ -7554,6 +7570,8 @@ module.exports = (_ => {
 				if (entry.runningPromise) return entry.runningPromise;
 				const job = entry.jobs.find(candidate => candidate && candidate.state == "collecting");
 				if (!job) return Promise.resolve(null);
+				entry.collectionStartedAt = null;
+				entry.lastCollectedAt = null;
 				const runningPromise = Promise.resolve(job.start()).finally(_ => {
 					for (const record of job.items.values()) {
 						const messageId = record && record.source && record.source.message && record.source.message.id;
@@ -7562,7 +7580,7 @@ module.exports = (_ => {
 					}
 					if (entry.runningPromise == runningPromise) entry.runningPromise = null;
 					entry.jobs = entry.jobs.filter(candidate => candidate != job);
-					if (entry.jobs.length) this.startCollectedHistoricalTranslationJobs(channelId);
+					if (entry.jobs.length) this.scheduleHistoricalTranslationJobStart(channelId, false);
 					else if (!entry.startTimer && historicalTranslationJobQueues.get(channelId) === entry) historicalTranslationJobQueues.delete(channelId);
 				});
 				entry.runningPromise = runningPromise;
@@ -7627,6 +7645,8 @@ module.exports = (_ => {
 					entry.generation++;
 					if (entry.startTimer) clearTimeout(entry.startTimer);
 					entry.startTimer = null;
+					entry.collectionStartedAt = null;
+					entry.lastCollectedAt = null;
 					for (const job of entry.jobs) {
 						job.cancel(reason);
 						for (const record of job.items.values()) if (record.source && record.source.message) delete queuedAutoTranslations[record.source.message.id];
