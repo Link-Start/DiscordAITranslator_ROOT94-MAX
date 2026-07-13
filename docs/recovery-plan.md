@@ -1,208 +1,151 @@
-# Recovery Plan
+# Architecture Migration Plan
 
-> **For agentic workers:** Execute this plan task by task with test-driven development. Keep the BetterDiscord distribution installable after every phase.
+> This is the only repository implementation sequence. Detailed task steps are written only after the architecture design is reviewed and approved.
 
-**Goal:** Stabilize automatic translation, eliminate silent message loss and stale display state, complete the approved product backlog, then split the source without changing the single-file distribution contract.
+**Goal:** Replace the coupled single-file implementation with modular source while preserving one installable BetterDiscord plugin and all approved behavior.
 
-**Architecture:** Live messages and loaded historical messages use separate paths. Historical messages are owned by one channel-scoped, ID-keyed job that may use multiple transport requests internally but performs one atomic display commit. Lifecycle generation tokens prevent late callbacks from mutating stopped, disabled, switched, or edited sessions.
+**Current status:** Architecture design prepared. Runtime migration has not started.
 
-**Tech Stack:** BetterDiscord, BDFDB, JavaScript, Node.js built-in test runner.
+## Current Verified Failures
 
-## Why Regressions Keep Returning
+The deployed runtime still has unresolved Discord display regressions:
 
-The recovery started from a large change set where runtime behavior, settings migration, documentation, and tests had changed together without stable checkpoints.
+- Stored translations may appear only after hovering a message.
+- Disabling automatic translation may leave translated text visible.
+- Translated text and translated watermark/styling may update separately.
+- A visually untranslated item cannot currently be distinguished from a skipped, failed, pending, or unrendered item without internal inspection.
 
-The root architectural defect was two competing historical paths: progressive staging and rescan globals remained active beside the new coordinator. Those legacy branches and their six obsolete skipped tests have now been removed. The remaining risk is physical coupling inside the single distribution file and incomplete DiscordPTB smoke coverage.
+No phase that claims to solve these behaviors is complete until DiscordPTB verification observes the result.
 
-## Recovery Rules
+## Noise Policy
 
-1. Freeze behavior changes until the current state is checkpointed.
-2. One phase changes one behavior or extracts one module, never both.
-3. Every asynchronous translation job has an identity and generation token.
-4. Late results from cancelled jobs are discarded.
-5. No message is silently dropped. Every item ends as translated, legitimately skipped, failed with a visible reason, or cancelled.
-6. Tests remain outside the BetterDiscord distribution and are not loaded by Discord.
-7. Remove obsolete or duplicate tests only after replacement coverage exists.
+- Keep one document per concern: product, settings, providers, architecture, and migration plan.
+- Do not add recovery copies, numbered planning documents, conversation summaries, or local issue files to Git.
+- Do not delete runtime code merely because it looks old. First identify its behavior, replace it behind a tested module interface, verify parity, then delete it in a separate commit.
+- Do not retain compatibility wrappers after all callers have migrated and the replacement has passed release gates.
+- Keep deployment backups and archived material outside the repository.
 
-## Historical Translation Contract
+## Program Rules
 
-Historical messages within the configured count form one logical `HistoricalTranslationJob`.
+1. Freeze new features until the display vertical slice is stable.
+2. One phase changes one ownership boundary.
+3. Every phase starts with a failing regression or characterization test at the correct interface.
+4. Every commit remains buildable, installable, and reversible.
+5. The generated plugin remains the only BetterDiscord install artifact.
+6. Automated tests cannot complete a Discord rendering phase without the required DiscordPTB smoke checks.
+7. Every translated, skipped, failed, or cancelled message has an inspectable terminal reason.
+8. No new global runtime map may duplicate state already owned by a target module.
 
-```text
-collecting -> translating -> repairing -> ready -> committed
-                                    \-> cancelled
-```
+## Phase 0: Architecture Baseline
 
-Each job owns:
+- [ ] Approve `docs/architecture.md` as the target design.
+- [ ] Accept ADR-0002 and supersede the hand-maintained runtime restriction in ADR-0001.
+- [ ] Capture the current deployed plugin hash, version, failing screenshots, and reproduction steps outside the repository.
+- [ ] Convert the hover-only display, disable restoration, and missing-decoration reports into red-capable feedback loops.
+- [x] Confirm the current repository contains no tracked backups, generated coverage, assistant configuration, or duplicate plans.
 
-- Job ID and channel ID
-- Configuration generation and provider selection
-- Immutable message snapshots keyed by Discord message ID
-- Original-content signature for every message
-- Per-item state: pending, translated, skipped, retrying, failed, or cancelled
-- Validated translated content and protected-placeholder metadata
-- Attempt count and provider error information
+**Exit gate:** The architecture and failure reproductions are reviewable before runtime code changes.
 
-Provider requests may be internally split to respect item, character, timeout, and rate-limit constraints. This internal splitting must not change display behavior.
+## Phase 1: Deterministic Build Skeleton
 
-Before commit, the job validates:
+- [ ] Add esbuild and a locked development dependency version.
+- [ ] Add `scripts/build-plugin.mjs` with deterministic metadata and CommonJS output.
+- [ ] Add `src/plugin/index.js` as the source entry point.
+- [ ] Generate the root `DiscordAITranslator.plugin.js` without changing runtime behavior.
+- [ ] Add build-contract tests for metadata, one-file output, deterministic bytes, and exclusion of tests/debug code.
+- [ ] Update `npm run verify` to build first and reject an out-of-date generated plugin.
 
-- Every returned ID belongs to the request
-- No duplicate IDs exist
-- Missing or empty results enter repair
-- Protected placeholders are complete and unchanged
-- The target language is plausible
-- The source message and settings signature are still current
+**Exit gate:** A clean checkout deterministically regenerates an installable plugin identical to the committed artifact.
 
-Repair order:
+## Phase 2: Display Vertical Slice
 
-1. Retry missing items in a smaller primary-provider request.
-2. Retry unresolved items one at a time with plain translation instructions.
-3. Use the configured backup provider.
-4. Mark unresolved items failed with a visible count and retry action; never cache them as successful or silently skipped.
+- [ ] Add `MessageStateStore` with immutable source snapshots and explicit statuses.
+- [ ] Add `TranslationDisplayController` with one transaction for text, decoration, loading, and restoration.
+- [ ] Add `DiscordRenderAdapter` that reports requested and confirmed message IDs.
+- [ ] Route one received-message vertical slice through the new modules.
+- [ ] Add regressions proving translations appear without hover.
+- [ ] Add regressions proving disabling restores original text and removes translated decoration together.
+- [ ] Add regressions proving a translated message cannot render without its watermark/styling state.
+- [ ] Verify typing and scrolling remain stable during one display transaction.
 
-When all items reach a terminal state, commit valid translations to cache and display state together, then request exactly one Discord message-list rerender. Live new messages use a separate live path and never wait for a historical job.
+**Exit gate:** The current reported display failures pass automated contracts and DiscordPTB smoke checks before the old display path is removed.
 
-### Accepted Interaction Rules
+## Phase 3: Message Lifecycle Ownership
 
-- New messages translate immediately through the live path, even while a historical job is running.
-- The configured loaded-message count is the maximum candidate count for one historical job.
-- Messages loaded by scrolling upward never join an immutable running job. They form the next job after scrolling becomes idle.
-- Historical network work may continue while the user types or scrolls, but display commit waits until recent input and scrolling activity are idle.
-- A historical job performs exactly one message-list rerender when it commits.
-- A live message performs at most one completion rerender and never triggers a historical rescan.
-- Every queued received message renders one CSS-animated loading icon beside its content or translation watermark. CSS animation must not require timer-driven React rerenders.
-- Loading icons disappear only when the item is translated, legitimately skipped, failed, or cancelled.
-- Changing channel, disabling automatic translation, editing source content, or stopping the plugin invalidates the relevant job generation. Late results are discarded.
-- Failed items remain original and are reported in the job status. They are never silently cached as skipped.
+- [ ] Route reply previews and embeds through the display controller.
+- [ ] Route thread and forum titles through channel-owned display state.
+- [ ] Move edit invalidation and sent-original recovery to immutable source snapshots.
+- [ ] Move channel disable, channel switch, plugin stop, and reload cleanup to generation-bound lifecycle operations.
+- [ ] Delete the replaced legacy display maps and cleanup branches in a separate commit.
 
-## Target Modules
+**Exit gate:** Messages, replies, embeds, titles, edits, disable, stop, and reload share one state owner and pass channel-isolation tests.
 
-The repository keeps one installable `DiscordAITranslator.plugin.js`, generated from source modules.
+## Phase 4: Translation Orchestration
 
-```text
-src/runtime/historical-translation-job.js
-src/runtime/live-translation-queue.js
-src/runtime/translation-cache.js
-src/display/message-display.js
-src/display/discord-render-adapter.js
-src/lifecycle/message-edit-adapter.js
-src/lifecycle/plugin-stop-adapter.js
-src/providers/provider-registry.js
-src/providers/batch-response-validator.js
-```
+- [ ] Add `TranslationOrchestrator` as the only caller of policy, queues, providers, cache, and display commits.
+- [ ] Move the live queue behind its module interface.
+- [ ] Move `HistoricalTranslationJob` behind its module interface without changing its state-machine contract.
+- [ ] Make historical jobs return structured terminal results and remove direct rendering knowledge.
+- [ ] Add per-message reason codes for translated, skipped, failed, and cancelled states.
+- [ ] Add latency measurements for queue, provider, validation, commit wait, and render acknowledgement.
 
-`HistoricalTranslationJob` is the first deep module. Its interface should accept a message snapshot and dependencies, then return one commit result. Callers must not manage its timers, retries, staging maps, or per-item flags.
+**Exit gate:** Live and historical paths share result types and observability but retain their accepted interaction behavior.
 
-## Execution Phases
+## Phase 5: Providers And Policies
 
-## Recovery Baseline
+- [ ] Add the shared provider client for timeout, retry, backoff, error normalization, and placeholder validation.
+- [ ] Move each provider adapter independently with parser and connection-contract tests.
+- [ ] Move received, sent, language detection, prompt, protection, and result validation policies.
+- [ ] Remove duplicated request and response handling after every provider uses the shared interface.
 
-- Date: 2026-07-12
-- Branch: `codex/two`
-- Baseline commit: `85ad579`
-- Source version: `0.3.36`
-- Installed version: `0.3.36`
-- Source and installed SHA-256: `BB7D28268101174CE791F2F9D4AD30A44A47AF63F1AE645A3049AF11C4D6829F`
-- Baseline limitation: historical translation still uses shared global batch state and progressive request-block display.
+**Exit gate:** Provider migration preserves provider-specific schemas, channel provider overrides, global backup behavior, and all current language policies.
 
-### Phase 0: Safe Baseline
+## Phase 6: Settings And Persistence
 
-- [x] Checkpoint the current repository and deployed plugin on the current recovery branch.
-- [x] Record the exact BetterDiscord file hash and installed version.
-- [x] Stop version bumps until a phase passes all gates.
-- [x] Add a manual Discord smoke-test checklist to this document.
+- [ ] Add versioned settings, channel settings, provider credentials, and translation cache stores.
+- [ ] Move all compatibility reads into one migration entry point.
+- [ ] Preserve channel/global ownership defined in `docs/settings.md`.
+- [ ] Remove obsolete persistent keys only after a verified migration release.
+- [ ] Route channel popout and BetterDiscord settings through the same typed settings interfaces.
 
-### Phase 1: Characterization
+**Exit gate:** Existing user data migrates without losing credentials, languages, channel enablement, or provider overrides.
 
-- [x] Replace the progressive-display test with an atomic-commit test that asserts exactly one rerender.
-- [x] Add real parser tests for unknown, duplicate, missing, empty, and malformed IDs.
-- [x] Add a persistent skip-cache version test using pre-existing user data.
-- [x] Add render-node reuse coverage that starts with translated CSS class and color variables.
-- [x] Add integration coverage for channel switching, channel disable, plugin stop, edits, scroll-loaded messages, and short words.
-- [x] Remove or replace obsolete skipped entry-flow and scroll-order tests with coordinator coverage.
+## Phase 7: Legacy Removal And Repository Cleanup
 
-### Phase 2: Historical Job
+- [ ] Confirm every legacy runtime responsibility has one replacement owner.
+- [ ] Delete superseded inline implementations and compatibility wrappers.
+- [ ] Consolidate duplicated test setup while retaining behavior coverage.
+- [ ] Enforce module and generated-artifact size guardrails.
+- [ ] Confirm release output contains no tests, debug journal, local configuration, or deployment data.
+- [ ] Update canonical documentation to describe the implemented architecture rather than the migration.
 
-- [x] Introduce one channel-scoped `HistoricalTranslationJob` interface without changing the live path.
-- [x] Move snapshot IDs, item states, staging results, attempts, counters, and generation into the job.
-- [x] Replace rerender-driven rescanning with explicit visible-message collection.
-- [x] Validate response IDs and protected placeholders before accepting any result.
-- [x] Repair unresolved items with smaller batches, forced single translation, then the global backup provider.
-- [x] Commit cache and display state only when all items are terminal and the source signatures are current.
-- [x] Wait for typing and scroll idle before one atomic rerender.
-- [x] Remove progressive flush, attempted-message maps, post-batch rescan scheduling, and superseded batch globals.
+**Exit gate:** Production source is modular, the generated plugin remains below the agreed size guardrail, and no duplicate runtime path remains.
 
-### Phase 3: Message Lifecycle
-
-- [x] Invalidate old snapshots and cache entries when another user edits a message.
-- [x] Re-translate edited received content using a new signature.
-- [x] Restore editable original text for sent messages and translate the replacement after submit.
-- [x] Restore original messages, replies, and embeds on plugin stop.
-- [x] Ignore every late provider callback after stop, disable, channel switch, or source edit.
-
-### Phase 4: Translation Correctness
-
-- [x] Guarantee short conversational words enter translation when source and target differ.
-- [x] Separate translation instructions from skip decisions.
-- [x] Version the skip-decision cache and invalidate incompatible old entries.
-- [x] Validate protected placeholders and glossary terms after every provider response.
-- [x] Remove translated classes, variables, watermark, and injected blocks when no active translation exists.
-- [x] Add completeness checks for batch results.
-
-### Phase 5: Providers And Settings
-
-- [x] Add an official OpenAI adapter for OpenAI API models.
-- [x] Add a native Gemini adapter using Gemini request and response schemas.
-- [x] Retain a clearly named OpenAI-compatible adapter for third-party and self-hosted endpoints.
-- [x] Keep Google Free keyless and Google Cloud responsible for official API keys.
-- [x] Add the language detection strategy selector with local detection and Google Free fallback.
-- [x] Remove the duplicate global language detection helper while retaining global detection strategy settings.
-- [x] Consolidate overlapping display settings under one canonical key per behavior.
-- [x] Update English metadata and the repository-linked author field.
-
-### Phase 6: Remaining Product Coverage
-
-- [x] Translate forum and thread titles with the current channel configuration.
-- [ ] Profile provider latency, queue latency, validation latency, commit wait, and Discord render latency separately.
-- [x] Add the CSS-only per-message loading indicator for live and historical work.
-- [ ] Complete canonical repository documentation and remove obsolete runtime branches after the `src/` migration is verified.
-
-### Phase 7: Cleanup
-
-- [ ] Generate the single installable plugin file deterministically from `src/`.
-- [ ] Remove superseded inline implementations.
-- [ ] Consolidate duplicated test setup and delete obsolete tests only when replacement coverage passes.
-- [ ] Keep high-value contract, state-machine, parser, lifecycle, and integration tests in the repository.
-- [ ] Confirm test files are excluded from the BetterDiscord artifact and do not affect runtime size.
-
-## Manual Discord Smoke Checklist
-
-- [ ] Current-channel right-click toggle does not affect another channel.
-- [ ] Live messages translate while a historical job is running.
-- [ ] Every queued item shows a loading icon without visible layout movement.
-- [ ] One historical job reveals all validated translations in one refresh.
-- [ ] Typing remains uninterrupted during network work and commit.
-- [ ] Dragging or scrolling remains stable; commit waits until idle.
-- [ ] Scrolling upward creates the next bounded job without reprocessing the previous job.
-- [ ] `hi`, `ok`, and other short foreign words translate when target language differs.
-- [ ] Same-language messages retain normal Discord styling.
-- [ ] Editing a received message replaces the stale translation.
-- [ ] Editing a sent translated message starts from the original editable text.
-- [ ] Disabling a channel during a request prevents late results from appearing.
-- [ ] Switching channel during a request cannot contaminate the new channel.
-- [ ] Stopping and reloading the plugin restores original message, reply, and embed content.
-- [ ] Forum and thread titles follow the current channel translation setting.
-
-## Release Gate
-
-Every phase requires:
+## Required Verification For Every Phase
 
 1. Focused red-green regression tests.
 2. `npm run verify` with zero failures.
-3. Real provider response parsing tests.
-4. Deployment with a timestamped backup and matching SHA-256.
-5. DiscordPTB checks for channel toggle, atomic historical reveal, short words, message edits, channel switching, plugin stop, and reload.
-6. A small commit containing only that phase.
+3. Standards and specification review with no unresolved P0-P2 finding.
+4. Timestamped backup before BetterDiscord deployment.
+5. Repository and installed SHA-256 equality.
+6. Renderer log inspection after hot reload.
+7. The phase-specific DiscordPTB smoke checks.
+8. One small commit containing only that phase.
 
-No release is complete while required manual Discord checks are unverified.
+## DiscordPTB Smoke Gate
+
+- [ ] Translation appears without hovering the message.
+- [ ] Translated text and translated decoration appear together.
+- [ ] Disabling the current channel restores original messages, replies, embeds, and title.
+- [ ] The current-channel switch does not affect another channel.
+- [ ] One historical job reveals all validated translations in one visible commit.
+- [ ] Live messages translate while a historical job is running.
+- [ ] Typing remains uninterrupted.
+- [ ] Scrolling and dragging remain under user control.
+- [ ] Scroll-loaded messages form the next bounded job.
+- [ ] Short foreign words translate when source and target differ.
+- [ ] Edited received and sent messages use the current immutable source.
+- [ ] Stop and reload restore originals and reject late callbacks.
+- [ ] Every missing translation has a visible pending, skipped, failed, or cancelled reason.
+
+No release or phase is complete while its required smoke checks remain unverified.
