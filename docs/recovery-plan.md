@@ -1,151 +1,1868 @@
-# Architecture Migration Plan
+# Display Core Migration Implementation Plan
 
-> This is the only repository implementation sequence. Detailed task steps are written only after the architecture design is reviewed and approved.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the coupled single-file implementation with modular source while preserving one installable BetterDiscord plugin and all approved behavior.
+**Goal:** Introduce deterministic modular source and replace the coupled received-message display path so translations appear without hover, translated decoration stays synchronized, and channel disable reliably restores original content.
 
-**Current status:** Architecture design prepared. Runtime migration has not started.
+**Architecture:** Preserve the current runtime behind a generated compatibility entry first. Then introduce `MessageStateStore`, `TranslationDisplayController`, and `DiscordRenderAdapter` as one received-message vertical slice. The state store owns immutable source and translation status; patches read one display view; the render adapter refreshes and confirms exact message IDs.
 
-## Current Verified Failures
+**Tech Stack:** BetterDiscord, BDFDB, CommonJS JavaScript, Node.js 20+, esbuild 0.28.1, Node.js built-in test runner.
 
-The deployed runtime still has unresolved Discord display regressions:
+---
 
-- Stored translations may appear only after hovering a message.
-- Disabling automatic translation may leave translated text visible.
-- Translated text and translated watermark/styling may update separately.
-- A visually untranslated item cannot currently be distinguished from a skipped, failed, pending, or unrendered item without internal inspection.
+## Scope
 
-No phase that claims to solve these behaviors is complete until DiscordPTB verification observes the result.
+This plan implements the first architecture milestone only:
 
-## Noise Policy
+- Deterministic `src/` to single-plugin build
+- Received-message display state ownership
+- Live and historical received translation commits
+- Hover-independent visible refresh
+- Text and translated-decoration synchronization
+- Channel disable and plugin-stop restoration
+- Per-message terminal reason and local diagnostics
+- Removal of the replaced received-display globals and branches
 
-- Keep one document per concern: product, settings, providers, architecture, and migration plan.
-- Do not add recovery copies, numbered planning documents, conversation summaries, or local issue files to Git.
-- Do not delete runtime code merely because it looks old. First identify its behavior, replace it behind a tested module interface, verify parity, then delete it in a separate commit.
-- Do not retain compatibility wrappers after all callers have migrated and the replacement has passed release gates.
-- Keep deployment backups and archived material outside the repository.
+The following remain out of scope until this milestone passes every release gate:
 
-## Program Rules
+- Provider adapter migration
+- Sent translation policy migration
+- Settings UI and persistent schema migration
+- Reply, embed, and thread-title ownership migration beyond compatibility calls required for channel restoration
+- New providers or new user-facing features
 
-1. Freeze new features until the display vertical slice is stable.
-2. One phase changes one ownership boundary.
-3. Every phase starts with a failing regression or characterization test at the correct interface.
-4. Every commit remains buildable, installable, and reversible.
-5. The generated plugin remains the only BetterDiscord install artifact.
-6. Automated tests cannot complete a Discord rendering phase without the required DiscordPTB smoke checks.
-7. Every translated, skipped, failed, or cancelled message has an inspectable terminal reason.
-8. No new global runtime map may duplicate state already owned by a target module.
+## Current Failure Baseline
 
-## Phase 0: Architecture Baseline
+- Stored translation data may remain invisible until Discord rerenders a message on hover.
+- `Messages` owns translated text while `MessageContent` independently owns watermark and styling.
+- Disabling a channel clears runtime records but may not force the message instances that still display translated props to rerender.
+- Tests currently prove that a BDFDB refresh helper was called, not that the expected message IDs visibly committed.
 
-- [ ] Approve `docs/architecture.md` as the target design.
-- [ ] Accept ADR-0002 and supersede the hand-maintained runtime restriction in ADR-0001.
-- [ ] Capture the current deployed plugin hash, version, failing screenshots, and reproduction steps outside the repository.
-- [ ] Convert the hover-only display, disable restoration, and missing-decoration reports into red-capable feedback loops.
-- [x] Confirm the current repository contains no tracked backups, generated coverage, assistant configuration, or duplicate plans.
+## File Map
 
-**Exit gate:** The architecture and failure reproductions are reviewable before runtime code changes.
+```text
+.gitignore
+package.json
+package-lock.json
+scripts/build-plugin.mjs
+src/plugin/index.js
+src/plugin/metadata.json
+src/legacy/runtime.js
+src/display/message-state-store.js
+src/display/translation-display-controller.js
+src/display/discord-render-adapter.js
+src/display/display-runtime.js
+src/diagnostics/display-transition-journal.js
+DiscordAITranslator.plugin.js
+tests/build-contract.test.js
+tests/display/message-state-store.test.js
+tests/display/translation-display-controller.test.js
+tests/display/discord-render-adapter.test.js
+tests/integration/received-display-runtime.test.js
+tests/integration/received-display-lifecycle.test.js
+tests/helpers/createPluginInstance.js
+tests/helpers/createReceivedDisplayHarness.js
+tests/received-display-ownership.test.js
+```
 
-## Phase 1: Deterministic Build Skeleton
+`DiscordAITranslator.plugin.js` becomes generated output. Existing regression tests continue to load that generated file.
 
-- [ ] Add esbuild and a locked development dependency version.
-- [ ] Add `scripts/build-plugin.mjs` with deterministic metadata and CommonJS output.
-- [ ] Add `src/plugin/index.js` as the source entry point.
-- [ ] Generate the root `DiscordAITranslator.plugin.js` without changing runtime behavior.
-- [ ] Add build-contract tests for metadata, one-file output, deterministic bytes, and exclusion of tests/debug code.
-- [ ] Update `npm run verify` to build first and reject an out-of-date generated plugin.
+## Task 1: Establish The Deterministic Build Contract
 
-**Exit gate:** A clean checkout deterministically regenerates an installable plugin identical to the committed artifact.
+**Files:**
+- Create: `tests/build-contract.test.js`
+- Create: `src/plugin/metadata.json`
+- Create: `src/plugin/index.js`
+- Create: `scripts/build-plugin.mjs`
+- Create: `.gitignore`
+- Move: `DiscordAITranslator.plugin.js` to `src/legacy/runtime.js`
+- Generate: `DiscordAITranslator.plugin.js`
+- Modify: `package.json`
+- Create: `package-lock.json`
 
-## Phase 2: Display Vertical Slice
+- [ ] **Step 1: Write the failing build-contract test**
 
-- [ ] Add `MessageStateStore` with immutable source snapshots and explicit statuses.
-- [ ] Add `TranslationDisplayController` with one transaction for text, decoration, loading, and restoration.
-- [ ] Add `DiscordRenderAdapter` that reports requested and confirmed message IDs.
-- [ ] Route one received-message vertical slice through the new modules.
-- [ ] Add regressions proving translations appear without hover.
-- [ ] Add regressions proving disabling restores original text and removes translated decoration together.
-- [ ] Add regressions proving a translated message cannot render without its watermark/styling state.
-- [ ] Verify typing and scrolling remain stable during one display transaction.
+Create `tests/build-contract.test.js`:
 
-**Exit gate:** The current reported display failures pass automated contracts and DiscordPTB smoke checks before the old display path is removed.
+```js
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
-## Phase 3: Message Lifecycle Ownership
+const root = path.resolve(__dirname, "..");
 
-- [ ] Route reply previews and embeds through the display controller.
-- [ ] Route thread and forum titles through channel-owned display state.
-- [ ] Move edit invalidation and sent-original recovery to immutable source snapshots.
-- [ ] Move channel disable, channel switch, plugin stop, and reload cleanup to generation-bound lifecycle operations.
-- [ ] Delete the replaced legacy display maps and cleanup branches in a separate commit.
+test("the committed BetterDiscord plugin matches the deterministic source build", async () => {
+	const {createPluginBundle} = await import("../scripts/build-plugin.mjs");
+	const generated = await createPluginBundle();
+	const committed = fs.readFileSync(path.join(root, "DiscordAITranslator.plugin.js"), "utf8");
 
-**Exit gate:** Messages, replies, embeds, titles, edits, disable, stop, and reload share one state owner and pass channel-isolation tests.
+	assert.equal(committed, generated);
+});
 
-## Phase 4: Translation Orchestration
+test("the generated plugin keeps metadata and excludes development artifacts", async () => {
+	const {createPluginBundle} = await import("../scripts/build-plugin.mjs");
+	const generated = await createPluginBundle();
 
-- [ ] Add `TranslationOrchestrator` as the only caller of policy, queues, providers, cache, and display commits.
-- [ ] Move the live queue behind its module interface.
-- [ ] Move `HistoricalTranslationJob` behind its module interface without changing its state-machine contract.
-- [ ] Make historical jobs return structured terminal results and remove direct rendering knowledge.
-- [ ] Add per-message reason codes for translated, skipped, failed, and cancelled states.
-- [ ] Add latency measurements for queue, provider, validation, commit wait, and render acknowledgement.
+	assert.match(generated, /^\/\*\*[\s\S]*@name DiscordAITranslator/);
+	assert.match(generated, /@version 0\.3\.36/);
+	assert.doesNotMatch(generated, /sourceMappingURL=/);
+	assert.doesNotMatch(generated, /tests\//);
+	assert.doesNotMatch(generated, /TRANSLATOR_DISPLAY_DEBUG_JOURNAL/);
+});
+```
 
-**Exit gate:** Live and historical paths share result types and observability but retain their accepted interaction behavior.
+- [ ] **Step 2: Run the test and verify it fails for the missing build module**
 
-## Phase 5: Providers And Policies
+Run:
 
-- [ ] Add the shared provider client for timeout, retry, backoff, error normalization, and placeholder validation.
-- [ ] Move each provider adapter independently with parser and connection-contract tests.
-- [ ] Move received, sent, language detection, prompt, protection, and result validation policies.
-- [ ] Remove duplicated request and response handling after every provider uses the shared interface.
+```powershell
+node --test tests/build-contract.test.js
+```
 
-**Exit gate:** Provider migration preserves provider-specific schemas, channel provider overrides, global backup behavior, and all current language policies.
+Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `scripts/build-plugin.mjs`.
 
-## Phase 6: Settings And Persistence
+- [ ] **Step 3: Install the pinned build dependency**
 
-- [ ] Add versioned settings, channel settings, provider credentials, and translation cache stores.
-- [ ] Move all compatibility reads into one migration entry point.
-- [ ] Preserve channel/global ownership defined in `docs/settings.md`.
-- [ ] Remove obsolete persistent keys only after a verified migration release.
-- [ ] Route channel popout and BetterDiscord settings through the same typed settings interfaces.
+Run:
 
-**Exit gate:** Existing user data migrates without losing credentials, languages, channel enablement, or provider overrides.
+```powershell
+npm install --save-dev esbuild@0.28.1
+```
 
-## Phase 7: Legacy Removal And Repository Cleanup
+Expected: `package.json` gains `devDependencies.esbuild` and npm creates `package-lock.json`.
 
-- [ ] Confirm every legacy runtime responsibility has one replacement owner.
-- [ ] Delete superseded inline implementations and compatibility wrappers.
-- [ ] Consolidate duplicated test setup while retaining behavior coverage.
-- [ ] Enforce module and generated-artifact size guardrails.
-- [ ] Confirm release output contains no tests, debug journal, local configuration, or deployment data.
-- [ ] Update canonical documentation to describe the implemented architecture rather than the migration.
+- [ ] **Step 4: Create canonical plugin metadata**
 
-**Exit gate:** Production source is modular, the generated plugin remains below the agreed size guardrail, and no duplicate runtime path remains.
+Create `src/plugin/metadata.json`:
 
-## Required Verification For Every Phase
+```json
+{
+  "name": "DiscordAITranslator",
+  "author": "ROOT94",
+  "authorLink": "https://github.com/ROOT94-MAX/DiscordAITranslator",
+  "version": "0.3.36",
+  "description": "BetterDiscord translation plugin with channel-aware automatic translation and AI providers.",
+  "source": "https://github.com/ROOT94-MAX/DiscordAITranslator",
+  "license": "GPL-2.0"
+}
+```
 
-1. Focused red-green regression tests.
-2. `npm run verify` with zero failures.
-3. Standards and specification review with no unresolved P0-P2 finding.
-4. Timestamped backup before BetterDiscord deployment.
-5. Repository and installed SHA-256 equality.
-6. Renderer log inspection after hot reload.
-7. The phase-specific DiscordPTB smoke checks.
-8. One small commit containing only that phase.
+Create `.gitignore`:
 
-## DiscordPTB Smoke Gate
+```gitignore
+node_modules/
+coverage/
+DiscordAITranslator.debug.plugin.js
+*.backup.plugin.js
+*.bak
+```
 
-- [ ] Translation appears without hovering the message.
-- [ ] Translated text and translated decoration appear together.
-- [ ] Disabling the current channel restores original messages, replies, embeds, and title.
-- [ ] The current-channel switch does not affect another channel.
-- [ ] One historical job reveals all validated translations in one visible commit.
-- [ ] Live messages translate while a historical job is running.
-- [ ] Typing remains uninterrupted.
-- [ ] Scrolling and dragging remain under user control.
-- [ ] Scroll-loaded messages form the next bounded job.
-- [ ] Short foreign words translate when source and target differ.
-- [ ] Edited received and sent messages use the current immutable source.
-- [ ] Stop and reload restore originals and reject late callbacks.
-- [ ] Every missing translation has a visible pending, skipped, failed, or cancelled reason.
+- [ ] **Step 5: Move the current runtime without changing its implementation**
 
-No release or phase is complete while its required smoke checks remain unverified.
+Run:
+
+```powershell
+New-Item -ItemType Directory -Force src/legacy, src/plugin, scripts | Out-Null
+git mv DiscordAITranslator.plugin.js src/legacy/runtime.js
+```
+
+Use `apply_patch` to remove only the leading BetterDiscord metadata comment from `src/legacy/runtime.js`. Do not format or refactor the moved runtime in this task.
+
+Create `src/plugin/index.js`:
+
+```js
+module.exports = require("../legacy/runtime");
+```
+
+- [ ] **Step 6: Implement the deterministic build script**
+
+Create `scripts/build-plugin.mjs`:
+
+```js
+import fs from "node:fs";
+import path from "node:path";
+import {fileURLToPath, pathToFileURL} from "node:url";
+import {build} from "esbuild";
+
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(scriptDirectory, "..");
+const outputPath = path.join(root, "DiscordAITranslator.plugin.js");
+
+function createMetadataBanner(metadata) {
+	return [
+		"/**",
+		` * @name ${metadata.name}`,
+		` * @author ${metadata.author}`,
+		` * @authorLink ${metadata.authorLink}`,
+		` * @version ${metadata.version}`,
+		` * @description ${metadata.description}`,
+		` * @source ${metadata.source}`,
+		` * @license ${metadata.license}`,
+		" */",
+		""
+	].join("\n");
+}
+
+export async function createPluginBundle({debug = false} = {}) {
+	const metadata = JSON.parse(fs.readFileSync(path.join(root, "src/plugin/metadata.json"), "utf8"));
+	const result = await build({
+		entryPoints: [path.join(root, "src/plugin/index.js")],
+		bundle: true,
+		platform: "node",
+		format: "cjs",
+		target: "es2020",
+		charset: "utf8",
+		legalComments: "none",
+		minify: false,
+		minifySyntax: true,
+		sourcemap: false,
+		define: {__TRANSLATOR_DISPLAY_DEBUG__: debug ? "true" : "false"},
+		write: false
+	});
+	const runtime = result.outputFiles[0].text.replace(/\r\n/g, "\n").trimStart();
+	return `${createMetadataBanner(metadata)}${runtime.trimEnd()}\n`;
+}
+
+export async function writePluginBundle({check = false, debug = false} = {}) {
+	const generated = await createPluginBundle({debug});
+	const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8") : "";
+	if (check && current !== generated) throw new Error("DiscordAITranslator.plugin.js is out of date. Run npm run build.");
+	if (!check && !debug && current !== generated) fs.writeFileSync(outputPath, generated);
+	return generated;
+}
+
+const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+if (isMain) {
+	const debug = process.argv.includes("--debug");
+	const generated = await writePluginBundle({check: process.argv.includes("--check"), debug});
+	if (debug) process.stdout.write(generated);
+}
+```
+
+- [ ] **Step 7: Update package scripts**
+
+Set `package.json` scripts to:
+
+```json
+{
+  "build": "node scripts/build-plugin.mjs",
+  "build:debug": "node scripts/build-plugin.mjs --debug > DiscordAITranslator.debug.plugin.js",
+  "build:check": "node scripts/build-plugin.mjs --check",
+  "check": "node --check DiscordAITranslator.plugin.js",
+  "test": "node --test",
+  "verify": "npm run build:check && npm run check && npm test"
+}
+```
+
+- [ ] **Step 8: Generate the root plugin and run the build contract**
+
+Run:
+
+```powershell
+npm run build
+node --test tests/build-contract.test.js
+```
+
+Expected: both build-contract tests PASS.
+
+- [ ] **Step 9: Run the complete existing suite**
+
+Run:
+
+```powershell
+npm run verify
+```
+
+Expected: the existing 203 tests plus the 2 build tests PASS. Any behavior failure means the build migration changed runtime semantics and must be fixed before continuing.
+
+- [ ] **Step 10: Commit the build skeleton**
+
+```powershell
+git add .gitignore package.json package-lock.json scripts src DiscordAITranslator.plugin.js tests/build-contract.test.js
+git commit -m "build: generate plugin from modular source"
+```
+
+## Task 2: Add The Message State Store
+
+**Files:**
+- Create: `src/display/message-state-store.js`
+- Create: `tests/display/message-state-store.test.js`
+
+- [ ] **Step 1: Write failing state ownership tests**
+
+Create `tests/display/message-state-store.test.js`:
+
+```js
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {createMessageStateStore} = require("../../src/display/message-state-store");
+
+function snapshot(messageId, channelId, content, generation = 1) {
+	return {
+		messageId,
+		channelId,
+		generation,
+		sourceSignature: `${channelId}:${messageId}:${content}`,
+		source: {content, embeds: [{description: `${content} embed`}]}
+	};
+}
+
+function translated(messageId, channelId, content, generation = 1, origin = "automatic") {
+	return {messageId, channelId, generation, origin, status: "translated", translation: {content}};
+}
+
+test("translation commits never overwrite the immutable source", () => {
+	const store = createMessageStateStore();
+	const source = snapshot("m1", "c1", "Hello");
+	store.captureSource(source);
+	source.source.content = "mutated outside";
+	source.source.embeds[0].description = "mutated embed";
+	store.commitResult(translated("m1", "c1", "你好"));
+
+	const state = store.getDisplayState("m1");
+	assert.equal(state.source.content, "Hello");
+	assert.equal(state.source.embeds[0].description, "Hello embed");
+	assert.equal(state.translation.content, "你好");
+	assert.equal(state.status, "translated");
+	assert.equal(Object.isFrozen(state.source), true);
+});
+
+test("an edited source replaces stale display state", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Before edit"));
+	store.commitResult(translated("m1", "c1", "旧译文"));
+	const translatedRevision = store.getDisplayState("m1").revision;
+
+	store.captureSource(snapshot("m1", "c1", "After edit"));
+
+	const state = store.getDisplayState("m1");
+	assert.equal(state.source.content, "After edit");
+	assert.equal(state.translation, null);
+	assert.equal(state.status, "idle");
+	assert.equal(state.revision > translatedRevision, true);
+});
+
+test("restoreChannel changes only automatic records in that channel", () => {
+	const store = createMessageStateStore();
+	for (const [messageId, channelId, origin] of [["auto-a", "c1", "automatic"], ["manual-a", "c1", "manual"], ["auto-b", "c2", "automatic"]]) {
+		store.captureSource(snapshot(messageId, channelId, `${messageId} source`));
+		store.commitResult(translated(messageId, channelId, `${messageId} translated`, 1, origin));
+	}
+
+	const restored = store.restoreChannel("c1");
+
+	assert.deepEqual(restored.map(record => record.messageId), ["auto-a"]);
+	assert.equal(store.getDisplayState("auto-a").translation, null);
+	assert.equal(store.getDisplayState("auto-a").reason, "channel-disabled");
+	assert.equal(store.getDisplayState("manual-a").translation.content, "manual-a translated");
+	assert.equal(store.getDisplayState("auto-b").translation.content, "auto-b translated");
+});
+
+test("a stale generation cannot commit into a newer channel session", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.setChannelGeneration("c1", 2);
+
+	assert.equal(store.commitResult(translated("m1", "c1", "stale")), null);
+	assert.equal(store.getDisplayState("m1").status, "idle");
+});
+
+test("commitBatch is all-or-nothing when one result is stale", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "One"));
+	store.captureSource(snapshot("m2", "c1", "Two"));
+
+	const outcome = store.commitBatch([
+		translated("m1", "c1", "一"),
+		translated("m2", "c1", "二", 0)
+	]);
+
+	assert.deepEqual(outcome.committed, []);
+	assert.deepEqual(outcome.rejected.map(result => result.messageId), ["m2"]);
+	assert.equal(store.getDisplayState("m1").status, "idle");
+	assert.equal(store.getDisplayState("m2").status, "idle");
+});
+
+test("render acknowledgement does not create a new display revision", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(translated("m1", "c1", "你好"));
+	const revision = store.getDisplayState("m1").revision;
+
+	store.markRenderOutcome({confirmedIds: [], missingIds: ["m1"]});
+	assert.equal(store.getDisplayState("m1").revision, revision);
+	assert.equal(store.getDisplayState("m1").renderStatus, "unconfirmed");
+	assert.equal(store.getDisplayState("m1").renderReason, "render-unconfirmed");
+
+	store.markRenderOutcome({confirmedIds: ["m1"], missingIds: []});
+	assert.equal(store.getDisplayState("m1").revision, revision);
+	assert.equal(store.getDisplayState("m1").renderStatus, "confirmed");
+	assert.equal(store.getDisplayState("m1").renderReason, null);
+});
+```
+
+- [ ] **Step 2: Verify the test fails for the missing module**
+
+Run:
+
+```powershell
+node --test tests/display/message-state-store.test.js
+```
+
+Expected: FAIL with `MODULE_NOT_FOUND`.
+
+- [ ] **Step 3: Implement the store as a deep module**
+
+Create `src/display/message-state-store.js` with the API exercised above. The implementation must use these exact exports and record fields:
+
+```js
+const MESSAGE_STATUSES = Object.freeze({
+	IDLE: "idle",
+	PENDING: "pending",
+	TRANSLATING: "translating",
+	TRANSLATED: "translated",
+	SKIPPED: "skipped",
+	FAILED: "failed",
+	CANCELLED: "cancelled"
+});
+
+const RENDER_STATUSES = Object.freeze({
+	IDLE: "idle",
+	PENDING: "pending",
+	CONFIRMED: "confirmed",
+	UNCONFIRMED: "unconfirmed"
+});
+
+function freezeValue(value) {
+	if (Array.isArray(value)) return Object.freeze(value.map(freezeValue));
+	if (!value || typeof value !== "object") return value;
+	return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeValue(item)])));
+}
+
+function createMessageStateStore() {
+	const records = new Map();
+	const channelMessageIds = new Map();
+	const channelGenerations = new Map();
+	let revision = 0;
+
+	function indexRecord(record) {
+		if (!channelMessageIds.has(record.channelId)) channelMessageIds.set(record.channelId, new Set());
+		channelMessageIds.get(record.channelId).add(record.messageId);
+	}
+
+	function unindexRecord(record) {
+		const ids = channelMessageIds.get(record.channelId);
+		if (!ids) return;
+		ids.delete(record.messageId);
+		if (!ids.size) channelMessageIds.delete(record.channelId);
+	}
+
+	function update(messageId, changes, {advanceRevision = true} = {}) {
+		const current = records.get(String(messageId));
+		if (!current) return null;
+		const next = Object.freeze({...current, ...changes, revision: advanceRevision ? ++revision : current.revision});
+		records.set(next.messageId, next);
+		return next;
+	}
+
+	function validates(result) {
+		const messageId = String(result && result.messageId || "");
+		const channelId = String(result && result.channelId || "");
+		const record = records.get(messageId);
+		const status = result && (result.status || MESSAGE_STATUSES.TRANSLATED);
+		const validStatus = [MESSAGE_STATUSES.TRANSLATED, MESSAGE_STATUSES.SKIPPED, MESSAGE_STATUSES.FAILED, MESSAGE_STATUSES.CANCELLED].includes(status);
+		const validTranslation = status !== MESSAGE_STATUSES.TRANSLATED || !!(result.translation && typeof result.translation.content === "string");
+		return !!record && validStatus && validTranslation && record.channelId === channelId && record.generation === result.generation && channelGenerations.get(channelId) === result.generation;
+	}
+
+	function applyResult(result) {
+		const status = result.status || MESSAGE_STATUSES.TRANSLATED;
+		const translated = status === MESSAGE_STATUSES.TRANSLATED;
+		return update(result.messageId, {
+			status,
+			translation: translated ? freezeValue(result.translation) : null,
+			reason: translated ? null : String(result.reason || status),
+			origin: result.origin || "automatic",
+			requestIdentity: null,
+			renderStatus: RENDER_STATUSES.PENDING,
+			renderReason: null
+		});
+	}
+
+	function restoreRecords(recordsToRestore, reason) {
+		return recordsToRestore.filter(record => record && record.origin === "automatic" && record.status !== MESSAGE_STATUSES.CANCELLED).map(record => update(record.messageId, {
+			status: MESSAGE_STATUSES.CANCELLED,
+			translation: null,
+			reason,
+			requestIdentity: null,
+			renderStatus: RENDER_STATUSES.PENDING,
+			renderReason: null
+		}));
+	}
+
+	function listChannel(channelId) {
+		return [...channelMessageIds.get(String(channelId)) || []].map(messageId => records.get(messageId)).filter(Boolean);
+	}
+
+	return Object.freeze({
+		captureSource(snapshot) {
+			const messageId = String(snapshot.messageId);
+			const channelId = String(snapshot.channelId);
+			const currentGeneration = channelGenerations.get(channelId);
+			if (currentGeneration !== undefined && currentGeneration !== snapshot.generation) return null;
+			const current = records.get(messageId);
+			if (current && current.channelId === channelId && current.generation === snapshot.generation && current.sourceSignature === snapshot.sourceSignature) return current;
+			if (current) unindexRecord(current);
+			const record = Object.freeze({
+				messageId,
+				channelId,
+				generation: snapshot.generation,
+				sourceSignature: String(snapshot.sourceSignature || ""),
+				source: freezeValue(snapshot.source || {}),
+				status: MESSAGE_STATUSES.IDLE,
+				translation: null,
+				reason: null,
+				origin: null,
+				requestIdentity: null,
+				renderStatus: RENDER_STATUSES.IDLE,
+				renderReason: null,
+				revision: ++revision
+			});
+			records.set(messageId, record);
+			indexRecord(record);
+			if (currentGeneration === undefined) channelGenerations.set(channelId, snapshot.generation);
+			return record;
+		},
+		setChannelGeneration(channelId, generation) {channelGenerations.set(String(channelId), generation);},
+		getChannelGeneration(channelId) {return channelGenerations.get(String(channelId));},
+		getDisplayState(messageId) {return records.get(String(messageId)) || null;},
+		listChannel,
+		markPending(request) {
+			if (!validates(request)) return null;
+			return update(request.messageId, {status: MESSAGE_STATUSES.PENDING, translation: null, reason: null, origin: request.origin || "automatic", requestIdentity: request.requestIdentity || null, renderStatus: RENDER_STATUSES.PENDING, renderReason: null});
+		},
+		markTranslating(request) {
+			if (!validates(request)) return null;
+			return update(request.messageId, {status: MESSAGE_STATUSES.TRANSLATING, reason: null, requestIdentity: request.requestIdentity || null, renderStatus: RENDER_STATUSES.PENDING, renderReason: null});
+		},
+		commitResult(result) {return validates(result) ? applyResult(result) : null;},
+		commitBatch(results) {
+			const channelIds = new Set(results.map(result => String(result && result.channelId || "")));
+			const rejected = channelIds.size === 1 ? results.filter(result => !validates(result)) : results.slice();
+			if (rejected.length) return {committed: [], rejected};
+			return {committed: results.map(applyResult), rejected: []};
+		},
+		restoreChannel(channelId, reason = "channel-disabled") {return restoreRecords(listChannel(channelId), reason);},
+		restoreAll(reason = "plugin-stopped") {return restoreRecords([...records.values()], reason);},
+		markRenderOutcome({confirmedIds = [], missingIds = []}) {
+			for (const messageId of confirmedIds) update(messageId, {renderStatus: RENDER_STATUSES.CONFIRMED, renderReason: null}, {advanceRevision: false});
+			for (const messageId of missingIds) update(messageId, {renderStatus: RENDER_STATUSES.UNCONFIRMED, renderReason: "render-unconfirmed"}, {advanceRevision: false});
+		}
+	});
+}
+
+module.exports = {MESSAGE_STATUSES, RENDER_STATUSES, createMessageStateStore};
+```
+
+Do not expose either internal map. `markRenderOutcome` must not advance `revision`; the DOM marker acknowledges the revision that was actually requested.
+
+- [ ] **Step 4: Run the focused test**
+
+```powershell
+node --test tests/display/message-state-store.test.js
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Run the complete suite and commit**
+
+```powershell
+npm run verify
+git add src/display/message-state-store.js tests/display/message-state-store.test.js
+git commit -m "refactor: add received message state store"
+```
+
+## Task 3: Add The Translation Display Controller
+
+**Files:**
+- Create: `src/display/translation-display-controller.js`
+- Create: `tests/display/translation-display-controller.test.js`
+
+- [ ] **Step 1: Add failing controller tests**
+
+Create `tests/display/translation-display-controller.test.js`:
+
+```js
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {createMessageStateStore} = require("../../src/display/message-state-store");
+const {createTranslationDisplayController} = require("../../src/display/translation-display-controller");
+
+function capture(store, messageId, channelId = "c1") {
+	store.captureSource({messageId, channelId, generation: 1, sourceSignature: `${channelId}:${messageId}`, source: {content: `${messageId} source`, embeds: []}});
+}
+
+function result(messageId, channelId = "c1", origin = "automatic") {
+	return {messageId, channelId, generation: 1, origin, status: "translated", translation: {content: `${messageId} translated`}};
+}
+
+function createHarness(renderOutcome) {
+	const refreshes = [];
+	const store = createMessageStateStore();
+	const renderAdapter = {
+		async refreshMessages(request) {
+			refreshes.push(request);
+			return renderOutcome ? renderOutcome(request) : {confirmedIds: request.messageIds, missingIds: [], fallbackUsed: false};
+		}
+	};
+	return {store, refreshes, controller: createTranslationDisplayController({store, renderAdapter})};
+}
+
+test("one result refreshes text and decoration under one revision", async () => {
+	const {store, refreshes, controller} = createHarness();
+	capture(store, "m1");
+
+	await controller.commitMessageResult(result("m1"));
+
+	assert.equal(refreshes.length, 1);
+	assert.deepEqual(refreshes[0].messageIds, ["m1"]);
+	assert.equal(refreshes[0].views[0].content, "m1 translated");
+	assert.equal(refreshes[0].views[0].translated, true);
+	assert.equal(refreshes[0].views[0].showWatermark, true);
+	assert.equal(refreshes[0].views[0].revision, store.getDisplayState("m1").revision);
+});
+
+test("one historical batch creates one refresh request", async () => {
+	const {store, refreshes, controller} = createHarness();
+	for (const messageId of ["m1", "m2", "m3"]) capture(store, messageId);
+
+	await controller.commitHistoricalBatch([result("m1"), result("m2"), result("m3")]);
+
+	assert.equal(refreshes.length, 1);
+	assert.deepEqual(refreshes[0].messageIds, ["m1", "m2", "m3"]);
+	assert.deepEqual(refreshes[0].views.map(view => view.content), ["m1 translated", "m2 translated", "m3 translated"]);
+});
+
+test("restoreChannel sends original automatic content in one request", async () => {
+	const {store, refreshes, controller} = createHarness();
+	capture(store, "automatic");
+	capture(store, "manual");
+	store.commitResult(result("automatic"));
+	store.commitResult(result("manual", "c1", "manual"));
+	refreshes.length = 0;
+
+	await controller.restoreChannel("c1");
+
+	assert.equal(refreshes.length, 1);
+	assert.deepEqual(refreshes[0].messageIds, ["automatic"]);
+	assert.equal(refreshes[0].views[0].content, "automatic source");
+	assert.equal(refreshes[0].views[0].translated, false);
+	assert.equal(refreshes[0].views[0].showWatermark, false);
+	assert.equal(controller.getDisplayView("manual").content, "manual translated");
+});
+
+test("missing render acknowledgement remains inspectable without changing the display revision", async () => {
+	const {store, controller} = createHarness(request => ({confirmedIds: [], missingIds: request.messageIds, fallbackUsed: true}));
+	capture(store, "m1");
+
+	await controller.commitMessageResult(result("m1"));
+
+	const view = controller.getDisplayView("m1");
+	assert.equal(view.renderStatus, "unconfirmed");
+	assert.equal(view.renderReason, "render-unconfirmed");
+	assert.equal(view.translated, true);
+});
+```
+
+- [ ] **Step 2: Verify the controller test fails**
+
+```powershell
+node --test tests/display/translation-display-controller.test.js
+```
+
+Expected: FAIL with `MODULE_NOT_FOUND`.
+
+- [ ] **Step 3: Implement the controller**
+
+Create `src/display/translation-display-controller.js`:
+
+```js
+function createDisplayView(state) {
+	if (!state) return null;
+	const translated = state.status === "translated" && !!state.translation;
+	return Object.freeze({
+		messageId: state.messageId,
+		channelId: state.channelId,
+		revision: state.revision,
+		status: state.status,
+		content: translated ? String(state.translation.content || "") : String(state.source.content || ""),
+		translated,
+		showWatermark: translated,
+		showLoading: state.status === "pending" || state.status === "translating",
+		reason: state.reason,
+		renderStatus: state.renderStatus,
+		renderReason: state.renderReason,
+		translation: state.translation,
+		source: state.source,
+		origin: state.origin
+	});
+}
+
+function createTranslationDisplayController({store, renderAdapter}) {
+	let transactionSequence = 0;
+
+	async function refreshRecords(records) {
+		const views = records.map(record => createDisplayView(store.getDisplayState(record.messageId))).filter(Boolean);
+		if (!views.length) return {confirmedIds: [], missingIds: [], fallbackUsed: false};
+		const channelIds = new Set(views.map(view => view.channelId));
+		if (channelIds.size !== 1) throw new Error("A display transaction cannot span channels");
+		const outcome = await renderAdapter.refreshMessages({
+			transactionId: ++transactionSequence,
+			channelId: views[0].channelId,
+			messageIds: views.map(view => view.messageId),
+			views
+		});
+		store.markRenderOutcome(outcome);
+		return outcome;
+	}
+
+	return Object.freeze({
+		getDisplayView(messageId) {return createDisplayView(store.getDisplayState(messageId));},
+		async renderMessage(messageId) {
+			const record = store.getDisplayState(messageId);
+			return record ? refreshRecords([record]) : {confirmedIds: [], missingIds: [], fallbackUsed: false};
+		},
+		async markPending(request, {refresh = true} = {}) {
+			const record = store.markPending(request);
+			if (!record) return {confirmedIds: [], missingIds: [], fallbackUsed: false, rejectedIds: [String(request.messageId)]};
+			return refresh ? refreshRecords([record]) : {confirmedIds: [], missingIds: [], fallbackUsed: false, deferredIds: [record.messageId]};
+		},
+		async commitMessageResult(result) {
+			const record = store.commitResult(result);
+			return record ? refreshRecords([record]) : {confirmedIds: [], missingIds: [], fallbackUsed: false, rejectedIds: [String(result.messageId)]};
+		},
+		async commitHistoricalBatch(results) {
+			const outcome = store.commitBatch(results);
+			if (!outcome.committed.length) return {confirmedIds: [], missingIds: [], fallbackUsed: false, rejectedIds: outcome.rejected.map(result => String(result.messageId))};
+			return refreshRecords(outcome.committed);
+		},
+		async restoreChannel(channelId) {
+			return refreshRecords(store.restoreChannel(channelId));
+		},
+		async restoreAll({refresh = true} = {}) {
+			const records = store.restoreAll();
+			if (!refresh) return records;
+			const byChannel = new Map();
+			for (const record of records) {
+				if (!byChannel.has(record.channelId)) byChannel.set(record.channelId, []);
+				byChannel.get(record.channelId).push(record);
+			}
+			return Promise.all([...byChannel.values()].map(refreshRecords));
+		}
+	});
+}
+
+module.exports = {createDisplayView, createTranslationDisplayController};
+```
+
+- [ ] **Step 4: Run focused and full tests**
+
+```powershell
+node --test tests/display/message-state-store.test.js tests/display/translation-display-controller.test.js
+npm run verify
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add src/display tests/display
+git commit -m "refactor: add translation display controller"
+```
+
+## Task 4: Add The Discord Render Adapter And Render Acknowledgement
+
+**Files:**
+- Create: `src/display/discord-render-adapter.js`
+- Create: `tests/display/discord-render-adapter.test.js`
+
+- [ ] **Step 1: Write failing adapter tests**
+
+Create `tests/display/discord-render-adapter.test.js`:
+
+```js
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {createDiscordRenderAdapter} = require("../../src/display/discord-render-adapter");
+
+function createHarness({confirmDirectly = true, userScrollDuringUpdate = false} = {}) {
+	const visibleRevisions = new Map();
+	const messageNodes = new Map(["m1", "m2"].map(messageId => [messageId, {
+		querySelector(selector) {
+			const match = selector.match(/data-translator-revision="(\d+)"/);
+			return match && visibleRevisions.get(messageId) === Number(match[1]) ? {} : null;
+		}
+	}]));
+	const scroller = {scrollTop: 240};
+	const owner = {props: {channelStream: []}};
+	const calls = {forceUpdate: 0, rerenderAll: 0, restored: 0};
+	let userIntentSequence = 7;
+	const document = {
+		querySelector(selector) {
+			if (selector === ".messages-scroller") return scroller;
+			const match = selector.match(/m[12]/);
+			return match ? messageNodes.get(match[0]) : null;
+		}
+	};
+	const BDFDB = {
+		dotCN: {messagesscroller: ".messages-scroller"},
+		ReactUtils: {
+			findOwner(_node, config) {
+				assert.equal(config.filter(owner), true);
+				return owner;
+			},
+			forceUpdate() {
+				calls.forceUpdate++;
+				if (userScrollDuringUpdate) userIntentSequence++;
+				if (confirmDirectly) {
+					visibleRevisions.set("m1", 11);
+					visibleRevisions.set("m2", 12);
+				}
+			}
+		},
+		MessageUtils: {
+			rerenderAll(instant) {
+				assert.equal(instant, true);
+				calls.rerenderAll++;
+				visibleRevisions.set("m1", 11);
+				visibleRevisions.set("m2", 12);
+			}
+		}
+	};
+	const adapter = createDiscordRenderAdapter({
+		BDFDB,
+		document,
+		requestAnimationFrame: callback => callback(),
+		setTimeout: callback => callback(),
+		getUserScrollIntentSequence: () => userIntentSequence,
+		captureScrollState: () => ({scrollTop: scroller.scrollTop}),
+		restoreScrollState: state => {
+			calls.restored++;
+			scroller.scrollTop = state.scrollTop;
+		}
+	});
+	return {adapter, calls, scroller};
+}
+
+const request = {
+	transactionId: 1,
+	channelId: "c1",
+	messageIds: ["m1", "m2"],
+	views: [{messageId: "m1", revision: 11}, {messageId: "m2", revision: 12}]
+};
+
+test("refreshMessages forces the channel stream owner and confirms exact revisions", async () => {
+	const {adapter, calls} = createHarness();
+	const outcome = await adapter.refreshMessages(request);
+
+	assert.equal(calls.forceUpdate, 1);
+	assert.equal(calls.rerenderAll, 0);
+	assert.equal(calls.restored, 1);
+	assert.deepEqual(outcome.confirmedIds, ["m1", "m2"]);
+	assert.deepEqual(outcome.missingIds, []);
+	assert.equal(outcome.fallbackUsed, false);
+});
+
+test("a missing direct confirmation uses one full-list fallback", async () => {
+	const {adapter, calls} = createHarness({confirmDirectly: false});
+	const outcome = await adapter.refreshMessages(request);
+
+	assert.equal(calls.forceUpdate, 1);
+	assert.equal(calls.rerenderAll, 1);
+	assert.equal(outcome.fallbackUsed, true);
+	assert.deepEqual(outcome.confirmedIds, ["m1", "m2"]);
+});
+
+test("a user scroll after capture prevents anchor correction", async () => {
+	const {adapter, calls, scroller} = createHarness({userScrollDuringUpdate: true});
+	scroller.scrollTop = 700;
+	await adapter.refreshMessages(request);
+
+	assert.equal(calls.restored, 0);
+	assert.equal(scroller.scrollTop, 700);
+});
+```
+
+- [ ] **Step 2: Verify the tests fail**
+
+```powershell
+node --test tests/display/discord-render-adapter.test.js
+```
+
+Expected: FAIL with `MODULE_NOT_FOUND`.
+
+- [ ] **Step 3: Implement exact owner lookup instead of component-name scanning**
+
+Create `src/display/discord-render-adapter.js` with dependency injection. Reuse the runtime's existing scroll capture and restoration functions instead of duplicating anchor logic:
+
+```js
+function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, setTimeout, getUserScrollIntentSequence, captureScrollState, restoreScrollState}) {
+	function findMessageElement(messageId) {
+		const escapedId = String(messageId).replace(/(["\\])/g, "\\$1");
+		return document.querySelector(`[id$="-${escapedId}"], [data-list-item-id$="-${escapedId}"], [data-list-item-id*="${escapedId}"]`);
+	}
+
+	function findStreamOwner(scroller) {
+		return BDFDB.ReactUtils.findOwner(scroller, {
+			up: true,
+			unlimited: true,
+			filter: instance => {
+				const props = instance && (instance.stateNode && instance.stateNode.props || instance.props || instance.memoizedProps);
+				return !!(props && Array.isArray(props.channelStream));
+			}
+		});
+	}
+
+	function waitForPaint() {
+		return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+	}
+
+	function waitForFallbackPaint() {
+		return new Promise(resolve => setTimeout(() => waitForPaint().then(resolve), 0));
+	}
+
+	function confirmViews(views) {
+		return views.filter(view => {
+			const element = findMessageElement(view.messageId);
+			return !!(element && element.querySelector(`[data-translator-revision="${view.revision}"]`));
+		}).map(view => view.messageId);
+	}
+
+	return {
+		async refreshMessages({messageIds, views}) {
+			const scroller = document.querySelector(BDFDB.dotCN.messagesscroller);
+			const intentSequence = getUserScrollIntentSequence();
+			const scrollState = scroller ? captureScrollState() : null;
+			const owner = scroller && findStreamOwner(scroller);
+			if (owner) BDFDB.ReactUtils.forceUpdate(owner);
+			await waitForPaint();
+			let confirmedIds = confirmViews(views);
+			let fallbackUsed = false;
+			if (confirmedIds.length !== messageIds.length) {
+				fallbackUsed = true;
+				BDFDB.MessageUtils.rerenderAll(true);
+				await waitForFallbackPaint();
+				confirmedIds = confirmViews(views);
+			}
+			if (scrollState && intentSequence === getUserScrollIntentSequence()) restoreScrollState(scrollState);
+			return {confirmedIds, fallbackUsed, missingIds: messageIds.filter(id => !confirmedIds.includes(id))};
+		}
+	};
+}
+
+module.exports = {createDiscordRenderAdapter};
+```
+
+Do not call `PatchUtils.forceAllUpdates` from this adapter. The direct path uses the actual channel-stream owner. The full-list rerender is a correctness fallback and must run at most once per display transaction.
+
+- [ ] **Step 4: Run the adapter tests and full verification**
+
+```powershell
+node --test tests/display/discord-render-adapter.test.js
+npm run verify
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add src/display/discord-render-adapter.js tests/display/discord-render-adapter.test.js
+git commit -m "refactor: add acknowledged Discord render adapter"
+```
+
+## Task 5: Wire The New Display Runtime Into The Generated Plugin
+
+**Files:**
+- Create: `src/display/display-runtime.js`
+- Modify: `src/legacy/runtime.js`
+- Modify: `tests/helpers/createPluginInstance.js`
+- Create: `tests/helpers/createReceivedDisplayHarness.js`
+- Create: `tests/integration/received-display-runtime.test.js`
+
+- [ ] **Step 1: Write failing integration tests for one authoritative display view**
+
+Create `tests/helpers/createReceivedDisplayHarness.js`:
+
+```js
+const {createPluginInstance} = require("./createPluginInstance");
+
+function createHarness({confirmDirectly = true, confirmAfterFallback = true} = {}) {
+	const originalDocument = global.document;
+	const originalRequestAnimationFrame = global.requestAnimationFrame;
+	const calls = {forceUpdate: 0, rerenderAll: 0};
+	let confirmed = false;
+	const messageElement = {querySelector: () => confirmed ? {} : null};
+	const scroller = {scrollTop: 100, scrollHeight: 1000, clientHeight: 400};
+	global.document = {
+		querySelector(selector) {
+			if (selector === ".messages-scroller") return scroller;
+			if (selector.includes("message-")) return messageElement;
+			return null;
+		}
+	};
+	global.requestAnimationFrame = callback => callback();
+	const plugin = createPluginInstance({
+		callSetLanguages: false,
+		bdfdb: {
+			dotCN: {messagesscroller: ".messages-scroller"},
+			disCN: {messagetimestamp: "timestamp", messagetimestampinline: "inline", _translatortranslated: "translated", messageedited: "edited"},
+			DOMUtils: {formatClassName: (...names) => names.filter(Boolean).join(" ")},
+			LibraryComponents: {TooltipContainer: "TooltipContainer"},
+			ReactUtils: {
+				createElement: (type, props) => ({type, key: props && props.key, props: props || {}}),
+				findOwner: () => ({props: {channelStream: []}}),
+				forceUpdate: () => {calls.forceUpdate++; if (confirmDirectly) confirmed = true;}
+			},
+			MessageUtils: {rerenderAll: () => {calls.rerenderAll++; if (confirmAfterFallback) confirmed = true;}}
+		}
+	});
+	plugin.settings.general.highlightTranslatedMessages = true;
+	plugin.labels.translated_watermark = "Translated";
+	plugin.getTranslatedTextColor = () => "#12a594";
+	plugin.shouldProtectWrappedTextForPlace = () => false;
+	return {
+		plugin,
+		calls,
+		restore() {
+			global.document = originalDocument;
+			global.requestAnimationFrame = originalRequestAnimationFrame;
+		}
+	};
+}
+
+function sourceSnapshot() {
+	return {messageId: "message-1", channelId: "channel-1", generation: 1, sourceSignature: "signature-1", source: {content: "Original", embeds: []}};
+}
+
+function translatedResult() {
+	return {messageId: "message-1", channelId: "channel-1", generation: 1, origin: "automatic", status: "translated", translation: {content: "译文", input: {id: "en"}, output: {id: "zh-CN"}}};
+}
+
+module.exports = {createHarness, sourceSnapshot, translatedResult};
+```
+
+Create `tests/integration/received-display-runtime.test.js`:
+
+```js
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {createHarness, sourceSnapshot, translatedResult} = require("../helpers/createReceivedDisplayHarness");
+
+test("Messages and MessageContent read the same translated revision", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(sourceSnapshot());
+		await plugin.commitReceivedDisplayResult(translatedResult());
+		const view = plugin.getReceivedDisplayView("message-1");
+		const stream = {content: {id: "message-1", channel_id: "channel-1", content: "Original", embeds: []}};
+		plugin.applyReceivedDisplayViewToStream(stream, view);
+		const event = {instance: {props: {message: stream.content}}, returnvalue: {props: {children: [], className: "message", style: {}}}};
+		plugin.applyReceivedDisplayViewToContent(event, view);
+
+		assert.equal(stream.content.content, "译文");
+		assert.equal(event.returnvalue.props["data-translator-revision"], String(view.revision));
+		assert.match(event.returnvalue.props.className, /translator-translated-message/);
+		assert.equal(event.returnvalue.props.style["--translator-text-color"], "#12a594");
+		assert.equal(event.returnvalue.props.children.some(child => child && child.key === "translator-translated-watermark"), true);
+	}
+	finally {harness.restore();}
+});
+
+test("a translated result cannot produce text without translated decoration", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(sourceSnapshot());
+		await plugin.commitReceivedDisplayResult(translatedResult());
+		const view = plugin.getReceivedDisplayView("message-1");
+		const stream = {content: {id: "message-1", channel_id: "channel-1", content: "Original", embeds: []}};
+		const event = {instance: {props: {message: stream.content}}, returnvalue: {props: {children: [], className: "", style: {}}}};
+
+		plugin.applyReceivedDisplayViewToStream(stream, view);
+		plugin.applyReceivedDisplayViewToContent(event, view);
+
+		assert.equal(stream.content.content === "译文", event.returnvalue.props.className.includes("translator-translated-message"));
+		assert.equal(event.returnvalue.props["data-translator-revision"], String(view.revision));
+	}
+	finally {harness.restore();}
+});
+
+test("render acknowledgement failure keeps the record inspectable", async () => {
+	const harness = createHarness({confirmDirectly: false, confirmAfterFallback: false});
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(sourceSnapshot());
+		await plugin.commitReceivedDisplayResult(translatedResult());
+
+		const view = plugin.getReceivedDisplayView("message-1");
+		assert.equal(view.renderStatus, "unconfirmed");
+		assert.equal(view.renderReason, "render-unconfirmed");
+	}
+	finally {harness.restore();}
+});
+
+test("a pending view renders one loading indicator without translated decoration", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(sourceSnapshot());
+		await plugin.markReceivedDisplayPending({messageId: "message-1", channelId: "channel-1", generation: 1, origin: "automatic", requestIdentity: "request-1"}, {refresh: false});
+		const view = plugin.getReceivedDisplayView("message-1");
+		const event = {instance: {props: {message: {id: "message-1", channel_id: "channel-1", content: "Original", embeds: []}}}, returnvalue: {props: {children: [], className: "", style: {}}}};
+
+		plugin.applyReceivedDisplayViewToContent(event, view);
+
+		assert.equal(view.showLoading, true);
+		assert.equal(event.returnvalue.props.children.filter(child => child && child.key === "translator-translation-loading").length, 1);
+		assert.doesNotMatch(event.returnvalue.props.className, /translator-translated-message/);
+	}
+	finally {harness.restore();}
+});
+```
+
+- [ ] **Step 2: Verify the integration tests fail**
+
+```powershell
+npm run build
+node --test tests/integration/received-display-runtime.test.js
+```
+
+Expected: FAIL because the plugin does not expose or use the new display runtime.
+
+- [ ] **Step 3: Create the runtime wiring module**
+
+Create `src/display/display-runtime.js`:
+
+```js
+const {createMessageStateStore} = require("./message-state-store");
+const {createTranslationDisplayController} = require("./translation-display-controller");
+const {createDiscordRenderAdapter} = require("./discord-render-adapter");
+
+function createDisplayRuntime(dependencies) {
+	const store = createMessageStateStore();
+	const renderAdapter = createDiscordRenderAdapter(dependencies);
+	const controller = createTranslationDisplayController({store, renderAdapter});
+	return Object.freeze({
+		captureSource: snapshot => store.captureSource(snapshot),
+		setChannelGeneration: (channelId, generation) => store.setChannelGeneration(channelId, generation),
+		getChannelGeneration: channelId => store.getChannelGeneration(channelId),
+		getDisplayView: messageId => controller.getDisplayView(messageId),
+		markPending: (request, options) => controller.markPending(request, options),
+		commitMessageResult: result => controller.commitMessageResult(result),
+		commitHistoricalBatch: results => controller.commitHistoricalBatch(results),
+		restoreChannel: channelId => controller.restoreChannel(channelId),
+		restoreAll: options => controller.restoreAll(options)
+	});
+}
+
+module.exports = {createDisplayRuntime};
+```
+
+- [ ] **Step 4: Instantiate it once inside the BDFDB runtime closure**
+
+In `src/legacy/runtime.js`, require `createDisplayRuntime` near the logical module declarations. Add `ensureReceivedDisplayRuntime()` on the plugin class so the runtime is created once per plugin instance. Inject `BDFDB`, `document`, `requestAnimationFrame`, `setTimeout`, a getter for `autoTranslationUserScrollIntentSequence`, and callbacks to the existing `captureMessageScrollerState()` and `restoreMessageScrollerState()` methods.
+
+Expose only temporary compatibility methods on the plugin class:
+
+```text
+captureReceivedMessageSource(snapshot)
+markReceivedDisplayPending(request, options)
+commitReceivedDisplayResult(result)
+commitHistoricalReceivedDisplayBatch(results)
+getReceivedDisplayView(messageId)
+restoreReceivedDisplayChannel(channelId)
+restoreAllReceivedDisplay(options)
+setReceivedDisplayGeneration(channelId, generation)
+getReceivedDisplayGeneration(channelId)
+resetReceivedDisplayRuntime()
+applyReceivedDisplayViewToStream(stream, view)
+applyReceivedDisplayViewToContent(event, view)
+```
+
+Do not expose the store object or its maps.
+
+- [ ] **Step 5: Route automatic received commits through the controller**
+
+Update these existing paths in `src/legacy/runtime.js`:
+
+- Source capture and pending-state handling in `checkMessage`
+- Cached received result handling
+- Live `translateMessage` received result handling
+- `getActiveMessageTranslation`
+- `clearDisplayedTranslationState`
+- `clearDisplayedAutoTranslations`
+- `getDisplayedTranslationChannelId`
+
+Historical commit wiring is completed in Task 7. Automatic received records go only to `MessageStateStore`. Manual message translations remain on the legacy path during this milestone and are converted to the same display-view shape by `getReceivedDisplayView`. Do not write one automatic result to both `translatedMessages` and the new store.
+
+When `checkMessage` captures a message during the same Discord render, call `markReceivedDisplayPending(request, {refresh: false})`. `MessageContent` reads that pending view later in the same render and adds the loading indicator without scheduling another list refresh. A caller that marks an already-mounted message pending may use the default `{refresh: true}` path.
+
+- [ ] **Step 6: Make both patch paths consume the same view**
+
+`processMessages` obtains one view and calls `applyReceivedDisplayViewToStream`. `processMessageContent` obtains the same revision and calls `applyReceivedDisplayViewToContent` for watermark, translated class, color variables, loading state, and reason. The stream method clones the Discord message before replacing `content`; it never mutates the message store object. Add this prop to the rendered message content root:
+
+```js
+e.returnvalue.props["data-translator-revision"] = String(view.revision);
+```
+
+Whenever a view exists, set the revision attribute even when the view renders original text. This lets the adapter acknowledge restoration. When no view exists, remove the attribute and every translator decoration.
+
+`applyReceivedDisplayViewToContent` converts a translated view to the existing decoration input only at this compatibility boundary. A pending view adds the fixed-size loading node. A cancelled, skipped, or failed view keeps the revision attribute but removes watermark, translated classes, color variables, and loading state. A missing view removes all translator-owned attributes and decoration.
+
+- [ ] **Step 7: Update the test helper only for injected adapter dependencies**
+
+Add no-op patch targets to the base BDFDB fixture so lifecycle tests can call `onStart()` without loading Discord modules:
+
+```js
+LibraryModules: {
+	MessageUtils: {},
+	MessageToolbarUtils: {}
+},
+PatchUtils: {
+	patch: () => {},
+	forceAllUpdates: () => {}
+}
+```
+
+The dedicated `createReceivedDisplayHarness` supplies `ReactUtils.findOwner`, `ReactUtils.forceUpdate`, DOM nodes, animation frames, and message confirmation. Tests still enter through plugin compatibility methods and never bypass the controller.
+
+- [ ] **Step 8: Build and run focused tests**
+
+```powershell
+npm run build
+node --test tests/integration/received-display-runtime.test.js tests/translation-regression.test.js tests/historical-translation-job.test.js
+```
+
+Expected: PASS.
+
+- [ ] **Step 9: Run full verification and commit**
+
+```powershell
+npm run verify
+git add src DiscordAITranslator.plugin.js tests
+git commit -m "refactor: route received display through one state owner"
+```
+
+## Task 6: Fix Channel Disable And Plugin Stop Restoration
+
+**Files:**
+- Modify: `src/display/message-state-store.js`
+- Modify: `src/display/translation-display-controller.js`
+- Modify: `src/display/display-runtime.js`
+- Modify: `src/legacy/runtime.js`
+- Create: `tests/integration/received-display-lifecycle.test.js`
+
+- [ ] **Step 1: Write failing lifecycle regressions**
+
+Create `tests/integration/received-display-lifecycle.test.js`:
+
+```js
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {createHarness} = require("../helpers/createReceivedDisplayHarness");
+
+function snapshot(messageId, channelId, content = `${messageId} original`) {
+	return {messageId, channelId, generation: 1, sourceSignature: `${channelId}:${messageId}:${content}`, source: {content, embeds: []}};
+}
+
+function result(messageId, channelId, content = `${messageId} translated`, generation = 1, origin = "automatic") {
+	return {messageId, channelId, generation, origin, status: "translated", translation: {content}};
+}
+
+test("disabling a channel restores visible originals without hover", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin, calls} = harness;
+		delete plugin.isTranslationEnabled;
+		plugin.setChannelEnablementStateValue("channel-a", true);
+		plugin.setChannelEnablementStateValue("channel-b", true);
+		for (const [messageId, channelId] of [["message-1", "channel-a"], ["message-2", "channel-a"], ["message-3", "channel-b"]]) {
+			plugin.captureReceivedMessageSource(snapshot(messageId, channelId));
+			await plugin.commitReceivedDisplayResult(result(messageId, channelId));
+		}
+		const updatesBeforeDisable = calls.forceUpdate;
+
+		await plugin.toggleTranslation("channel-a");
+
+		assert.equal(plugin.getReceivedDisplayView("message-1").content, "message-1 original");
+		assert.equal(plugin.getReceivedDisplayView("message-2").content, "message-2 original");
+		assert.equal(plugin.getReceivedDisplayView("message-3").content, "message-3 translated");
+		assert.equal(calls.forceUpdate, updatesBeforeDisable + 1);
+	}
+	finally {harness.restore();}
+});
+
+test("disable restoration removes text and decoration under the same revision", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(snapshot("message-1", "channel-a"));
+		await plugin.commitReceivedDisplayResult(result("message-1", "channel-a"));
+		await plugin.restoreReceivedDisplayChannel("channel-a");
+		const view = plugin.getReceivedDisplayView("message-1");
+		const stream = {content: {id: "message-1", channel_id: "channel-a", content: "message-1 translated", embeds: []}};
+		const event = {instance: {props: {message: stream.content}}, returnvalue: {props: {children: [], className: "translator-translated-message", style: {"--translator-text-color": "#fff", "--translator-accent-color": "#fff"}}}};
+
+		plugin.applyReceivedDisplayViewToStream(stream, view);
+		plugin.applyReceivedDisplayViewToContent(event, view);
+
+		assert.equal(stream.content.content, "message-1 original");
+		assert.equal(event.returnvalue.props["data-translator-revision"], String(view.revision));
+		assert.doesNotMatch(event.returnvalue.props.className, /translator-translated-message/);
+		assert.equal(event.returnvalue.props.style["--translator-text-color"], undefined);
+		assert.equal(event.returnvalue.props.style["--translator-accent-color"], undefined);
+		assert.equal(event.returnvalue.props.children.some(child => child && child.key === "translator-translated-watermark"), false);
+	}
+	finally {harness.restore();}
+});
+
+test("plugin stop restores automatic records before requesting the final rerender", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(snapshot("message-1", "channel-a"));
+		await plugin.commitReceivedDisplayResult(result("message-1", "channel-a"));
+		const order = [];
+		const restoreAll = plugin.restoreAllReceivedDisplay.bind(plugin);
+		plugin.restoreAllReceivedDisplay = options => {order.push("restore"); return restoreAll(options);};
+		plugin._testBdfdb.MessageUtils.rerenderAll = instant => {order.push(`rerender:${instant}`);};
+		plugin.cancelHistoricalTranslationJobs = () => {};
+		plugin.clearChannelTitleTranslations = () => {};
+		plugin.detachAutoTranslationInputActivityWatcher = () => {};
+		plugin.detachAutoTranslationScrollWatcher = () => {};
+		plugin.clearDisplayedTranslations = () => {order.push("legacy-clear");};
+		plugin.clearLoadedAutoTranslationStatus = () => {};
+		plugin.forceUpdateAll = () => {throw new Error("onStop must not reload settings while restoring display");};
+
+		plugin.onStop();
+
+		assert.deepEqual(order.slice(0, 3), ["restore", "legacy-clear", "rerender:true"]);
+	}
+	finally {harness.restore();}
+});
+
+test("a late provider callback cannot recreate a restored automatic record", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(snapshot("message-1", "channel-a"));
+		plugin.setReceivedDisplayGeneration("channel-a", 2);
+		await plugin.restoreReceivedDisplayChannel("channel-a");
+
+		const outcome = await plugin.commitReceivedDisplayResult(result("message-1", "channel-a", "late translation", 1));
+
+		assert.deepEqual(outcome.rejectedIds, ["message-1"]);
+		assert.equal(plugin.getReceivedDisplayView("message-1").content, "message-1 original");
+	}
+	finally {harness.restore();}
+});
+
+test("plugin start replaces the stopped display runtime", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(snapshot("message-1", "channel-a"));
+		await plugin.commitReceivedDisplayResult(result("message-1", "channel-a"));
+		let resetCount = 0;
+		const reset = plugin.resetReceivedDisplayRuntime.bind(plugin);
+		plugin.resetReceivedDisplayRuntime = () => {resetCount++; return reset();};
+		plugin._testBdfdb.PatchUtils.patch = () => {};
+		plugin._testBdfdb.LibraryModules = {MessageUtils: {}, MessageToolbarUtils: {}};
+		plugin.attachAutoTranslationInputActivityWatcher = () => {};
+		plugin.forceUpdateAll = () => {};
+
+		plugin.onStart();
+
+		assert.equal(resetCount, 1);
+		assert.equal(plugin.getReceivedDisplayView("message-1"), null);
+	}
+	finally {harness.restore();}
+});
+```
+
+- [ ] **Step 2: Verify the tests fail**
+
+```powershell
+npm run build
+node --test tests/integration/received-display-lifecycle.test.js
+```
+
+Expected: FAIL on the current clear-then-rerender lifecycle.
+
+- [ ] **Step 3: Make restoration a controller transaction**
+
+When disabling, `toggleTranslation(channelId)` becomes async and executes in this order:
+
+```text
+increment the channel generation and update MessageStateStore
+persist the channel as disabled
+cancel channel requests and jobs
+await controller.restoreChannel(channelId)
+clear reply/embed/title compatibility state
+resume unrelated queue work
+```
+
+Do not delete immutable source snapshots during channel disable.
+
+`onStop()` remains synchronous. It first calls `restoreAllReceivedDisplay({refresh: false})`, which changes store state synchronously, then clears legacy display records, and finally calls `BDFDB.MessageUtils.rerenderAll(true)`. It must not call `forceUpdateAll()`, because that method reloads settings and queues during shutdown. Late callbacks check the incremented generation and cannot commit.
+
+`onStart()` creates a fresh display runtime before accepting new work. It does not reuse the stopped runtime, so a reload cannot expose stale translated state from the previous plugin instance.
+
+- [ ] **Step 4: Run focused and full verification**
+
+```powershell
+npm run build
+node --test tests/integration/received-display-lifecycle.test.js tests/channel-enablement-regression.test.js tests/translation-regression.test.js
+npm run verify
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add src DiscordAITranslator.plugin.js tests
+git commit -m "fix: restore received originals through display transactions"
+```
+
+## Task 7: Make Historical And Live Display Commits Explicit
+
+**Files:**
+- Modify: `src/legacy/runtime.js`
+- Modify: `tests/historical-translation-job.test.js`
+- Modify: `tests/translation-regression.test.js`
+
+- [ ] **Step 1: Add failing commit-count tests**
+
+Historical test:
+
+```js
+test("one historical job performs one acknowledged display commit", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin();
+	const commits = [];
+	plugin.isHistoricalTranslationJobItemCurrent = () => true;
+	plugin.commitHistoricalReceivedDisplayBatch = async results => {
+		commits.push(results);
+		return {confirmedIds: results.map(result => result.messageId), missingIds: [], fallbackUsed: false};
+	};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("historical automatic results must not write the legacy display map");};
+	const messages = [createMessage("100", "first"), createMessage("200", "second"), createMessage("300", "third")];
+	const summary = {
+		translated: messages.map(message => ({message, originalContentData: {content: message.content, embeds: []}, translation: {channelId: message.channel_id, auto: true, content: `${message.content} translated`, translatedContent: `${message.content} translated`, signature: `sig-${message.id}`}})),
+		skipped: [],
+		failed: []
+	};
+	const job = {channelId: "channel-history-job", generation: 1, items: new Map(messages.map(message => [message.id, {message}]))};
+
+	await plugin.commitHistoricalTranslationJob(summary, job);
+
+	assert.equal(commits.length, 1);
+	assert.deepEqual(commits[0].map(result => result.messageId), ["100", "200", "300"]);
+	assert.equal(commits[0].every(result => result.status === "translated" && result.generation === 1), true);
+});
+```
+
+Live test:
+
+```js
+test("one live result performs one ID-scoped display commit", async () => {
+	const plugin = createPluginInstance({callSetLanguages: false});
+	const channel = {id: "channel-live-commit"};
+	const message = createMessage("live-1", "live source");
+	message.channel_id = channel.id;
+	const commits = [];
+	plugin.captureReceivedMessageSource({messageId: message.id, channelId: channel.id, generation: 1, sourceSignature: "live-signature", source: {content: message.content, embeds: []}});
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => ({channelId: channel.id, auto: true, content: "live translated", translatedContent: "live translated", originalContent: message.content, signature: "live-signature", embeds: {}});
+	plugin.commitReceivedDisplayResult = async result => {
+		commits.push(result);
+		return {confirmedIds: [result.messageId], missingIds: [], fallbackUsed: false};
+	};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("live automatic results must not write the legacy display map");};
+	plugin.scheduleTranslationRerender = () => {throw new Error("live display commits must not use the generic timer");};
+
+	const handled = await plugin.translateMessage(message, channel, {auto: true, silent: true, trackBusy: false});
+
+	assert.equal(handled, true);
+	assert.equal(commits.length, 1);
+	assert.equal(commits[0].messageId, "live-1");
+	assert.equal(commits[0].status, "translated");
+});
+```
+
+- [ ] **Step 2: Verify both tests fail at the compatibility rerender path**
+
+```powershell
+npm run build
+node --test --test-name-pattern "acknowledged display commit|ID-scoped display commit" tests/historical-translation-job.test.js tests/translation-regression.test.js
+```
+
+- [ ] **Step 3: Replace generic rerender scheduling for received completions**
+
+Historical jobs convert translated, skipped, and failed terminal items to one result array and call only:
+
+```js
+await this.commitHistoricalReceivedDisplayBatch(results);
+```
+
+Live received results call only:
+
+```js
+await this.commitReceivedDisplayResult(result);
+```
+
+Generic `scheduleTranslationRerender` remains temporarily for settings, manual translation, reply, embed, and title compatibility paths. It must no longer repaint automatic received message completions.
+
+- [ ] **Step 4: Run focused, full, and build checks**
+
+```powershell
+npm run build
+node --test tests/historical-translation-job.test.js tests/translation-regression.test.js tests/display/*.test.js tests/integration/*.test.js
+npm run verify
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add src DiscordAITranslator.plugin.js tests
+git commit -m "refactor: commit received translations by message id"
+```
+
+## Task 8: Add Per-Message Reasons And A Local Transition Journal
+
+**Files:**
+- Create: `src/diagnostics/display-transition-journal.js`
+- Modify: `src/display/message-state-store.js`
+- Modify: `src/display/translation-display-controller.js`
+- Modify: `src/display/display-runtime.js`
+- Create: `tests/display/display-transition-journal.test.js`
+- Modify: `tests/build-contract.test.js`
+
+- [ ] **Step 1: Write failing reason and journal tests**
+
+Create `tests/display/display-transition-journal.test.js`:
+
+```js
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {createMessageStateStore} = require("../../src/display/message-state-store");
+const {createDisplayView} = require("../../src/display/translation-display-controller");
+const {createDisplayTransitionJournal} = require("../../src/diagnostics/display-transition-journal");
+
+function capture(store, messageId) {
+	store.captureSource({messageId, channelId: "c1", generation: 1, sourceSignature: messageId, source: {content: `${messageId} source`, embeds: []}});
+}
+
+test("pending skipped failed and render-unconfirmed records expose stable reason codes", () => {
+	const store = createMessageStateStore();
+	for (const messageId of ["pending", "skipped", "failed", "unconfirmed"]) capture(store, messageId);
+	store.markPending({messageId: "pending", channelId: "c1", generation: 1, origin: "automatic", requestIdentity: "request-1"});
+	store.commitResult({messageId: "skipped", channelId: "c1", generation: 1, origin: "automatic", status: "skipped", reason: "same-language"});
+	store.commitResult({messageId: "failed", channelId: "c1", generation: 1, origin: "automatic", status: "failed", reason: "provider-timeout"});
+	store.commitResult({messageId: "unconfirmed", channelId: "c1", generation: 1, origin: "automatic", status: "translated", translation: {content: "translated"}});
+	store.markRenderOutcome({confirmedIds: [], missingIds: ["unconfirmed"]});
+
+	assert.equal(createDisplayView(store.getDisplayState("pending")).showLoading, true);
+	assert.equal(createDisplayView(store.getDisplayState("skipped")).reason, "same-language");
+	assert.equal(createDisplayView(store.getDisplayState("failed")).reason, "provider-timeout");
+	assert.equal(createDisplayView(store.getDisplayState("unconfirmed")).renderReason, "render-unconfirmed");
+});
+
+test("the debug journal is bounded and keyed by channel and message", () => {
+	const journal = createDisplayTransitionJournal({enabled: true, limit: 2, now: () => 123});
+	journal.append({channelId: "c1", messageId: "m1", transition: "captured"});
+	journal.append({channelId: "c1", messageId: "m2", transition: "pending"});
+	journal.append({channelId: "c2", messageId: "m3", transition: "state-committed"});
+
+	assert.deepEqual(journal.list().map(entry => entry.messageId), ["m2", "m3"]);
+	assert.deepEqual(journal.list({channelId: "c1"}).map(entry => entry.messageId), ["m2"]);
+	assert.deepEqual(journal.list({messageId: "m3"})[0], {channelId: "c2", messageId: "m3", transition: "state-committed", timestamp: 123});
+});
+
+test("the release bundle removes the debug journal implementation", async () => {
+	const {createPluginBundle} = await import("../../scripts/build-plugin.mjs");
+	const releaseBundle = await createPluginBundle({debug: false});
+	const debugBundle = await createPluginBundle({debug: true});
+
+	assert.doesNotMatch(releaseBundle, /TRANSLATOR_DISPLAY_DEBUG_JOURNAL/);
+	assert.match(debugBundle, /TRANSLATOR_DISPLAY_DEBUG_JOURNAL/);
+});
+```
+
+- [ ] **Step 2: Verify the tests fail**
+
+```powershell
+node --test tests/display/display-transition-journal.test.js tests/build-contract.test.js
+```
+
+- [ ] **Step 3: Implement the bounded journal**
+
+The module interface is:
+
+```js
+const DISPLAY_JOURNAL_MARKER = "TRANSLATOR_DISPLAY_DEBUG_JOURNAL";
+
+function createDisplayTransitionJournal({enabled = false, limit = 500, now = Date.now} = {}) {
+	const entries = [];
+	return Object.freeze({
+		append(entry) {
+			if (!enabled) return;
+			entries.push(Object.freeze({...entry, timestamp: entry.timestamp || now()}));
+			if (entries.length > limit) entries.splice(0, entries.length - limit);
+		},
+		list({channelId, messageId} = {}) {
+			return entries.filter(entry => (!channelId || entry.channelId === channelId) && (!messageId || entry.messageId === messageId));
+		},
+		clear() {entries.length = 0;},
+		marker: DISPLAY_JOURNAL_MARKER
+	});
+}
+
+module.exports = {createDisplayTransitionJournal};
+```
+
+Record these transitions:
+
+```text
+captured
+pending
+state-committed
+render-requested
+render-confirmed
+render-unconfirmed
+skipped
+failed
+cancelled
+restored
+```
+
+Task 8 changes `createMessageStateStore` and `createTranslationDisplayController` to accept an optional `journal` dependency. Store transitions append after the immutable state update; render transitions append immediately before and after `refreshMessages`. Each entry includes `channelId`, `messageId`, `revision`, and `transition`. Provider timing remains a later orchestrator milestone and is not fabricated inside the display layer.
+
+- [ ] **Step 4: Wire the existing debug and release build modes**
+
+In `src/display/display-runtime.js`, create the journal only behind the compile-time constant:
+
+```js
+const debugEnabled = typeof __TRANSLATOR_DISPLAY_DEBUG__ !== "undefined" && __TRANSLATOR_DISPLAY_DEBUG__;
+const journal = debugEnabled ? require("../diagnostics/display-transition-journal").createDisplayTransitionJournal({enabled: true}) : null;
+const store = createMessageStateStore({journal});
+const controller = createTranslationDisplayController({store, renderAdapter, journal});
+```
+
+Normal `npm run build` defines the constant as `false`; `npm run build:debug` defines it as `true`. Release verification compares only the non-debug artifact, and `DiscordAITranslator.debug.plugin.js` remains ignored and uncommitted.
+
+- [ ] **Step 5: Run verification and commit**
+
+```powershell
+npm run build
+npm run verify
+git add src scripts package.json DiscordAITranslator.plugin.js tests
+git commit -m "feat: add received display diagnostics"
+```
+
+## Task 9: Remove The Replaced Received Display Path
+
+**Files:**
+- Modify: `src/legacy/runtime.js`
+- Modify: `tests/translation-regression.test.js`
+- Modify: `tests/typing-during-translation-regression.test.js`
+- Modify: `tests/helpers/createPluginInstance.js`
+- Create: `tests/received-display-ownership.test.js`
+- Modify: `tests/build-contract.test.js`
+
+- [ ] **Step 1: Add an absence test for replaced runtime symbols**
+
+Create `tests/received-display-ownership.test.js`:
+
+```js
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const source = fs.readFileSync(path.resolve(__dirname, "..", "src", "legacy", "runtime.js"), "utf8");
+
+function methodSlice(name, nextName) {
+	const start = source.indexOf(`\n\t\t\t${name} (`);
+	const end = source.indexOf(`\n\t\t\t${nextName} (`, start + 1);
+	assert.notEqual(start, -1, `${name} method not found`);
+	assert.notEqual(end, -1, `${nextName} method not found after ${name}`);
+	return source.slice(start, end);
+}
+
+test("replaced received display methods do not write legacy display ownership", () => {
+	const automaticCommitMethods = [
+		methodSlice("commitReceivedDisplayResult", "commitHistoricalReceivedDisplayBatch"),
+		methodSlice("commitHistoricalReceivedDisplayBatch", "getReceivedDisplayView"),
+		methodSlice("commitHistoricalTranslationJob", "rerenderHistoricalTranslationJob")
+	];
+	for (const method of automaticCommitMethods) {
+		assert.doesNotMatch(method, /translatedMessages|oldMessages|applyStoredTranslationToMessage|scheduleTranslationRerender|PatchUtils\.forceAllUpdates/);
+	}
+});
+
+test("the received display compatibility path delegates to the display runtime", () => {
+	assert.match(methodSlice("commitReceivedDisplayResult", "commitHistoricalReceivedDisplayBatch"), /ensureReceivedDisplayRuntime\(\)\.commitMessageResult/);
+	assert.match(methodSlice("commitHistoricalReceivedDisplayBatch", "getReceivedDisplayView"), /ensureReceivedDisplayRuntime\(\)\.commitHistoricalBatch/);
+});
+```
+
+The source contract deliberately inspects only automatic received-display methods. Manual translation, sent-edit compatibility, reply previews, and embeds may still use `translatedMessages` or `oldMessages` until their own milestone.
+
+- [ ] **Step 2: Run the absence test and verify it fails**
+
+```powershell
+node --test tests/received-display-ownership.test.js
+```
+
+- [ ] **Step 3: Delete replaced branches and compatibility methods**
+
+Run both audits before editing:
+
+```powershell
+rg -n "translatedMessages|oldMessages" src/legacy/runtime.js
+rg -n "scheduleTranslationRerender|PatchUtils\.forceAllUpdates" src/legacy/runtime.js
+```
+
+Delete automatic received writes and automatic original snapshots already replaced by the state store. Keep accesses required by manual message translation, sent editing, reply previews, and embeds. Keep `scheduleTranslationRerender` only for those compatibility paths plus settings and titles.
+
+Remove the test that asserts name-based `PatchUtils.forceAllUpdates` is the correct visible refresh. Replace it with adapter acknowledgement tests.
+
+- [ ] **Step 4: Verify module and artifact guardrails**
+
+Add a first-milestone growth guard to `tests/build-contract.test.js`:
+
+```js
+const pluginPath = path.join(root, "DiscordAITranslator.plugin.js");
+const pluginBytes = fs.statSync(pluginPath).size;
+assert.ok(pluginBytes <= 700 * 1024, `generated plugin unexpectedly exceeds 700 KB: ${pluginBytes} bytes`);
+```
+
+The approved 350-450 KB target remains a final migration gate after all legacy modules are replaced. This first milestone must not remove behavior merely to reach that final target.
+
+- [ ] **Step 5: Run full verification and commit**
+
+```powershell
+npm run build
+npm run verify
+git diff --check
+git add src DiscordAITranslator.plugin.js tests
+git commit -m "refactor: remove legacy received display ownership"
+```
+
+## Task 10: Review, Deploy, And Complete The Display Milestone
+
+**Files:**
+- Modify only if review finds a tested defect
+- Update: `docs/recovery-plan.md` after evidence exists
+
+- [ ] **Step 1: Run the complete verification gate**
+
+```powershell
+npm run build
+npm run verify
+git diff --check
+git status --short
+```
+
+Expected: zero failures, clean diff check, and only intended milestone changes.
+
+- [ ] **Step 2: Run Standards and Spec reviews against the milestone base commit**
+
+The Standards review uses `AGENTS.md`, `docs/architecture.md`, and ADR-0002. The Spec review uses `docs/product.md`, `docs/settings.md`, and the current plan. Resolve every P0-P2 finding with a failing test before proceeding.
+
+- [ ] **Step 3: Create a milestone commit if review fixes were required**
+
+```powershell
+git add src scripts tests package.json package-lock.json DiscordAITranslator.plugin.js docs/recovery-plan.md
+git commit -m "fix: address display milestone review"
+```
+
+- [ ] **Step 4: Back up and deploy the generated plugin**
+
+Run from the repository root:
+
+```powershell
+$repositoryPlugin = (Resolve-Path '.\DiscordAITranslator.plugin.js').Path
+$installedPlugin = Join-Path $env:APPDATA 'BetterDiscord\plugins\DiscordAITranslator.plugin.js'
+$backupDirectory = Join-Path $env:APPDATA 'BetterDiscord\plugin-backups\DiscordAITranslator'
+if (-not (Test-Path -LiteralPath $installedPlugin)) { throw "Installed BetterDiscord plugin not found: $installedPlugin" }
+New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
+$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$backupPlugin = Join-Path $backupDirectory "DiscordAITranslator-$timestamp.plugin.js"
+$installedBeforeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedPlugin).Hash
+Copy-Item -LiteralPath $installedPlugin -Destination $backupPlugin
+Copy-Item -LiteralPath $repositoryPlugin -Destination $installedPlugin -Force
+$repositoryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $repositoryPlugin).Hash
+$installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedPlugin).Hash
+$backupHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupPlugin).Hash
+if ($repositoryHash -ne $installedHash) { throw "Installed plugin hash does not match the repository artifact" }
+if ($installedBeforeHash -ne $backupHash) { throw "Backup hash does not match the previously installed plugin" }
+[pscustomobject]@{Repository=$repositoryHash; Installed=$installedHash; Backup=$backupHash; BackupPath=$backupPlugin}
+```
+
+- [ ] **Step 5: Inspect the renderer log after hot reload**
+
+Confirm the plugin stop event is followed by its start event after the file copy. No new `SyntaxError`, `TypeError`, `ReferenceError`, unhandled rejection, or `DiscordAITranslator` error may appear.
+
+- [ ] **Step 6: Run the DiscordPTB smoke gate**
+
+Verify in this order:
+
+1. Enable automatic translation in one channel.
+2. Confirm translated text and watermark appear without hovering.
+3. Confirm one loaded historical batch appears together.
+4. Scroll and type while a translation finishes; neither position nor input changes unexpectedly.
+5. Disable the channel and confirm original messages return immediately.
+6. Confirm another channel is unchanged.
+7. Stop and reload the plugin and confirm originals and state remain coherent.
+8. Inspect any missing item through the debug build and confirm a pending, skipped, failed, cancelled, or render-unconfirmed reason.
+
+- [ ] **Step 7: Mark only observed checks complete**
+
+Update this document with exact automated counts, deployed hash, commit, and observed smoke evidence. Leave every unobserved checkbox unchecked.
+
+- [ ] **Step 8: Commit milestone evidence**
+
+```powershell
+git add docs/recovery-plan.md
+git commit -m "docs: record display milestone verification"
+```
+
+## Display Milestone Evidence
+
+- Base commit: `92406ca`
+- Implementation commit: not created
+- Automated verification: not run for this milestone
+- Generated artifact bytes: not measured for this milestone
+- Deployed SHA-256: not deployed for this milestone
+- DiscordPTB smoke gate: not run for this milestone
+
+## Later Milestones
+
+These milestones require separate detailed plans after the display milestone is verified:
+
+1. Reply, embed, thread-title, edit, and sent-original lifecycle ownership
+2. Translation orchestrator and live/historical queue extraction
+3. Shared provider client and provider adapter extraction
+4. Received, sent, language detection, prompt, protection, and validation policy extraction
+5. Versioned settings, credentials, channel settings, cache, and migration stores
+6. Remaining legacy removal, test consolidation, size enforcement, and canonical documentation update
+
+No later milestone begins while the display smoke gate has an unresolved failure.
