@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Proposed to be superseded by [ADR-0002](0002-generate-single-file-plugin-from-modular-source.md) after written architecture review.
+Superseded by [ADR-0002](0002-generate-single-file-plugin-from-modular-source.md).
 
 ## Context
 

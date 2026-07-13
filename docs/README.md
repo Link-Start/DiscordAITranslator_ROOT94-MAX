@@ -18,7 +18,7 @@ This directory contains the canonical project documentation.
 - `product.md` describes approved user-visible behavior.
 - `settings.md` decides whether a setting belongs to the current channel or global configuration.
 - `providers.md` describes provider capabilities without embedding UI implementation details.
-- `architecture.md` describes the current failure model, the proposed target modules, and migration constraints.
+- `architecture.md` describes the current failure model, the approved target modules, and migration constraints.
 - `recovery-plan.md` is the current stabilization and refactoring sequence. It overrides ad hoc implementation order.
 - ADRs record durable architectural decisions and are not task trackers.
 

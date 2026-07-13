@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the proposed target architecture for the repository. The direction has been approved in conversation, but the written design still requires repository review. The migration has not started until `src/` and the deterministic build exist in Git.
+This document defines the approved target architecture for the repository. The migration has not started until `src/` and the deterministic build exist in Git.
 
 The current shipped runtime remains `DiscordAITranslator.plugin.js`. It is approximately 10,700 lines and 618 KB. It must remain installable while the source architecture is migrated.
 
@@ -24,7 +24,7 @@ src/plugin/index.js
         -> DiscordAITranslator.plugin.js
 ```
 
-The build uses esbuild in CommonJS bundle mode, preserves the BetterDiscord metadata banner, excludes tests and diagnostics, and produces the same bytes from the same source and dependency lockfile.
+The build uses esbuild in CommonJS bundle mode with an ES2020 runtime target, preserves the BetterDiscord metadata banner, excludes tests and release-disabled diagnostics, and produces the same bytes from the same source and dependency lockfile.
 
 ## Current Architecture
 
@@ -181,13 +181,16 @@ Owns immutable source snapshots and current display state.
 ```text
 captureSource(snapshot)
 markPending(messageId, requestIdentity)
-commitTranslation(result)
+commitResult(result)
 commitBatch(results)
 markSkipped(messageId, reason)
 markFailed(messageId, reason)
 cancelChannel(channelId, generation)
 restoreChannel(channelId)
+restoreAll()
+markRenderOutcome(outcome)
 getDisplayState(messageId)
+listChannel(channelId)
 ```
 
 Callers do not access internal maps.
@@ -213,11 +216,11 @@ Contains all knowledge of Discord and BDFDB rendering internals.
 ```text
 captureVisibleMessages(channelId)
 applyDisplayTransaction(transaction)
-refreshMessages(channelId, messageIds, anchor)
+refreshMessages({channelId, messageIds, views, transactionId})
 refreshThreadTitles(channelId)
 ```
 
-No translation policy or provider logic is allowed in this adapter. The adapter reports whether the requested message IDs actually rerendered so state commit and render commit can be measured separately.
+No translation policy or provider logic is allowed in this adapter. It returns `confirmedIds`, `missingIds`, and `fallbackUsed` so state commit and render commit can be measured separately. Revision acknowledgement applies to translated, loading, skipped, failed, cancelled, and restored-original views.
 
 ### TranslationOrchestrator
 
