@@ -19,6 +19,32 @@ test("channel text area editor is not disabled while translations are running", 
 	assert.equal(props.disabled, false);
 });
 
+test("translation refresh updates message components without remounting the chat layer", () => {
+	let chatLayerRerenders = 0;
+	const targetedUpdates = [];
+	const plugin = createBasePluginInstance({
+		callSetLanguages: false,
+		bdfdb: {
+			MessageUtils: {
+				rerenderAll: () => {
+					chatLayerRerenders++;
+				}
+			},
+			PatchUtils: {
+				forceAllUpdates: (_plugin, componentTypes) => {
+					targetedUpdates.push(componentTypes);
+				}
+			}
+		}
+	});
+	plugin.captureMessageScrollerState = () => null;
+
+	plugin.rerenderMessagesWithScrollPreserved();
+
+	assert.equal(chatLayerRerenders, 0);
+	assert.deepEqual(targetedUpdates, [["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"]]);
+});
+
 test("normal and prefixed sent translations keep the submitted channel id", async () => {
 	let submitPatch = null;
 	const translateCalls = [];
