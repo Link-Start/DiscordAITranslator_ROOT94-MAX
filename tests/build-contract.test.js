@@ -17,16 +17,12 @@ test("the committed BetterDiscord plugin matches the deterministic source build"
 test("the generated plugin keeps metadata and excludes development artifacts", async () => {
 	const {createPluginBundle} = await import("../scripts/build-plugin.mjs");
 	const generated = await createPluginBundle();
+	const plugin = createPluginInstance({callSetLanguages: false});
 
 	assert.match(generated, /^\/\*\*[\s\S]*@name DiscordAITranslator/);
 	assert.match(generated, /@version 0\.3\.36/);
 	assert.doesNotMatch(generated, /sourceMappingURL=/);
 	assert.doesNotMatch(generated, /tests\//);
 	assert.doesNotMatch(generated, /TRANSLATOR_DISPLAY_DEBUG_JOURNAL/);
-});
-
-test("the generated plugin preserves the loaded plugin class name", () => {
-	const plugin = createPluginInstance({callSetLanguages: false});
-
 	assert.equal(plugin.constructor.name, "Translator");
 });
