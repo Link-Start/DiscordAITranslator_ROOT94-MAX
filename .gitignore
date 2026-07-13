@@ -4,3 +4,5 @@ BetterDiscordAddons-sparse/
 node_modules/
 coverage/
 .claude/settings.local.json
+DiscordAITranslator.debug.plugin.js
+*.backup.plugin.js
