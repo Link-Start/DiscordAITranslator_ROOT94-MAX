@@ -32,6 +32,8 @@ test("the generated plugin keeps metadata and excludes development artifacts", a
 		cwd: root,
 		encoding: "utf8"
 	});
+	const packageLock = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
+	const activeEsbuildPackage = packageLock.packages[`node_modules/@esbuild/${process.platform}-${process.arch}`];
 	const plugin = createPluginInstance({callSetLanguages: false});
 
 	assert.match(generated, /^\/\*\*[\s\S]*@name DiscordAITranslator/);
@@ -46,4 +48,7 @@ test("the generated plugin keeps metadata and excludes development artifacts", a
 	assert.notEqual(conflictingFlagsResult.status, 0);
 	assert.equal(conflictingFlagsResult.stdout, "");
 	assert.equal(conflictingFlagsResult.stderr.trim(), "--debug and --check are mutually exclusive.");
+	assert.ok(activeEsbuildPackage);
+	assert.match(activeEsbuildPackage.resolved, /^https:\/\/registry\.npmjs\.org\/@esbuild\/[^/]+\/-\/[^/]+\.tgz$/);
+	assert.match(activeEsbuildPackage.integrity, /^sha512-[A-Za-z0-9+/]+={0,2}$/);
 });
