@@ -10,48 +10,8 @@ function createMessage(id, content) {
 		channel_id: "channel-history-job",
 		content,
 		embeds: [],
+		attachments: [],
 		author: {id: "other-user"}
-	};
-}
-
-function installFakeClock() {
-	const realDateNow = Date.now;
-	const realSetTimeout = global.setTimeout;
-	const realClearTimeout = global.clearTimeout;
-	let now = 0;
-	let nextTimerId = 1;
-	const timers = new Map();
-	const flushAsyncWork = () => new Promise(resolve => setImmediate(resolve));
-
-	Date.now = () => now;
-	global.setTimeout = (callback, delay = 0) => {
-		const timerId = nextTimerId++;
-		timers.set(timerId, {callback, time: now + Math.max(0, delay)});
-		return timerId;
-	};
-	global.clearTimeout = timerId => timers.delete(timerId);
-
-	return {
-		async advanceTime(milliseconds) {
-			const targetTime = now + milliseconds;
-			while (true) {
-				const nextTimer = [...timers.entries()]
-					.filter(([, timer]) => timer.time <= targetTime)
-					.sort((left, right) => left[1].time - right[1].time)[0];
-				if (!nextTimer) break;
-				now = nextTimer[1].time;
-				timers.delete(nextTimer[0]);
-				nextTimer[1].callback();
-				await flushAsyncWork();
-			}
-			now = targetTime;
-			await flushAsyncWork();
-		},
-		restore() {
-			Date.now = realDateNow;
-			global.setTimeout = realSetTimeout;
-			global.clearTimeout = realClearTimeout;
-		}
 	};
 }
 
@@ -372,7 +332,7 @@ test("historical commit rejects a translated item when Discord now stores edited
 });
 
 function configureHistoricalCoordinatorPlugin(options = {}) {
-	const plugin = createPluginInstance();
+	const plugin = createPluginInstance(options.pluginOptions || {});
 	plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
 	plugin.shouldAutoTranslateReceivedMessage = () => true;
 	plugin.isMessageWithinLoadedRange = () => true;
@@ -389,68 +349,354 @@ function configureHistoricalCoordinatorPlugin(options = {}) {
 	return plugin;
 }
 
-test("historical collection waits for a quiet period before starting one atomic job", async () => {
-	const clock = installFakeClock();
+test("repeated message renders during one scroll gesture merge until scrollend", async () => {
+	const realDocument = global.document;
+	const handlers = {};
+	const scroller = {
+		addEventListener: (eventName, handler) => {
+			handlers[eventName] = handler;
+		},
+		removeEventListener: () => {}
+	};
+	global.document = {
+		querySelector: selector => selector == ".messages-scroller" ? scroller : null
+	};
+	const plugin = configureHistoricalCoordinatorPlugin({
+		scheduleAutomatically: true,
+		pluginOptions: {
+			bdfdb: {
+				dotCN: {messagesscroller: ".messages-scroller"},
+				LibraryStores: {
+					SelectedChannelStore: {getChannelId: () => "channel-history-job"}
+				}
+			}
+		}
+	});
+	const requestedIds = [];
+	let resolveBatch;
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => item.message.id));
+		return new Promise(resolve => {
+			resolveBatch = resolve;
+		});
+	};
+	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.rerenderMessagesWithScrollPreserved = () => {};
+	const channel = {id: "channel-history-job"};
 
 	try {
-		const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
-		const requestedIds = [];
-		let rerenderCount = 0;
-		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
-			requestedIds.push(preparedItems.map(item => item.message.id));
-			return Promise.resolve(Object.fromEntries(preparedItems.map(item => [item.message.id, `translated ${item.message.id}`])));
-		};
-		plugin.applyStoredTranslationToMessage = () => ({});
-		plugin.rerenderMessagesWithScrollPreserved = () => {
-			rerenderCount++;
-		};
-
-		plugin.queueAutoTranslateMessage(createMessage("100", "first"), {id: "channel-history-job"}, {content: "first"}, {historicalLoad: true});
-		await clock.advanceTime(300);
-		plugin.queueAutoTranslateMessage(createMessage("200", "second"), {id: "channel-history-job"}, {content: "second"}, {historicalLoad: true});
-		await clock.advanceTime(200);
-		plugin.queueAutoTranslateMessage(createMessage("300", "third"), {id: "channel-history-job"}, {content: "third"}, {historicalLoad: true});
-		await clock.advanceTime(449);
+		plugin.attachAutoTranslationScrollWatcher();
+		handlers.wheel({type: "wheel"});
+		handlers.scroll();
+		plugin.processMessages({
+			instance: {props: {channel, channelStream: [createMessage("300", "newest"), createMessage("200", "older")].map(message => ({content: message}))}}
+		});
+		plugin.processMessages({
+			instance: {props: {channel, channelStream: [createMessage("300", "newest"), createMessage("200", "older"), createMessage("100", "oldest")].map(message => ({content: message}))}}
+		});
+		await new Promise(resolve => setImmediate(resolve));
 
 		assert.deepEqual(requestedIds, []);
 
-		await clock.advanceTime(1);
-		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
+		if (handlers.scrollend) handlers.scrollend();
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(requestedIds, [["300", "200", "100"]]);
 
-		assert.deepEqual(requestedIds, [["100", "200", "300"]]);
-		assert.equal(rerenderCount, 1);
+		resolveBatch({"300": "newest translated", "200": "older translated", "100": "oldest translated"});
+		await plugin.waitForHistoricalTranslationJobs(channel.id);
 	}
 	finally {
-		clock.restore();
+		plugin.cancelHistoricalTranslationJobs(channel.id, "test-cleanup");
+		global.document = realDocument;
 	}
 });
 
-test("historical collection starts at the maximum wait even while messages keep arriving", async () => {
-	const clock = installFakeClock();
-	try {
-		const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
-		const requestedIds = [];
-		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
-			requestedIds.push(preparedItems.map(item => item.message.id));
-			return Promise.resolve(Object.fromEntries(preparedItems.map(item => [item.message.id, `translated ${item.message.id}`])));
-		};
-		plugin.applyStoredTranslationToMessage = () => ({});
-		plugin.rerenderMessagesWithScrollPreserved = () => {};
-
-		for (let index = 0; index < 6; index++) {
-			plugin.queueAutoTranslateMessage(createMessage(String(index + 1), `message ${index + 1}`), {id: "channel-history-job"}, {content: `message ${index + 1}`}, {historicalLoad: true});
-			if (index < 5) await clock.advanceTime(300);
+test("scroll gesture seals its pending snapshot after idle when scrollend is unavailable", async () => {
+	const realDocument = global.document;
+	const realSetTimeout = global.setTimeout;
+	const realClearTimeout = global.clearTimeout;
+	const handlers = {};
+	const timers = new Map();
+	let nextTimerId = 0;
+	const scroller = {
+		addEventListener: (eventName, handler) => {
+			handlers[eventName] = handler;
+		},
+		removeEventListener: () => {}
+	};
+	global.document = {
+		querySelector: selector => selector == ".messages-scroller" ? scroller : null
+	};
+	global.setTimeout = callback => {
+		const timerId = ++nextTimerId;
+		timers.set(timerId, callback);
+		return timerId;
+	};
+	global.clearTimeout = timerId => timers.delete(timerId);
+	const plugin = configureHistoricalCoordinatorPlugin({
+		scheduleAutomatically: true,
+		pluginOptions: {
+			bdfdb: {
+				dotCN: {messagesscroller: ".messages-scroller"},
+				LibraryStores: {
+					SelectedChannelStore: {getChannelId: () => "channel-history-job"}
+				}
+			}
 		}
-		await clock.advanceTime(299);
+	});
+	const requestedIds = [];
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => item.message.id));
+		return Promise.resolve({"100": "translated"});
+	};
+	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.rerenderMessagesWithScrollPreserved = () => {};
+	const channel = {id: "channel-history-job"};
+
+	try {
+		plugin.attachAutoTranslationScrollWatcher();
+		handlers.wheel({type: "wheel"});
+		handlers.scroll({type: "scroll"});
+		plugin.processMessages({
+			instance: {props: {channel, channelStream: [{content: createMessage("100", "original")}]}}
+		});
+		await new Promise(resolve => setImmediate(resolve));
+
 		assert.deepEqual(requestedIds, []);
+		assert.equal(timers.size > 0, true);
+		const idleCallback = [...timers.values()].at(-1);
+		idleCallback();
+		await new Promise(resolve => setImmediate(resolve));
 
-		await clock.advanceTime(1);
-		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
-
-		assert.deepEqual(requestedIds, [["1", "2", "3", "4", "5", "6"]]);
+		assert.deepEqual(requestedIds, [["100"]]);
+		await plugin.waitForHistoricalTranslationJobs(channel.id);
 	}
 	finally {
-		clock.restore();
+		plugin.cancelHistoricalTranslationJobs(channel.id, "test-cleanup");
+		global.document = realDocument;
+		global.setTimeout = realSetTimeout;
+		global.clearTimeout = realClearTimeout;
+	}
+});
+
+test("layout-only scroll does not hold a historical snapshot open", async () => {
+	const realDocument = global.document;
+	const handlers = {};
+	const scroller = {
+		addEventListener: (eventName, handler) => {
+			handlers[eventName] = handler;
+		},
+		removeEventListener: () => {}
+	};
+	global.document = {
+		querySelector: selector => selector == ".messages-scroller" ? scroller : null
+	};
+	const plugin = configureHistoricalCoordinatorPlugin({
+		scheduleAutomatically: true,
+		pluginOptions: {
+			bdfdb: {
+				dotCN: {messagesscroller: ".messages-scroller"},
+				LibraryStores: {
+					SelectedChannelStore: {getChannelId: () => "channel-history-job"}
+				}
+			}
+		}
+	});
+	const requestedIds = [];
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => item.message.id));
+		return Promise.resolve({"100": "translated"});
+	};
+	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.rerenderMessagesWithScrollPreserved = () => {};
+	const channel = {id: "channel-history-job"};
+
+	try {
+		plugin.attachAutoTranslationScrollWatcher();
+		handlers.scroll({type: "scroll"});
+		plugin.processMessages({
+			instance: {props: {channel, channelStream: [{content: createMessage("100", "original")}]}}
+		});
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.deepEqual(requestedIds, [["100"]]);
+		await plugin.waitForHistoricalTranslationJobs(channel.id);
+	}
+	finally {
+		plugin.cancelHistoricalTranslationJobs(channel.id, "test-cleanup");
+		global.document = realDocument;
+	}
+});
+
+test("pointer input without scroll does not delay a historical snapshot", async () => {
+	const realDocument = global.document;
+	const handlers = {};
+	const scroller = {
+		addEventListener: (eventName, handler) => {
+			handlers[eventName] = handler;
+		},
+		removeEventListener: () => {}
+	};
+	global.document = {
+		querySelector: selector => selector == ".messages-scroller" ? scroller : null
+	};
+	const plugin = configureHistoricalCoordinatorPlugin({
+		scheduleAutomatically: true,
+		pluginOptions: {
+			bdfdb: {
+				dotCN: {messagesscroller: ".messages-scroller"},
+				LibraryStores: {
+					SelectedChannelStore: {getChannelId: () => "channel-history-job"}
+				}
+			}
+		}
+	});
+	const requestedIds = [];
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => item.message.id));
+		return Promise.resolve({"100": "translated"});
+	};
+	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.rerenderMessagesWithScrollPreserved = () => {};
+	const channel = {id: "channel-history-job"};
+
+	try {
+		plugin.attachAutoTranslationScrollWatcher();
+		handlers.pointerdown({type: "pointerdown"});
+		plugin.processMessages({
+			instance: {props: {channel, channelStream: [{content: createMessage("100", "original")}]}}
+		});
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.deepEqual(requestedIds, [["100"]]);
+		await plugin.waitForHistoricalTranslationJobs(channel.id);
+	}
+	finally {
+		plugin.detachAutoTranslationScrollWatcher();
+		plugin.cancelHistoricalTranslationJobs(channel.id, "test-cleanup");
+		global.document = realDocument;
+	}
+});
+
+test("scroll activity from one channel does not hold the next channel snapshot open", async () => {
+	const realDocument = global.document;
+	const handlers = {};
+	let selectedChannelId = "channel-a";
+	const scroller = {
+		addEventListener: (eventName, handler) => {
+			handlers[eventName] = handler;
+		},
+		removeEventListener: () => {}
+	};
+	global.document = {
+		querySelector: selector => selector == ".messages-scroller" ? scroller : null
+	};
+	const plugin = configureHistoricalCoordinatorPlugin({
+		scheduleAutomatically: true,
+		pluginOptions: {
+			bdfdb: {
+				dotCN: {messagesscroller: ".messages-scroller"},
+				LibraryStores: {
+					SelectedChannelStore: {getChannelId: () => selectedChannelId}
+				}
+			}
+		}
+	});
+	const requestedIds = [];
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => item.message.id));
+		return Promise.resolve(Object.fromEntries(preparedItems.map(item => [item.message.id, `translated ${item.message.id}`])));
+	};
+	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.rerenderMessagesWithScrollPreserved = () => {};
+	const channelA = {id: "channel-a"};
+	const channelB = {id: "channel-b"};
+
+	try {
+		plugin.attachAutoTranslationScrollWatcher();
+		handlers.wheel({type: "wheel"});
+		handlers.scroll({type: "scroll"});
+		plugin.processMessages({
+			instance: {props: {channel: channelA, channelStream: [{content: createMessage("100", "channel a")}]}}
+		});
+		selectedChannelId = channelB.id;
+		plugin.processMessages({
+			instance: {props: {channel: channelB, channelStream: [{content: createMessage("200", "channel b")}]}}
+		});
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.deepEqual(requestedIds, [["200"]]);
+		await plugin.waitForHistoricalTranslationJobs(channelB.id);
+	}
+	finally {
+		plugin.detachAutoTranslationScrollWatcher();
+		plugin.cancelHistoricalTranslationJobs(channelA.id, "test-cleanup");
+		plugin.cancelHistoricalTranslationJobs(channelB.id, "test-cleanup");
+		global.document = realDocument;
+	}
+});
+
+test("one loaded message render snapshot starts one atomic ID batch without a wall-clock wait", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const requestedIds = [];
+	let resolveBatch;
+	let rerenderCount = 0;
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => item.message.id));
+		return new Promise(resolve => {
+			resolveBatch = resolve;
+		});
+	};
+	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.rerenderMessagesWithScrollPreserved = () => {
+		rerenderCount++;
+	};
+	const channel = {id: "channel-history-job"};
+	const messages = [createMessage("100", "first"), createMessage("200", "second"), createMessage("300", "third")];
+
+	try {
+		plugin.processMessages({
+			instance: {
+				props: {
+					channel,
+					channelStream: messages.map(message => ({content: message}))
+				}
+			}
+		});
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.deepEqual(requestedIds, [["100", "200", "300"]]);
+
+		resolveBatch({"100": "first translated", "200": "second translated", "300": "third translated"});
+		await plugin.waitForHistoricalTranslationJobs(channel.id);
+		assert.equal(rerenderCount, 1);
+	}
+	finally {
+		plugin.cancelHistoricalTranslationJobs(channel.id, "test-cleanup");
+	}
+});
+
+test("synchronous fallback historical collections coalesce into one ID snapshot", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const requestedIds = [];
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => item.message.id));
+		return Promise.resolve(Object.fromEntries(preparedItems.map(item => [item.message.id, `translated ${item.message.id}`])));
+	};
+	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.rerenderMessagesWithScrollPreserved = () => {};
+
+	try {
+		for (const [id, content] of [["100", "first"], ["200", "second"], ["300", "third"]]) {
+			plugin.queueAutoTranslateMessage(createMessage(id, content), {id: "channel-history-job"}, {content}, {historicalLoad: true});
+		}
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.deepEqual(requestedIds, [["100", "200", "300"]]);
+		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
+	}
+	finally {
+		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
 	}
 });
 
@@ -526,9 +772,8 @@ test("initial loaded-message pass stops at the configured historical job limit",
 });
 
 test("messages loaded during a running historical job form the next atomic job", async () => {
-	const clock = installFakeClock();
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
 	try {
-		const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
 		const batchResolvers = [];
 		const requestedIds = [];
 		let rerenderCount = 0;
@@ -551,10 +796,7 @@ test("messages loaded during a running historical job form the next atomic job",
 
 		batchResolvers.shift()({"100": "第一条"});
 		await firstRunning;
-		await clock.advanceTime(449);
-		assert.deepEqual(requestedIds, [["100"]]);
-
-		await clock.advanceTime(1);
+		await new Promise(resolve => setImmediate(resolve));
 		assert.deepEqual(requestedIds, [["100"], ["200"]]);
 
 		batchResolvers.shift()({"200": "第二条"});
@@ -563,7 +805,7 @@ test("messages loaded during a running historical job form the next atomic job",
 		assert.equal(rerenderCount, 2);
 	}
 	finally {
-		clock.restore();
+		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
 	}
 });
 
