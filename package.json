@@ -8,8 +8,14 @@
     "node": ">=20"
   },
   "scripts": {
+    "build": "node scripts/build-plugin.mjs",
+    "build:debug": "node scripts/build-plugin.mjs --debug > DiscordAITranslator.debug.plugin.js",
+    "build:check": "node scripts/build-plugin.mjs --check",
     "check": "node --check DiscordAITranslator.plugin.js",
     "test": "node --test",
-    "verify": "npm run check && npm test"
+    "verify": "npm run build:check && npm run check && npm test"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
   }
 }
