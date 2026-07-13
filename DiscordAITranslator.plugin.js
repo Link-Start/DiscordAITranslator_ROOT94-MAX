@@ -2988,7 +2988,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   icon: /* @__PURE__ */ __name((_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
                     icon: translated ? translateIconUntranslate : translateIcon
                   }), "icon"),
-                  action: /* @__PURE__ */ __name((_2) => this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false}), "action")
+                  action: /* @__PURE__ */ __name((_2) => this.translateMessage(e.instance.props.message, e.instance.props.channel, { manual: !0, independentOfTextAreaSwitch: !0, trackBusy: !1 }), "action")
                 })), this.injectMessageLanguageActions(children, index + 1, e.instance.props.message, e.instance.props.channel);
               }
             }, "after") }), this.forceUpdateAll();
@@ -6359,7 +6359,7 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
                 icon: /* @__PURE__ */ __name((_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
                   icon: translated ? translateIconUntranslate : translateIcon
                 }), "icon"),
-                action: /* @__PURE__ */ __name((_2) => this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false}), "action")
+                action: /* @__PURE__ */ __name((_2) => this.translateMessage(e.instance.props.message, e.instance.props.channel, { manual: !0, independentOfTextAreaSwitch: !0, trackBusy: !1 }), "action")
               })), this.injectMessageLanguageActions(children, index > -1 ? index + 1 : 0, e.instance.props.message, e.instance.props.channel), this.injectSearchItem(e, !1, e.instance.props.channel.id);
             }
           }
@@ -6417,7 +6417,7 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
                   children: BDFDB.ReactUtils.createElement("div", {
                     className: BDFDB.disCNS.messagetoolbarhoverbutton + BDFDB.disCN.messagetoolbarbutton,
                     onClick: /* @__PURE__ */ __name((_2) => {
-                      _this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false}).then((_3) => {
+                      _this.translateMessage(e.instance.props.message, e.instance.props.channel, { manual: !0, independentOfTextAreaSwitch: !0, trackBusy: !1 }).then((_3) => {
                         translated = !!_this.getActiveMessageTranslation(e.instance.props.message, channelId), BDFDB.ReactUtils.forceUpdate(this);
                       });
                     }, "onClick"),

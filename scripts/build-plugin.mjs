@@ -39,13 +39,7 @@ export async function createPluginBundle({debug = false} = {}) {
 		define: {__TRANSLATOR_DISPLAY_DEBUG__: debug ? "true" : "false"},
 		write: false
 	});
-	const runtime = result.outputFiles[0].text
-		.replace(/\r\n/g, "\n")
-		.replace(
-			/\{\s*manual:\s*!0,\s*independentOfTextAreaSwitch:\s*!0,\s*trackBusy:\s*!1\s*}/g,
-			"{manual: true, independentOfTextAreaSwitch: true, trackBusy: false}"
-		)
-		.trimStart();
+	const runtime = result.outputFiles[0].text.replace(/\r\n/g, "\n").trimStart();
 	return `${createMetadataBanner(metadata)}${runtime.trimEnd()}\n`;
 }
 
@@ -60,6 +54,13 @@ export async function writePluginBundle({check = false, debug = false} = {}) {
 const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 if (isMain) {
 	const debug = process.argv.includes("--debug");
-	const generated = await writePluginBundle({check: process.argv.includes("--check"), debug});
-	if (debug) process.stdout.write(generated);
+	const check = process.argv.includes("--check");
+	if (debug && check) {
+		process.stderr.write("--debug and --check are mutually exclusive.\n");
+		process.exitCode = 1;
+	}
+	else {
+		const generated = await writePluginBundle({check, debug});
+		if (debug) process.stdout.write(generated);
+	}
 }
