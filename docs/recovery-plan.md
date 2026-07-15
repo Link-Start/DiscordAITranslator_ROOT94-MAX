@@ -291,7 +291,7 @@ git commit -m "build: generate plugin from modular source"
 - Create: `src/display/message-state-store.js`
 - Create: `tests/display/message-state-store.test.js`
 
-- [ ] **Step 1: Write failing state ownership tests**
+- [x] **Step 1: Write failing state ownership tests**
 
 Create `tests/display/message-state-store.test.js`:
 
@@ -404,7 +404,7 @@ test("render acknowledgement does not create a new display revision", () => {
 });
 ```
 
-- [ ] **Step 2: Verify the test fails for the missing module**
+- [x] **Step 2: Verify the test fails for the missing module**
 
 Run:
 
@@ -414,7 +414,7 @@ node --test tests/display/message-state-store.test.js
 
 Expected: FAIL with `MODULE_NOT_FOUND`.
 
-- [ ] **Step 3: Implement the store as a deep module**
+- [x] **Step 3: Implement the store as a deep module**
 
 Create `src/display/message-state-store.js` with the API exercised above. The implementation must use these exact exports and record fields:
 
@@ -569,7 +569,7 @@ module.exports = {MESSAGE_STATUSES, RENDER_STATUSES, createMessageStateStore};
 
 Do not expose either internal map. `markRenderOutcome` must not advance `revision`; the DOM marker acknowledges the revision that was actually requested.
 
-- [ ] **Step 4: Run the focused test**
+- [x] **Step 4: Run the focused test**
 
 ```powershell
 node --test tests/display/message-state-store.test.js
@@ -577,13 +577,15 @@ node --test tests/display/message-state-store.test.js
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the complete suite and commit**
+- [x] **Step 5: Run the complete suite and commit**
 
 ```powershell
 npm run verify
 git add src/display/message-state-store.js tests/display/message-state-store.test.js
 git commit -m "refactor: add received message state store"
 ```
+
+**Verification evidence (2026-07-16):** `d966a45`; focused state-store tests `22/22`; full `npm run verify` `237/237`; specification and code-quality reviews approved.
 
 ## Task 3: Add The Translation Display Controller
 
@@ -790,7 +792,7 @@ git commit -m "refactor: add translation display controller"
 - Create: `src/display/discord-render-adapter.js`
 - Create: `tests/display/discord-render-adapter.test.js`
 
-- [ ] **Step 1: Write failing adapter tests**
+- [x] **Step 1: Write failing adapter tests**
 
 Create `tests/display/discord-render-adapter.test.js`:
 
@@ -897,7 +899,7 @@ test("a user scroll after capture prevents anchor correction", async () => {
 });
 ```
 
-- [ ] **Step 2: Verify the tests fail**
+- [x] **Step 2: Verify the tests fail**
 
 ```powershell
 node --test tests/display/discord-render-adapter.test.js
@@ -905,7 +907,7 @@ node --test tests/display/discord-render-adapter.test.js
 
 Expected: FAIL with `MODULE_NOT_FOUND`.
 
-- [ ] **Step 3: Implement exact owner lookup instead of component-name scanning**
+- [x] **Step 3: Implement exact owner lookup instead of component-name scanning**
 
 Create `src/display/discord-render-adapter.js` with dependency injection. Reuse the runtime's existing scroll capture and restoration functions instead of duplicating anchor logic:
 
@@ -969,7 +971,7 @@ module.exports = {createDiscordRenderAdapter};
 
 Do not call `PatchUtils.forceAllUpdates` from this adapter. The direct path uses the actual channel-stream owner. The full-list rerender is a correctness fallback and must run at most once per display transaction.
 
-- [ ] **Step 4: Run the adapter tests and full verification**
+- [x] **Step 4: Run the adapter tests and full verification**
 
 ```powershell
 node --test tests/display/discord-render-adapter.test.js
@@ -978,12 +980,14 @@ npm run verify
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/display/discord-render-adapter.js tests/display/discord-render-adapter.test.js
 git commit -m "refactor: add acknowledged Discord render adapter"
 ```
+
+**Verification evidence (2026-07-16):** `65b24a0`; focused render-adapter tests `10/10`; full `npm run verify` `237/237`; specification and code-quality reviews approved.
 
 ## Task 5: Wire The New Display Runtime Into The Generated Plugin
 
