@@ -824,6 +824,228 @@ var require_display_runtime = __commonJS({
   }
 });
 
+// src/display/translation-display-logic.js
+var require_translation_display_logic = __commonJS({
+  "src/display/translation-display-logic.js"(exports2, module2) {
+    var MESSAGE_DIRECTIONS = Object.freeze({ RECEIVED: "received", SENT: "sent" });
+    function createTranslationDisplayLogic({ BDFDB } = {}) {
+      let translationDisplayLogic = {
+        buildReceivedDisplayContent(plugin, translatedContent, originalContent, forceInlineOriginal = !1) {
+          let content = (translatedContent || "").trim();
+          return originalContent && (forceInlineOriginal || plugin.settings.general.showOriginalMessage && !plugin.settings.general.showOriginalDirectly) && (content += plugin.formatOriginalTextForMessage(originalContent, plugin.shouldUseSpoilerInReceivedOriginal())), content;
+        },
+        refreshTranslationDisplay(plugin, translation) {
+          if (!translation) return null;
+          translation = Object.assign(translation, plugin.normalizeStoredTranslationData(translation));
+          let inlineOriginalBySetting = !!(translation.originalContent && plugin.settings.general.showOriginalMessage && !plugin.settings.general.showOriginalDirectly);
+          return translation.content = translationDisplayLogic.buildReceivedDisplayContent(plugin, translation.translatedContent || translation.content, translation.originalContent, !1), translation.contentIncludesOriginal = inlineOriginalBySetting, translation;
+        },
+        getReplyPreviewDisplayContent(plugin, translation) {
+          if (!translation) return "";
+          translation = plugin.normalizeStoredTranslationData(translation);
+          let originalContent = (translation.originalContent || "").trim(), translatedContent = (translation.translatedContent || translation.content || "").trim();
+          return plugin.settings.general.showOriginalInReplyPreview && translatedContent || originalContent;
+        },
+        stripReplyPreviewOriginalSuffix(_plugin, content) {
+          if (content = (content || "").trim(), !content) return "";
+          if (/\n\|\|[\s\S]*\|\|$/.test(content)) return content.replace(/\n\|\|[\s\S]*\|\|$/, "").trim();
+          let lines = content.split(`
+`), boundaryIndex = lines.length;
+          for (; boundaryIndex > 0 && /^\s*>\s?/.test(lines[boundaryIndex - 1]); ) boundaryIndex--;
+          return boundaryIndex < lines.length ? lines.slice(0, boundaryIndex).join(`
+`).trim() : content;
+        },
+        getStableReplyPreviewOriginalContent(plugin, message) {
+          if (!message) return "";
+          let currentContent = (message.content || "").trim(), storedTranslations = plugin.ensureReceivedDisplayRuntime().getPreviewCandidates(message.id).filter(Boolean);
+          for (let storedTranslation of storedTranslations) {
+            let normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation), originalContent = (normalizedTranslation.originalContent || "").trim(), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim(), displayContent = translationDisplayLogic.getReplyPreviewDisplayContent(plugin, normalizedTranslation).trim();
+            if (originalContent && (!currentContent || currentContent == originalContent || currentContent == translatedContent || currentContent == displayContent || currentContent == translationDisplayLogic.stripReplyPreviewOriginalSuffix(plugin, displayContent)))
+              return originalContent;
+          }
+          return currentContent;
+        },
+        getStableReplyPreviewMessage(plugin, message) {
+          if (!message) return message;
+          let stableMessage = new BDFDB.DiscordObjects.Message(message);
+          return stableMessage.content = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message), stableMessage;
+        },
+        getReplyPreviewFallbackContent(plugin, message) {
+          return message ? translationDisplayLogic.stripReplyPreviewOriginalSuffix(plugin, message.content || "") : "";
+        },
+        getReplyPreviewDisplayContentForMessage(plugin, message, channelId = null) {
+          if (!message) return "";
+          let originalContent = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message) || (message.content || "").trim(), previewProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(message.id, { channelId }), storedTranslation = previewProjection && previewProjection.translation;
+          if (storedTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedTranslation, channelId || translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id))) {
+            let normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
+            if (!normalizedTranslation.auto || plugin.settings.general.showOriginalInReplyPreview) return translatedContent || originalContent;
+          }
+          return originalContent;
+        },
+        applyStoredTranslationToMessage(plugin, message, translation, originalContentData = null) {
+          if (!message || !translation) return null;
+          let storedTranslation = translationDisplayLogic.refreshTranslationDisplay(plugin, Object.assign({
+            channelId: translation.channelId || message.channel_id || null,
+            auto: !!translation.auto
+          }, translation));
+          return plugin.ensureReceivedDisplayRuntime().clearSuppression(message.id), plugin.ensureReceivedDisplayRuntime().commitManualTranslation({
+            messageId: message.id,
+            channelId: storedTranslation.channelId,
+            translation: storedTranslation,
+            manualOptions: { independentOfTextAreaSwitch: !!storedTranslation.independentOfTextAreaSwitch },
+            archive: { message: new BDFDB.DiscordObjects.Message(message), originalContentData: originalContentData || plugin.extractOriginalContentData(message) }
+          }), storedTranslation;
+        },
+        clearDisplayedTranslationState(plugin, messageId, options = {}) {
+          if (!messageId) return;
+          let config = Object.assign({
+            clearReplyPreview: !1,
+            preserveSuppressed: !1
+          }, options);
+          plugin.ensureReceivedDisplayRuntime().clearDisplayedTranslation(messageId, { preserveArchive: !0, preserveSuppressed: config.preserveSuppressed, clearPreview: config.clearReplyPreview }), config.preserveSuppressed || plugin.ensureReceivedDisplayRuntime().clearSuppression(messageId), config.clearReplyPreview && plugin.ensureReceivedDisplayRuntime().clearPreview(messageId);
+        },
+        getStoredTranslationChannelId(plugin, messageId, fallbackChannelId = null, translation = null) {
+          if (fallbackChannelId) return fallbackChannelId;
+          if (translation && translation.channelId) return translation.channelId;
+          let displayedTranslation = plugin.ensureReceivedDisplayRuntime().getDisplayState(messageId);
+          if (displayedTranslation && displayedTranslation.channelId) return displayedTranslation.channelId;
+          let replyPreviewTranslation = plugin.ensureReceivedDisplayRuntime().getPreviewTranslation(messageId);
+          if (replyPreviewTranslation && replyPreviewTranslation.channelId) return replyPreviewTranslation.channelId;
+          let archive = plugin.ensureReceivedDisplayRuntime().peekSourceArchive(messageId);
+          return archive && archive.message.channel_id || null;
+        },
+        shouldDisplayStoredTranslation(plugin, translation, channelId = null) {
+          if (!translation) return !1;
+          let normalizedTranslation = plugin.normalizeStoredTranslationData(translation);
+          if (normalizedTranslation.manual && normalizedTranslation.independentOfTextAreaSwitch) return !0;
+          let resolvedChannelId = channelId || normalizedTranslation.channelId || null;
+          return !(normalizedTranslation.auto && resolvedChannelId && !plugin.isTranslationEnabled(resolvedChannelId));
+        },
+        getStoredTranslationOriginalContent(plugin, translation, fallbackContent = "") {
+          if (!translation) return fallbackContent;
+          let normalizedTranslation = plugin.normalizeStoredTranslationData(translation);
+          return normalizedTranslation.originalContent != null ? String(normalizedTranslation.originalContent) : fallbackContent;
+        },
+        getActiveMessageTranslation(plugin, message, channelId = null, expectedSignature = null) {
+          if (!message || !message.id) return null;
+          let displayRecord = plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id), translation = displayRecord && displayRecord.status == "translated" && displayRecord.translation ? Object.assign({}, displayRecord.translation) : null;
+          if (!translation) return null;
+          let resolvedChannelId = translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id, channelId, translation);
+          return !translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, resolvedChannelId) || expectedSignature && translation.signature && translation.signature != expectedSignature ? (translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id), null) : (translation = translationDisplayLogic.refreshTranslationDisplay(plugin, translation), translation.auto && plugin.isTranslationResultTooSimilar(translation) ? (translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id), plugin.clearCachedTranslation(message.id), null) : translation);
+        },
+        getActiveReplyPreviewTranslation(plugin, message, channelId) {
+          if (!message || !message.id) return null;
+          let translation = plugin.getReplyPreviewTranslation(message, channelId);
+          return translation ? translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, channelId) ? translation : (plugin.ensureReceivedDisplayRuntime().clearPreview(message.id), null) : null;
+        },
+        processMessageReply(plugin, e) {
+          if (!e.instance.props.referencedMessage || !e.instance.props.referencedMessage.message) return;
+          let referencedMessage = e.instance.props.referencedMessage.message, stableReferencedMessage = translationDisplayLogic.getStableReplyPreviewMessage(plugin, referencedMessage), baseMessage = e.instance.props.baseMessage || null, channelId = plugin.getMessageChannelId(baseMessage || stableReferencedMessage), baseProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(stableReferencedMessage.id, { channelId }), storedMessageTranslation = baseProjection && baseProjection.translation;
+          !(storedMessageTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedMessageTranslation, channelId) || translationDisplayLogic.getActiveReplyPreviewTranslation(plugin, stableReferencedMessage, channelId)) && plugin.shouldAutoTranslateReplyPreview(baseMessage, stableReferencedMessage, channelId) && plugin.queueReplyPreviewTranslation(stableReferencedMessage, channelId, { baseMessage });
+          let fallbackContent = translationDisplayLogic.getReplyPreviewDisplayContentForMessage(plugin, stableReferencedMessage, channelId) || translationDisplayLogic.getReplyPreviewFallbackContent(plugin, stableReferencedMessage) || (stableReferencedMessage.content || "").trim();
+          e.instance.props.referencedMessage = Object.assign({}, e.instance.props.referencedMessage);
+          let previewMessage = new BDFDB.DiscordObjects.Message(stableReferencedMessage);
+          previewMessage.content = fallbackContent, plugin.markReplyPreviewRenderMessage(previewMessage), e.instance.props.referencedMessage.message = previewMessage, e.returnvalue && e.returnvalue.props && (e.returnvalue = plugin.wrapReplyPreviewJumpPause(plugin.stripTranslatorStylingFromReplyPreviewNode(e.returnvalue)));
+        },
+        resolveLoadedMessageContentTranslation(plugin, message, channelId) {
+          if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id) || plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return null;
+          let storeView = plugin.getReceivedDisplayRuntimeView(message.id);
+          if (storeView && (storeView.translated || storeView.showLoading)) return null;
+          let originalContentData = plugin.extractOriginalContentData(message), cachedTranslation = plugin.getCachedReceivedTranslation(message, channelId, originalContentData), liveMessage = plugin.isLikelyLiveAutoTranslateMessage(message, channelId);
+          return (cachedTranslation || plugin.shouldAutoTranslateReceivedMessage(message, { id: channelId }, originalContentData)) && plugin.queueAutoTranslateMessage(message, { id: channelId }, originalContentData, {
+            historicalLoad: !liveMessage,
+            deferWhileReading: !1,
+            cachedTranslation
+          }), null;
+        },
+        prepareMessageContentDisplay(plugin, e) {
+          let message = e.instance.props.message, channelId = plugin.getMessageChannelId(message), translation = translationDisplayLogic.getActiveMessageTranslation(plugin, message, channelId);
+          return !translation && plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (message = e.instance.props.message = new BDFDB.DiscordObjects.Message(plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message)), translation || (translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId)), { message, channelId, translation };
+        },
+        createTranslationWatermarkNode(plugin, translation, key) {
+          return !translation || !translation.content ? null : BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
+            key,
+            text: plugin.getTranslationTooltipText(translation.input, translation.output),
+            tooltipConfig: { style: "max-width: 400px" },
+            children: BDFDB.ReactUtils.createElement("span", {
+              className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.messagetimestamp, BDFDB.disCN.messagetimestampinline, BDFDB.disCN._translatortranslated),
+              children: BDFDB.ReactUtils.createElement("span", {
+                className: BDFDB.disCN.messageedited,
+                children: `(${plugin.labels.translated_watermark})`
+              })
+            })
+          });
+        },
+        createTranslationLoadingNode(plugin, message) {
+          return !message || !plugin.isMessageTranslationPending(message.id, plugin.getMessageChannelId(message)) ? null : BDFDB.ReactUtils.createElement("span", {
+            key: "translator-translation-loading",
+            className: "translator-translation-loading",
+            "aria-label": plugin.isChineseUiLanguage() ? "正在翻译" : "Translating"
+          });
+        },
+        clearTranslatedRenderDecorations(_plugin, e) {
+          if (!e || !e.returnvalue || !e.returnvalue.props) return;
+          let className = String(e.returnvalue.props.className || "").split(/\s+/).filter((name) => name && name != "translator-translated-message").join(" ");
+          e.returnvalue.props.className = className;
+          let style = Object.assign({}, e.returnvalue.props.style || {});
+          delete style["--translator-accent-color"], delete style["--translator-text-color"], e.returnvalue.props.style = style;
+        },
+        applyMessageContentRenderDecorations(plugin, e, message, translation) {
+          let children = plugin.ensureElementChildrenArray(e.returnvalue);
+          plugin.cleanupInjectedMessageChildren(children), translationDisplayLogic.clearTranslatedRenderDecorations(plugin, e);
+          let translationPlace = plugin.isOwnMessage(message) ? MESSAGE_DIRECTIONS.SENT : MESSAGE_DIRECTIONS.RECEIVED;
+          translation && plugin.shouldProtectWrappedTextForPlace(translationPlace) && (e.returnvalue.props.children = plugin.highlightProtectedWrappedTextInNode(e.returnvalue.props.children, message.id), children = plugin.ensureElementChildrenArray(e.returnvalue)), translation && plugin.settings.general.highlightTranslatedMessages && (e.returnvalue.props.className = BDFDB.DOMUtils.formatClassName(e.returnvalue.props.className, "translator-translated-message")), translation && (e.returnvalue.props.style = Object.assign({}, e.returnvalue.props.style, {
+            "--translator-accent-color": plugin.getTranslatedTextColor(),
+            "--translator-text-color": plugin.getTranslatedTextColor()
+          }));
+          let watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(plugin, translation, "translator-translated-watermark");
+          watermarkNode && children.push(watermarkNode);
+          let loadingNode = !translation && translationDisplayLogic.createTranslationLoadingNode(plugin, message);
+          loadingNode && children.push(loadingNode), translation && translation.originalContent && plugin.settings.general.showOriginalMessage && plugin.settings.general.showOriginalDirectly && !translation.contentIncludesOriginal && children.push(plugin.createOriginalMessageBlock(translation.originalContent));
+        },
+        processEmbed(plugin, e) {
+          if (!e.instance.props.embed || !e.instance.props.embed.message_id) return;
+          let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, { id: e.instance.props.embed.message_id }, plugin.getDisplayedTranslationChannelId(e.instance.props.embed.message_id));
+          if (!translation) {
+            let storeView = plugin.getReceivedDisplayRuntimeView(e.instance.props.embed.message_id);
+            storeView && storeView.translated && storeView.translation && storeView.translation.embeds && (translation = storeView.translation);
+          }
+          if (translation && Object.keys(translation.embeds).length)
+            if (!e.returnvalue) e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
+              rawDescription: translation.embeds[e.instance.props.embed.id].description,
+              rawTitle: translation.embeds[e.instance.props.embed.id].title,
+              footer: Object.assign({}, e.instance.props.embed.footer || {}, {
+                text: translation.embeds[e.instance.props.embed.id].footerText || ""
+              }),
+              fields: translation.embeds[e.instance.props.embed.id].fields.map((n) => ({ rawName: n.name, rawValue: n.value })),
+              originalDescription: e.instance.props.embed.originalDescription || e.instance.props.embed.rawDescription,
+              originalTitle: e.instance.props.embed.originalTitle || e.instance.props.embed.rawTitle,
+              originalFields: e.instance.props.embed.originalFields || e.instance.props.embed.fields,
+              originalFooter: e.instance.props.embed.originalFooter || Object.assign({}, e.instance.props.embed.footer)
+            });
+            else {
+              let [children, index] = BDFDB.ReactUtils.findParent(e.returnvalue, { props: [["className", BDFDB.disCN.embeddescription]] });
+              if (index > -1) {
+                Array.isArray(children[index].props.children) || (children[index].props.children = [children[index].props.children]), plugin.cleanupInjectedMessageChildren(children[index].props.children);
+                let watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(plugin, translation, "translator-embed-watermark");
+                watermarkNode && children[index].props.children.push(watermarkNode);
+              }
+            }
+          else !e.returnvalue && e.instance.props.embed.originalDescription && (e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
+            rawDescription: e.instance.props.embed.originalDescription,
+            rawTitle: e.instance.props.embed.originalTitle,
+            fields: e.instance.props.embed.originalFields,
+            footer: e.instance.props.embed.originalFooter
+          }), delete e.instance.props.embed.originalDescription, delete e.instance.props.embed.originalTitle, delete e.instance.props.embed.originalFields, delete e.instance.props.embed.originalFooter);
+        }
+      };
+      return translationDisplayLogic;
+    }
+    __name(createTranslationDisplayLogic, "createTranslationDisplayLogic");
+    module2.exports = { MESSAGE_DIRECTIONS, createTranslationDisplayLogic };
+  }
+});
+
 // src/display/repaint-scheduler.js
 var require_repaint_scheduler = __commonJS({
   "src/display/repaint-scheduler.js"(exports2, module2) {
@@ -5528,6 +5750,154 @@ var require_historical_job_registry = __commonJS({
   }
 });
 
+// src/orchestrator/historical-translation-job.js
+var require_historical_translation_job = __commonJS({
+  "src/orchestrator/historical-translation-job.js"(exports2, module2) {
+    var HISTORICAL_TERMINAL_ITEM_STATES = /* @__PURE__ */ new Set(["translated", "skipped", "failed", "cancelled"]), HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, _HistoricalTranslationJob = class _HistoricalTranslationJob {
+      constructor(config = {}) {
+        this.id = config.id || `historical-${Date.now()}`, this.channelId = config.channelId || null, this.generation = config.generation || 0, this.configurationSignature = config.configurationSignature || null, this.dependencies = Object.assign({
+          prepare: /* @__PURE__ */ __name((item) => ({ status: "pending", prepared: item }), "prepare"),
+          translateBatch: /* @__PURE__ */ __name(() => Promise.resolve(null), "translateBatch"),
+          repairBatch: null,
+          validate: /* @__PURE__ */ __name((_item, translatedText) => translatedText == null ? { ok: !1 } : { ok: !0, translation: translatedText }, "validate"),
+          repair: /* @__PURE__ */ __name(() => Promise.resolve({ status: "failed", reason: "unresolved" }), "repair"),
+          waitForCommit: /* @__PURE__ */ __name(() => Promise.resolve(), "waitForCommit"),
+          isCurrent: /* @__PURE__ */ __name(() => !0, "isCurrent"),
+          commit: /* @__PURE__ */ __name(() => {
+          }, "commit"),
+          rerender: /* @__PURE__ */ __name(() => {
+          }, "rerender"),
+          onStateChange: /* @__PURE__ */ __name(() => {
+          }, "onStateChange")
+        }, config.dependencies || {}), this.items = /* @__PURE__ */ new Map(), this.state = "collecting", this.sealed = !1, this.cancelReason = null, this.started = !1, this.repairConcurrency = Math.max(1, parseInt(config.repairConcurrency, 10) || 4), this.repairBatchSize = Math.max(1, parseInt(config.repairBatchSize, 10) || 10);
+      }
+      add(item) {
+        if (this.state != "collecting" || this.sealed) return !1;
+        let source = item && item.message ? item : { message: item }, messageId = source.message && source.message.id;
+        return !messageId || this.items.has(String(messageId)) ? !1 : (this.items.set(String(messageId), {
+          source,
+          prepared: null,
+          status: "pending",
+          translation: null,
+          reason: null
+        }), this.dependencies.onStateChange(this), !0);
+      }
+      seal() {
+        return this.state != "collecting" || this.sealed ? !1 : (this.sealed = !0, this.dependencies.onStateChange(this), !0);
+      }
+      cancel(reason = "cancelled") {
+        if (this.state == "committed" || this.state == "cancelled") return !1;
+        this.cancelReason = reason, this.state = "cancelled";
+        for (let record of this.items.values()) HISTORICAL_TERMINAL_ITEM_STATES.has(record.status) || (record.status = "cancelled");
+        return this.dependencies.onStateChange(this), !0;
+      }
+      invalidateMessage(messageId, reason = "source-changed") {
+        if (this.state == "committed" || this.state == "cancelled") return !1;
+        let record = this.items.get(String(messageId));
+        return !record || record.status == "cancelled" ? !1 : (record.status = "cancelled", record.translation = null, record.reason = reason, this.dependencies.onStateChange(this), !0);
+      }
+      isMessagePending(messageId) {
+        let record = this.items.get(String(messageId));
+        return !!record && this.state != "cancelled" && !HISTORICAL_TERMINAL_ITEM_STATES.has(record.status);
+      }
+      setPreparedOutcome(record, outcome) {
+        outcome = outcome || { status: "failed", reason: "prepare_failed" }, outcome.status == "translated" ? (record.status = "translated", record.translation = outcome.translation) : outcome.status == "skipped" ? (record.status = "skipped", record.reason = outcome.reason || "skipped") : outcome.status == "failed" ? (record.status = "failed", record.reason = outcome.reason || "failed") : (record.status = "translating", record.prepared = outcome.prepared || record.source);
+      }
+      createSummary() {
+        let summary = { jobId: this.id, channelId: this.channelId, generation: this.generation, translated: [], skipped: [], failed: [] };
+        for (let record of this.items.values()) {
+          let item = Object.assign({}, record.source, { translation: record.translation, reason: record.reason });
+          record.status == "translated" ? summary.translated.push(item) : record.status == "skipped" ? summary.skipped.push(item) : record.status == "failed" && summary.failed.push(item);
+        }
+        return summary;
+      }
+      async start() {
+        return this.started ? this.runningPromise : (this.sealed = !0, this.started = !0, this.state = "translating", this.dependencies.onStateChange(this), this.runningPromise = this.run(), this.runningPromise);
+      }
+      async run() {
+        for (let record of this.items.values()) {
+          if (this.state == "cancelled") return this.createSummary();
+          if (record.status != "cancelled")
+            try {
+              this.setPreparedOutcome(record, await this.dependencies.prepare(record.source, this));
+            } catch {
+              this.setPreparedOutcome(record, { status: "failed", reason: "prepare_failed" });
+            }
+        }
+        let translatingRecords = [...this.items.values()].filter((record) => record.status == "translating");
+        if (translatingRecords.length && this.state != "cancelled") {
+          let resultMap = null;
+          try {
+            resultMap = await this.dependencies.translateBatch(translatingRecords.map((record) => record.prepared), this);
+          } catch {
+          }
+          if (this.state == "cancelled") return this.createSummary();
+          for (let record of translatingRecords) {
+            if (record.status == "cancelled") continue;
+            let messageId = String(record.source.message.id), rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null, validation = { ok: !1 };
+            try {
+              validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || { ok: !1 };
+            } catch {
+            }
+            validation.ok ? (record.status = "translated", record.translation = validation.translation) : record.status = "repairing";
+          }
+        }
+        if (this.state == "cancelled") return this.createSummary();
+        let unresolvedBatchRecords = [...this.items.values()].filter((record) => record.status == "repairing");
+        if (unresolvedBatchRecords.length > 1 && typeof this.dependencies.repairBatch == "function") {
+          let chunkSize = Math.min(this.repairBatchSize, Math.max(1, Math.ceil(translatingRecords.length / 2)));
+          for (let offset = 0; offset < unresolvedBatchRecords.length && this.state != "cancelled"; offset += chunkSize) {
+            let chunk = unresolvedBatchRecords.slice(offset, offset + chunkSize).filter((record) => record.status == "repairing");
+            if (!chunk.length) continue;
+            let repairResultMap = null;
+            try {
+              repairResultMap = await this.dependencies.repairBatch(chunk.map((record) => record.prepared), this);
+            } catch {
+            }
+            if (this.state == "cancelled") return this.createSummary();
+            for (let record of chunk) {
+              if (record.status == "cancelled") continue;
+              let messageId = String(record.source.message.id), rawTranslation = repairResultMap && Object.prototype.hasOwnProperty.call(repairResultMap, messageId) ? repairResultMap[messageId] : null, validation = { ok: !1 };
+              try {
+                validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || { ok: !1 };
+              } catch {
+              }
+              validation.ok && (record.status = "translated", record.translation = validation.translation);
+            }
+          }
+        }
+        if (this.state == "cancelled") return this.createSummary();
+        this.state = "repairing", this.dependencies.onStateChange(this);
+        let repairingRecords = [...this.items.values()].filter((record) => record.status == "repairing"), repairIndex = 0, repairNext = /* @__PURE__ */ __name(async () => {
+          for (; repairIndex < repairingRecords.length && this.state != "cancelled"; ) {
+            let record = repairingRecords[repairIndex++];
+            if (!record || record.status == "cancelled") continue;
+            let repairOutcome;
+            try {
+              repairOutcome = await this.dependencies.repair(record.prepared || record.source, this);
+            } catch {
+              repairOutcome = { status: "failed", reason: "repair_failed" };
+            }
+            record.status != "cancelled" && (this.setPreparedOutcome(record, repairOutcome), HISTORICAL_TERMINAL_ITEM_STATES.has(record.status) || (record.status = "failed", record.reason = "repair_failed"));
+          }
+        }, "repairNext");
+        if (await Promise.all(Array.from({ length: Math.min(this.repairConcurrency, repairingRecords.length) }, () => repairNext())), this.state == "cancelled") return this.createSummary();
+        if (this.state = "ready", this.dependencies.onStateChange(this), await this.dependencies.waitForCommit(this), this.state == "cancelled" || !this.dependencies.isCurrent(this))
+          return this.cancel("stale_generation"), this.createSummary();
+        let summary = this.createSummary();
+        return await this.dependencies.commit(summary, this), this.state == "cancelled" ? this.createSummary() : (this.dependencies.rerender(summary, this), this.state = "committed", this.dependencies.onStateChange(this), summary);
+      }
+    };
+    __name(_HistoricalTranslationJob, "HistoricalTranslationJob");
+    var HistoricalTranslationJob = _HistoricalTranslationJob;
+    module2.exports = {
+      HISTORICAL_TERMINAL_ITEM_STATES,
+      HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX,
+      HistoricalTranslationJob
+    };
+  }
+});
+
 // src/protection/protection-logic.js
 var require_protection_logic = __commonJS({
   "src/protection/protection-logic.js"(exports2, module2) {
@@ -8008,7 +8378,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a;
-        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), {
+        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), {
           LOADED_AUTO_TRANSLATE_RANGE_MODES,
           loadedAutoTranslatePolicy,
           aiDecisionPolicy,
@@ -8269,7 +8639,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           _: "··−−·−"
         }, channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
         var pluginRuntimeActive = !0;
-        let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
+        let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
         }, languageTypes = {
@@ -8278,143 +8648,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }, messageTypes = {
           RECEIVED: "received",
           SENT: "sent"
-        }, AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__", HISTORICAL_TERMINAL_ITEM_STATES = /* @__PURE__ */ new Set(["translated", "skipped", "failed", "cancelled"]), _HistoricalTranslationJob = class _HistoricalTranslationJob {
-          constructor(config = {}) {
-            this.id = config.id || `historical-${Date.now()}`, this.channelId = config.channelId || null, this.generation = config.generation || 0, this.configurationSignature = config.configurationSignature || null, this.dependencies = Object.assign({
-              prepare: /* @__PURE__ */ __name((item) => ({ status: "pending", prepared: item }), "prepare"),
-              translateBatch: /* @__PURE__ */ __name(() => Promise.resolve(null), "translateBatch"),
-              repairBatch: null,
-              validate: /* @__PURE__ */ __name((_item, translatedText) => translatedText == null ? { ok: !1 } : { ok: !0, translation: translatedText }, "validate"),
-              repair: /* @__PURE__ */ __name(() => Promise.resolve({ status: "failed", reason: "unresolved" }), "repair"),
-              waitForCommit: /* @__PURE__ */ __name(() => Promise.resolve(), "waitForCommit"),
-              isCurrent: /* @__PURE__ */ __name(() => !0, "isCurrent"),
-              commit: /* @__PURE__ */ __name(() => {
-              }, "commit"),
-              rerender: /* @__PURE__ */ __name(() => {
-              }, "rerender"),
-              onStateChange: /* @__PURE__ */ __name(() => {
-              }, "onStateChange")
-            }, config.dependencies || {}), this.items = /* @__PURE__ */ new Map(), this.state = "collecting", this.sealed = !1, this.cancelReason = null, this.started = !1, this.repairConcurrency = Math.max(1, parseInt(config.repairConcurrency, 10) || 4), this.repairBatchSize = Math.max(1, parseInt(config.repairBatchSize, 10) || 10);
-          }
-          add(item) {
-            if (this.state != "collecting" || this.sealed) return !1;
-            let source = item && item.message ? item : { message: item }, messageId = source.message && source.message.id;
-            return !messageId || this.items.has(String(messageId)) ? !1 : (this.items.set(String(messageId), {
-              source,
-              prepared: null,
-              status: "pending",
-              translation: null,
-              reason: null
-            }), this.dependencies.onStateChange(this), !0);
-          }
-          seal() {
-            return this.state != "collecting" || this.sealed ? !1 : (this.sealed = !0, this.dependencies.onStateChange(this), !0);
-          }
-          cancel(reason = "cancelled") {
-            if (this.state == "committed" || this.state == "cancelled") return !1;
-            this.cancelReason = reason, this.state = "cancelled";
-            for (let record of this.items.values()) HISTORICAL_TERMINAL_ITEM_STATES.has(record.status) || (record.status = "cancelled");
-            return this.dependencies.onStateChange(this), !0;
-          }
-          invalidateMessage(messageId, reason = "source-changed") {
-            if (this.state == "committed" || this.state == "cancelled") return !1;
-            let record = this.items.get(String(messageId));
-            return !record || record.status == "cancelled" ? !1 : (record.status = "cancelled", record.translation = null, record.reason = reason, this.dependencies.onStateChange(this), !0);
-          }
-          isMessagePending(messageId) {
-            let record = this.items.get(String(messageId));
-            return !!record && this.state != "cancelled" && !HISTORICAL_TERMINAL_ITEM_STATES.has(record.status);
-          }
-          setPreparedOutcome(record, outcome) {
-            outcome = outcome || { status: "failed", reason: "prepare_failed" }, outcome.status == "translated" ? (record.status = "translated", record.translation = outcome.translation) : outcome.status == "skipped" ? (record.status = "skipped", record.reason = outcome.reason || "skipped") : outcome.status == "failed" ? (record.status = "failed", record.reason = outcome.reason || "failed") : (record.status = "translating", record.prepared = outcome.prepared || record.source);
-          }
-          createSummary() {
-            let summary = { jobId: this.id, channelId: this.channelId, generation: this.generation, translated: [], skipped: [], failed: [] };
-            for (let record of this.items.values()) {
-              let item = Object.assign({}, record.source, { translation: record.translation, reason: record.reason });
-              record.status == "translated" ? summary.translated.push(item) : record.status == "skipped" ? summary.skipped.push(item) : record.status == "failed" && summary.failed.push(item);
-            }
-            return summary;
-          }
-          async start() {
-            return this.started ? this.runningPromise : (this.sealed = !0, this.started = !0, this.state = "translating", this.dependencies.onStateChange(this), this.runningPromise = this.run(), this.runningPromise);
-          }
-          async run() {
-            for (let record of this.items.values()) {
-              if (this.state == "cancelled") return this.createSummary();
-              if (record.status != "cancelled")
-                try {
-                  this.setPreparedOutcome(record, await this.dependencies.prepare(record.source, this));
-                } catch {
-                  this.setPreparedOutcome(record, { status: "failed", reason: "prepare_failed" });
-                }
-            }
-            let translatingRecords = [...this.items.values()].filter((record) => record.status == "translating");
-            if (translatingRecords.length && this.state != "cancelled") {
-              let resultMap = null;
-              try {
-                resultMap = await this.dependencies.translateBatch(translatingRecords.map((record) => record.prepared), this);
-              } catch {
-              }
-              if (this.state == "cancelled") return this.createSummary();
-              for (let record of translatingRecords) {
-                if (record.status == "cancelled") continue;
-                let messageId = String(record.source.message.id), rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null, validation = { ok: !1 };
-                try {
-                  validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || { ok: !1 };
-                } catch {
-                }
-                validation.ok ? (record.status = "translated", record.translation = validation.translation) : record.status = "repairing";
-              }
-            }
-            if (this.state == "cancelled") return this.createSummary();
-            let unresolvedBatchRecords = [...this.items.values()].filter((record) => record.status == "repairing");
-            if (unresolvedBatchRecords.length > 1 && typeof this.dependencies.repairBatch == "function") {
-              let chunkSize = Math.min(this.repairBatchSize, Math.max(1, Math.ceil(translatingRecords.length / 2)));
-              for (let offset = 0; offset < unresolvedBatchRecords.length && this.state != "cancelled"; offset += chunkSize) {
-                let chunk = unresolvedBatchRecords.slice(offset, offset + chunkSize).filter((record) => record.status == "repairing");
-                if (!chunk.length) continue;
-                let repairResultMap = null;
-                try {
-                  repairResultMap = await this.dependencies.repairBatch(chunk.map((record) => record.prepared), this);
-                } catch {
-                }
-                if (this.state == "cancelled") return this.createSummary();
-                for (let record of chunk) {
-                  if (record.status == "cancelled") continue;
-                  let messageId = String(record.source.message.id), rawTranslation = repairResultMap && Object.prototype.hasOwnProperty.call(repairResultMap, messageId) ? repairResultMap[messageId] : null, validation = { ok: !1 };
-                  try {
-                    validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || { ok: !1 };
-                  } catch {
-                  }
-                  validation.ok && (record.status = "translated", record.translation = validation.translation);
-                }
-              }
-            }
-            if (this.state == "cancelled") return this.createSummary();
-            this.state = "repairing", this.dependencies.onStateChange(this);
-            let repairingRecords = [...this.items.values()].filter((record) => record.status == "repairing"), repairIndex = 0, repairNext = /* @__PURE__ */ __name(async () => {
-              for (; repairIndex < repairingRecords.length && this.state != "cancelled"; ) {
-                let record = repairingRecords[repairIndex++];
-                if (!record || record.status == "cancelled") continue;
-                let repairOutcome;
-                try {
-                  repairOutcome = await this.dependencies.repair(record.prepared || record.source, this);
-                } catch {
-                  repairOutcome = { status: "failed", reason: "repair_failed" };
-                }
-                record.status != "cancelled" && (this.setPreparedOutcome(record, repairOutcome), HISTORICAL_TERMINAL_ITEM_STATES.has(record.status) || (record.status = "failed", record.reason = "repair_failed"));
-              }
-            }, "repairNext");
-            if (await Promise.all(Array.from({ length: Math.min(this.repairConcurrency, repairingRecords.length) }, () => repairNext())), this.state == "cancelled") return this.createSummary();
-            if (this.state = "ready", this.dependencies.onStateChange(this), await this.dependencies.waitForCommit(this), this.state == "cancelled" || !this.dependencies.isCurrent(this))
-              return this.cancel("stale_generation"), this.createSummary();
-            let summary = this.createSummary();
-            return await this.dependencies.commit(summary, this), this.state == "cancelled" ? this.createSummary() : (this.dependencies.rerender(summary, this), this.state = "committed", this.dependencies.onStateChange(this), summary);
-          }
-        };
-        __name(_HistoricalTranslationJob, "HistoricalTranslationJob");
-        let HistoricalTranslationJob = _HistoricalTranslationJob, protectionLogic = createProtectionLogic({ BDFDB }), receivedTranslationRuntime = {
+        }, AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__", protectionLogic = createProtectionLogic({ BDFDB }), receivedTranslationRuntime = {
           // Drains queued live items that can share one AI batch request with the first
           // item: same channel, no cached result, and not already batch-rejected.
           // Returns a burst item to the single-message path, preserving the queue's
@@ -8547,216 +8781,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             let outcome = receivedTranslationRuntime.resolveCheckMessageDisplay(plugin, stream, message, context);
             receivedTranslationRuntime.queueCheckMessageTranslation(plugin, message, channel, context, outcome);
           }
-        }, translationDisplayLogic = {
-          buildReceivedDisplayContent(plugin, translatedContent, originalContent, forceInlineOriginal = !1) {
-            let content = (translatedContent || "").trim();
-            return originalContent && (forceInlineOriginal || plugin.settings.general.showOriginalMessage && !plugin.settings.general.showOriginalDirectly) && (content += plugin.formatOriginalTextForMessage(originalContent, plugin.shouldUseSpoilerInReceivedOriginal())), content;
-          },
-          refreshTranslationDisplay(plugin, translation) {
-            if (!translation) return null;
-            translation = Object.assign(translation, plugin.normalizeStoredTranslationData(translation));
-            let inlineOriginalBySetting = !!(translation.originalContent && plugin.settings.general.showOriginalMessage && !plugin.settings.general.showOriginalDirectly);
-            return translation.content = translationDisplayLogic.buildReceivedDisplayContent(plugin, translation.translatedContent || translation.content, translation.originalContent, !1), translation.contentIncludesOriginal = inlineOriginalBySetting, translation;
-          },
-          getReplyPreviewDisplayContent(plugin, translation) {
-            if (!translation) return "";
-            translation = plugin.normalizeStoredTranslationData(translation);
-            let originalContent = (translation.originalContent || "").trim(), translatedContent = (translation.translatedContent || translation.content || "").trim();
-            return plugin.settings.general.showOriginalInReplyPreview && translatedContent || originalContent;
-          },
-          stripReplyPreviewOriginalSuffix(_plugin, content) {
-            if (content = (content || "").trim(), !content) return "";
-            if (/\n\|\|[\s\S]*\|\|$/.test(content)) return content.replace(/\n\|\|[\s\S]*\|\|$/, "").trim();
-            let lines = content.split(`
-`), boundaryIndex = lines.length;
-            for (; boundaryIndex > 0 && /^\s*>\s?/.test(lines[boundaryIndex - 1]); ) boundaryIndex--;
-            return boundaryIndex < lines.length ? lines.slice(0, boundaryIndex).join(`
-`).trim() : content;
-          },
-          getStableReplyPreviewOriginalContent(plugin, message) {
-            if (!message) return "";
-            let currentContent = (message.content || "").trim(), storedTranslations = plugin.ensureReceivedDisplayRuntime().getPreviewCandidates(message.id).filter(Boolean);
-            for (let storedTranslation of storedTranslations) {
-              let normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation), originalContent = (normalizedTranslation.originalContent || "").trim(), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim(), displayContent = translationDisplayLogic.getReplyPreviewDisplayContent(plugin, normalizedTranslation).trim();
-              if (originalContent && (!currentContent || currentContent == originalContent || currentContent == translatedContent || currentContent == displayContent || currentContent == translationDisplayLogic.stripReplyPreviewOriginalSuffix(plugin, displayContent)))
-                return originalContent;
-            }
-            return currentContent;
-          },
-          getStableReplyPreviewMessage(plugin, message) {
-            if (!message) return message;
-            let stableMessage = new BDFDB.DiscordObjects.Message(message);
-            return stableMessage.content = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message), stableMessage;
-          },
-          getReplyPreviewFallbackContent(plugin, message) {
-            return message ? translationDisplayLogic.stripReplyPreviewOriginalSuffix(plugin, message.content || "") : "";
-          },
-          getReplyPreviewDisplayContentForMessage(plugin, message, channelId = null) {
-            if (!message) return "";
-            let originalContent = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message) || (message.content || "").trim(), previewProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(message.id, { channelId }), storedTranslation = previewProjection && previewProjection.translation;
-            if (storedTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedTranslation, channelId || translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id))) {
-              let normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
-              if (!normalizedTranslation.auto || plugin.settings.general.showOriginalInReplyPreview) return translatedContent || originalContent;
-            }
-            return originalContent;
-          },
-          applyStoredTranslationToMessage(plugin, message, translation, originalContentData = null) {
-            if (!message || !translation) return null;
-            let storedTranslation = translationDisplayLogic.refreshTranslationDisplay(plugin, Object.assign({
-              channelId: translation.channelId || message.channel_id || null,
-              auto: !!translation.auto
-            }, translation));
-            return plugin.ensureReceivedDisplayRuntime().clearSuppression(message.id), plugin.ensureReceivedDisplayRuntime().commitManualTranslation({
-              messageId: message.id,
-              channelId: storedTranslation.channelId,
-              translation: storedTranslation,
-              manualOptions: { independentOfTextAreaSwitch: !!storedTranslation.independentOfTextAreaSwitch },
-              archive: { message: new BDFDB.DiscordObjects.Message(message), originalContentData: originalContentData || plugin.extractOriginalContentData(message) }
-            }), storedTranslation;
-          },
-          clearDisplayedTranslationState(plugin, messageId, options = {}) {
-            if (!messageId) return;
-            let config = Object.assign({
-              clearReplyPreview: !1,
-              preserveSuppressed: !1
-            }, options);
-            plugin.ensureReceivedDisplayRuntime().clearDisplayedTranslation(messageId, { preserveArchive: !0, preserveSuppressed: config.preserveSuppressed, clearPreview: config.clearReplyPreview }), config.preserveSuppressed || plugin.ensureReceivedDisplayRuntime().clearSuppression(messageId), config.clearReplyPreview && plugin.ensureReceivedDisplayRuntime().clearPreview(messageId);
-          },
-          getStoredTranslationChannelId(plugin, messageId, fallbackChannelId = null, translation = null) {
-            if (fallbackChannelId) return fallbackChannelId;
-            if (translation && translation.channelId) return translation.channelId;
-            let displayedTranslation = plugin.ensureReceivedDisplayRuntime().getDisplayState(messageId);
-            if (displayedTranslation && displayedTranslation.channelId) return displayedTranslation.channelId;
-            let replyPreviewTranslation = plugin.ensureReceivedDisplayRuntime().getPreviewTranslation(messageId);
-            if (replyPreviewTranslation && replyPreviewTranslation.channelId) return replyPreviewTranslation.channelId;
-            let archive = plugin.ensureReceivedDisplayRuntime().peekSourceArchive(messageId);
-            return archive && archive.message.channel_id || null;
-          },
-          shouldDisplayStoredTranslation(plugin, translation, channelId = null) {
-            if (!translation) return !1;
-            let normalizedTranslation = plugin.normalizeStoredTranslationData(translation);
-            if (normalizedTranslation.manual && normalizedTranslation.independentOfTextAreaSwitch) return !0;
-            let resolvedChannelId = channelId || normalizedTranslation.channelId || null;
-            return !(normalizedTranslation.auto && resolvedChannelId && !plugin.isTranslationEnabled(resolvedChannelId));
-          },
-          getStoredTranslationOriginalContent(plugin, translation, fallbackContent = "") {
-            if (!translation) return fallbackContent;
-            let normalizedTranslation = plugin.normalizeStoredTranslationData(translation);
-            return normalizedTranslation.originalContent != null ? String(normalizedTranslation.originalContent) : fallbackContent;
-          },
-          getActiveMessageTranslation(plugin, message, channelId = null, expectedSignature = null) {
-            if (!message || !message.id) return null;
-            let displayRecord = plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id), translation = displayRecord && displayRecord.status == "translated" && displayRecord.translation ? Object.assign({}, displayRecord.translation) : null;
-            if (!translation) return null;
-            let resolvedChannelId = translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id, channelId, translation);
-            return !translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, resolvedChannelId) || expectedSignature && translation.signature && translation.signature != expectedSignature ? (translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id), null) : (translation = translationDisplayLogic.refreshTranslationDisplay(plugin, translation), translation.auto && plugin.isTranslationResultTooSimilar(translation) ? (translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id), plugin.clearCachedTranslation(message.id), null) : translation);
-          },
-          getActiveReplyPreviewTranslation(plugin, message, channelId) {
-            if (!message || !message.id) return null;
-            let translation = plugin.getReplyPreviewTranslation(message, channelId);
-            return translation ? translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, channelId) ? translation : (plugin.ensureReceivedDisplayRuntime().clearPreview(message.id), null) : null;
-          },
-          processMessageReply(plugin, e) {
-            if (!e.instance.props.referencedMessage || !e.instance.props.referencedMessage.message) return;
-            let referencedMessage = e.instance.props.referencedMessage.message, stableReferencedMessage = translationDisplayLogic.getStableReplyPreviewMessage(plugin, referencedMessage), baseMessage = e.instance.props.baseMessage || null, channelId = plugin.getMessageChannelId(baseMessage || stableReferencedMessage), baseProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(stableReferencedMessage.id, { channelId }), storedMessageTranslation = baseProjection && baseProjection.translation;
-            !(storedMessageTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedMessageTranslation, channelId) || translationDisplayLogic.getActiveReplyPreviewTranslation(plugin, stableReferencedMessage, channelId)) && plugin.shouldAutoTranslateReplyPreview(baseMessage, stableReferencedMessage, channelId) && plugin.queueReplyPreviewTranslation(stableReferencedMessage, channelId, { baseMessage });
-            let fallbackContent = translationDisplayLogic.getReplyPreviewDisplayContentForMessage(plugin, stableReferencedMessage, channelId) || translationDisplayLogic.getReplyPreviewFallbackContent(plugin, stableReferencedMessage) || (stableReferencedMessage.content || "").trim();
-            e.instance.props.referencedMessage = Object.assign({}, e.instance.props.referencedMessage);
-            let previewMessage = new BDFDB.DiscordObjects.Message(stableReferencedMessage);
-            previewMessage.content = fallbackContent, plugin.markReplyPreviewRenderMessage(previewMessage), e.instance.props.referencedMessage.message = previewMessage, e.returnvalue && e.returnvalue.props && (e.returnvalue = plugin.wrapReplyPreviewJumpPause(plugin.stripTranslatorStylingFromReplyPreviewNode(e.returnvalue)));
-          },
-          resolveLoadedMessageContentTranslation(plugin, message, channelId) {
-            if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id) || plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return null;
-            let storeView = plugin.getReceivedDisplayRuntimeView(message.id);
-            if (storeView && (storeView.translated || storeView.showLoading)) return null;
-            let originalContentData = plugin.extractOriginalContentData(message), cachedTranslation = plugin.getCachedReceivedTranslation(message, channelId, originalContentData), liveMessage = plugin.isLikelyLiveAutoTranslateMessage(message, channelId);
-            return (cachedTranslation || plugin.shouldAutoTranslateReceivedMessage(message, { id: channelId }, originalContentData)) && plugin.queueAutoTranslateMessage(message, { id: channelId }, originalContentData, {
-              historicalLoad: !liveMessage,
-              deferWhileReading: !1,
-              cachedTranslation
-            }), null;
-          },
-          prepareMessageContentDisplay(plugin, e) {
-            let message = e.instance.props.message, channelId = plugin.getMessageChannelId(message), translation = translationDisplayLogic.getActiveMessageTranslation(plugin, message, channelId);
-            return !translation && plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (message = e.instance.props.message = new BDFDB.DiscordObjects.Message(plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message)), translation || (translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId)), { message, channelId, translation };
-          },
-          createTranslationWatermarkNode(plugin, translation, key) {
-            return !translation || !translation.content ? null : BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
-              key,
-              text: plugin.getTranslationTooltipText(translation.input, translation.output),
-              tooltipConfig: { style: "max-width: 400px" },
-              children: BDFDB.ReactUtils.createElement("span", {
-                className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.messagetimestamp, BDFDB.disCN.messagetimestampinline, BDFDB.disCN._translatortranslated),
-                children: BDFDB.ReactUtils.createElement("span", {
-                  className: BDFDB.disCN.messageedited,
-                  children: `(${plugin.labels.translated_watermark})`
-                })
-              })
-            });
-          },
-          createTranslationLoadingNode(plugin, message) {
-            return !message || !plugin.isMessageTranslationPending(message.id, plugin.getMessageChannelId(message)) ? null : BDFDB.ReactUtils.createElement("span", {
-              key: "translator-translation-loading",
-              className: "translator-translation-loading",
-              "aria-label": plugin.isChineseUiLanguage() ? "正在翻译" : "Translating"
-            });
-          },
-          clearTranslatedRenderDecorations(_plugin, e) {
-            if (!e || !e.returnvalue || !e.returnvalue.props) return;
-            let className = String(e.returnvalue.props.className || "").split(/\s+/).filter((name) => name && name != "translator-translated-message").join(" ");
-            e.returnvalue.props.className = className;
-            let style = Object.assign({}, e.returnvalue.props.style || {});
-            delete style["--translator-accent-color"], delete style["--translator-text-color"], e.returnvalue.props.style = style;
-          },
-          applyMessageContentRenderDecorations(plugin, e, message, translation) {
-            let children = plugin.ensureElementChildrenArray(e.returnvalue);
-            plugin.cleanupInjectedMessageChildren(children), translationDisplayLogic.clearTranslatedRenderDecorations(plugin, e);
-            let translationPlace = plugin.isOwnMessage(message) ? messageTypes.SENT : messageTypes.RECEIVED;
-            translation && plugin.shouldProtectWrappedTextForPlace(translationPlace) && (e.returnvalue.props.children = plugin.highlightProtectedWrappedTextInNode(e.returnvalue.props.children, message.id), children = plugin.ensureElementChildrenArray(e.returnvalue)), translation && plugin.settings.general.highlightTranslatedMessages && (e.returnvalue.props.className = BDFDB.DOMUtils.formatClassName(e.returnvalue.props.className, "translator-translated-message")), translation && (e.returnvalue.props.style = Object.assign({}, e.returnvalue.props.style, {
-              "--translator-accent-color": plugin.getTranslatedTextColor(),
-              "--translator-text-color": plugin.getTranslatedTextColor()
-            }));
-            let watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(plugin, translation, "translator-translated-watermark");
-            watermarkNode && children.push(watermarkNode);
-            let loadingNode = !translation && translationDisplayLogic.createTranslationLoadingNode(plugin, message);
-            loadingNode && children.push(loadingNode), translation && translation.originalContent && plugin.settings.general.showOriginalMessage && plugin.settings.general.showOriginalDirectly && !translation.contentIncludesOriginal && children.push(plugin.createOriginalMessageBlock(translation.originalContent));
-          },
-          processEmbed(plugin, e) {
-            if (!e.instance.props.embed || !e.instance.props.embed.message_id) return;
-            let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, { id: e.instance.props.embed.message_id }, plugin.getDisplayedTranslationChannelId(e.instance.props.embed.message_id));
-            if (!translation) {
-              let storeView = plugin.getReceivedDisplayRuntimeView(e.instance.props.embed.message_id);
-              storeView && storeView.translated && storeView.translation && storeView.translation.embeds && (translation = storeView.translation);
-            }
-            if (translation && Object.keys(translation.embeds).length)
-              if (!e.returnvalue) e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
-                rawDescription: translation.embeds[e.instance.props.embed.id].description,
-                rawTitle: translation.embeds[e.instance.props.embed.id].title,
-                footer: Object.assign({}, e.instance.props.embed.footer || {}, {
-                  text: translation.embeds[e.instance.props.embed.id].footerText || ""
-                }),
-                fields: translation.embeds[e.instance.props.embed.id].fields.map((n) => ({ rawName: n.name, rawValue: n.value })),
-                originalDescription: e.instance.props.embed.originalDescription || e.instance.props.embed.rawDescription,
-                originalTitle: e.instance.props.embed.originalTitle || e.instance.props.embed.rawTitle,
-                originalFields: e.instance.props.embed.originalFields || e.instance.props.embed.fields,
-                originalFooter: e.instance.props.embed.originalFooter || Object.assign({}, e.instance.props.embed.footer)
-              });
-              else {
-                let [children, index] = BDFDB.ReactUtils.findParent(e.returnvalue, { props: [["className", BDFDB.disCN.embeddescription]] });
-                if (index > -1) {
-                  Array.isArray(children[index].props.children) || (children[index].props.children = [children[index].props.children]), plugin.cleanupInjectedMessageChildren(children[index].props.children);
-                  let watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(plugin, translation, "translator-embed-watermark");
-                  watermarkNode && children[index].props.children.push(watermarkNode);
-                }
-              }
-            else !e.returnvalue && e.instance.props.embed.originalDescription && (e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
-              rawDescription: e.instance.props.embed.originalDescription,
-              rawTitle: e.instance.props.embed.originalTitle,
-              fields: e.instance.props.embed.originalFields,
-              footer: e.instance.props.embed.originalFooter
-            }), delete e.instance.props.embed.originalDescription, delete e.instance.props.embed.originalTitle, delete e.instance.props.embed.originalFields, delete e.instance.props.embed.originalFooter);
-          }
-        }, foreignLanguageDecisionRuntime = {
+        }, translationDisplayLogic = createTranslationDisplayLogic({ BDFDB }), foreignLanguageDecisionRuntime = {
           isDetectedLanguageForeign(plugin, detectedLanguageId, targetLanguageId) {
             return !!detectedLanguageId && !plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId);
           },
