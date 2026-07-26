@@ -593,7 +593,7 @@ git commit -m "refactor: add received message state store"
 - Create: `src/display/translation-display-controller.js`
 - Create: `tests/display/translation-display-controller.test.js`
 
-- [ ] **Step 1: Add failing controller tests**
+- [x] **Step 1: Add failing controller tests**
 
 Create `tests/display/translation-display-controller.test.js`:
 
@@ -679,7 +679,7 @@ test("missing render acknowledgement remains inspectable without changing the di
 });
 ```
 
-- [ ] **Step 2: Verify the controller test fails**
+- [x] **Step 2: Verify the controller test fails**
 
 ```powershell
 node --test tests/display/translation-display-controller.test.js
@@ -687,7 +687,7 @@ node --test tests/display/translation-display-controller.test.js
 
 Expected: FAIL with `MODULE_NOT_FOUND`.
 
-- [ ] **Step 3: Implement the controller**
+- [x] **Step 3: Implement the controller**
 
 Create `src/display/translation-display-controller.js`:
 
@@ -770,7 +770,7 @@ function createTranslationDisplayController({store, renderAdapter}) {
 module.exports = {createDisplayView, createTranslationDisplayController};
 ```
 
-- [ ] **Step 4: Run focused and full tests**
+- [x] **Step 4: Run focused and full tests**
 
 ```powershell
 node --test tests/display/message-state-store.test.js tests/display/translation-display-controller.test.js
@@ -779,12 +779,14 @@ npm run verify
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/display tests/display
 git commit -m "refactor: add translation display controller"
 ```
+
+**Verification evidence (2026-07-26):** `7ffad07`; red phase reproduced `MODULE_NOT_FOUND` with the module absent; focused controller tests `19/19`; full `npm run verify` `256/256`. The committed controller hardens the plan baseline: it filters late render acknowledgements against the current display revision (reported as `staleIds`) and rejects a transaction whose records lack views instead of silently dropping them.
 
 ## Task 4: Add The Discord Render Adapter And Render Acknowledgement
 
