@@ -1877,9 +1877,9 @@ git commit -m "docs: record display milestone verification"
 - Deployed SHA-256: `422E76152EEE14FAA38F90B130A4C0CB4CCF6EFF02ECCC8EE04FD83F782F0BDC` (2026-07-26 18:27, `443a54a`; backups `-175610` and `-182726` retained)
 - DiscordPTB smoke gate: first operator pass FAILED and the defect is fixed — the loaded-history capsule stalled at `0/N` with N growing while the client janked, because per-commit scroll restores fired scroll events that kept extending the user-scroll idle window, starving the snapshot seal; reproduced in `tests/integration/received-display-throughput.test.js`, fixed in `443a54a` (programmatic-scroll grace window plus coalesced live display flushes), redeployed. The eight observation checks now need a fresh operator pass.
 
-## Later Milestones
+## Later Milestones — RETIRED, superseded by `docs/extraction-plan.md`
 
-These milestones require separate detailed plans after the display milestone is verified:
+The original list cut milestones by feature and by layer and scheduled legacy removal last:
 
 1. Reply, embed, thread-title, edit, and sent-original lifecycle ownership
 2. Translation orchestrator and live/historical queue extraction
@@ -1888,4 +1888,17 @@ These milestones require separate detailed plans after the display milestone is 
 5. Versioned settings, credentials, channel settings, cache, and migration stores
 6. Remaining legacy removal, test consolidation, size enforcement, and canonical documentation update
 
-No later milestone begins while the display smoke gate has an unresolved failure.
+That ordering was retired after measurement showed it could not shrink the legacy runtime.
+Task 9 of this plan — "remove the replaced received display path" — deleted zero production
+lines because `translatedMessages` is read by six unrelated features, so a display-scoped
+milestone can never drive its reader count to zero. The same argument applies to every row
+above. The four commits after this milestone added 394 lines to `src/legacy/runtime.js` and 5
+to `src/display`, because state that lives in the plugin factory closure is free to read from
+anywhere while modules must be hand-injected.
+
+The replacement cuts by state ownership and deletes the owned state in the same commit, with a
+ratchet (`tests/architecture-budget.test.js`) that fails the suite whenever `runtime.js` or its
+module-level var count grows. See `docs/extraction-plan.md`.
+
+The display milestone recorded above stands as completed history; its outstanding debt is
+listed in the replacement plan and paid in that plan's M0.
