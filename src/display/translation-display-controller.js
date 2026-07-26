@@ -107,9 +107,13 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 		},
 		async commitHistoricalBatch(results) {
 			const outcome = store.commitBatch(results);
-			if (outcome.committed.length) return refreshRecords(outcome.committed);
-			if (!outcome.rejected.length) return createEmptyOutcome();
-			return createEmptyOutcome({rejectedIds: outcome.rejected.map(result => String(result.messageId))});
+			if (!outcome.committed.length) {
+				if (!outcome.rejected.length) return createEmptyOutcome();
+				return createEmptyOutcome({rejectedIds: outcome.rejected.map(result => String(result.messageId))});
+			}
+			const refreshOutcome = await refreshRecords(outcome.committed);
+			if (outcome.rejected.length) refreshOutcome.rejectedIds = outcome.rejected.map(result => String(result.messageId));
+			return refreshOutcome;
 		},
 		async restoreMessage(messageId, {refresh = true} = {}) {
 			const records = store.restoreMessage(messageId);

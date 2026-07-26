@@ -1541,6 +1541,9 @@ module.exports = (_ => {
 			},
 			captureReceivedDisplaySource(plugin, message, context) {
 				if (!context.channelId || plugin.isOwnMessage(message)) return null;
+				// A disabled channel captures nothing: recapturing during the restore repaint
+				// would replace cancelled records and break the transaction's acknowledgement.
+				if (!plugin.isTranslationEnabled(context.channelId)) return null;
 				const previousView = plugin.getReceivedDisplayRuntimeView(message.id);
 				const generation = plugin.getReceivedDisplayGeneration(context.channelId);
 				const record = plugin.captureReceivedMessageSource({
@@ -7972,7 +7975,8 @@ module.exports = (_ => {
 					try {batchOutcome = await this.commitHistoricalReceivedDisplayBatch(results);}
 					catch (error) {batchOutcome = null;}
 				}
-				const batchRejected = !!(results.length && (!batchOutcome || Array.isArray(batchOutcome.rejectedIds) && batchOutcome.rejectedIds.length));
+				const batchCommitted = !!(batchOutcome && (batchOutcome.confirmedIds && batchOutcome.confirmedIds.length || batchOutcome.missingIds && batchOutcome.missingIds.length || batchOutcome.staleIds && batchOutcome.staleIds.length || batchOutcome.deferredIds && batchOutcome.deferredIds.length));
+				const batchRejected = !!(results.length && !batchCommitted);
 				const failedCount = this.updateFailedHistoricalTranslationSnapshots(summary, job.channelId);
 				this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed: batchRejected ? 0 : summary.translated.length, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length});
 			}
@@ -8135,16 +8139,13 @@ module.exports = (_ => {
 
 			onMessageContextMenu (e) {
 				if (e.instance.props.message && e.instance.props.channel) {
-					let translated = !!translatedMessages[e.instance.props.message.id];
+					let translated = this.isMessageDisplayTranslated(e.instance.props.message, e.instance.props.channel.id);
 					let hint = BDFDB.BDUtils.isPluginEnabled("MessageUtilities") ? BDFDB.BDUtils.getPlugin("MessageUtilities").getActiveShortcutString("__Translate_Message") : null;
 					let [children, index] = BDFDB.ContextMenuUtils.findItem(e.returnvalue, {id: ["copy-text", "pin", "unpin"]});
 					if (index == -1) [children, index] = BDFDB.ContextMenuUtils.findItem(e.returnvalue, {id: ["edit", "add-reaction", "add-reaction-1", "quote"]});
 					children.splice(index > -1 ? index + 1 : 0, 0, BDFDB.ContextMenuUtils.createItem(BDFDB.LibraryComponents.MenuItems.MenuItem, {
 						label: translated ? this.labels.context_messageuntranslateoption : this.labels.context_messagetranslateoption,
 						id: BDFDB.ContextMenuUtils.createItemId(this.name, translated ? "untranslate-message" : "translate-message"),
-						icon: hint && (_ => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuHint, {
-							hint: hint
-						})),
 						icon: _ => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
 							icon: translated ? translateIconUntranslate : translateIcon
 						}),
@@ -8474,9 +8475,21 @@ module.exports = (_ => {
 				}, overrides);
 			}
 
+			// Display composition happens at render time so Display settings changed after a
+			// commit still shape the painted content; the frozen store record keeps only the
+			// translation facts.
+			getReceivedDisplayViewRenderContent (view) {
+				if (!view) return "";
+				if (view.translated && view.translation) {
+					const translatedContent = view.translation.translatedContent != null && view.translation.translatedContent !== "" ? view.translation.translatedContent : view.translation.content;
+					return this.buildReceivedDisplayContent(String(translatedContent == null ? "" : translatedContent), view.translation.originalContent || "");
+				}
+				return String(view.content == null ? "" : view.content);
+			}
+
 			applyReceivedDisplayViewToStream (stream, view) {
 				if (!stream || !stream.content || !view) return;
-				const displayContent = String(view.content == null ? "" : view.content);
+				const displayContent = this.getReceivedDisplayViewRenderContent(view);
 				if (stream.content.content === displayContent) return;
 				const clonedMessage = new BDFDB.DiscordObjects.Message(stream.content);
 				clonedMessage.content = displayContent;
@@ -8501,7 +8514,7 @@ module.exports = (_ => {
 					});
 					const watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(this, view.translation, "translator-translated-watermark");
 					if (watermarkNode) this.ensureElementChildrenArray(e.returnvalue).push(watermarkNode);
-					if (view.translation.originalContent && this.settings.general.showOriginalMessage && this.settings.general.showOriginalDirectly && !view.translation.contentIncludesOriginal) this.ensureElementChildrenArray(e.returnvalue).push(this.createOriginalMessageBlock(view.translation.originalContent));
+					if (view.translation.originalContent && this.settings.general.showOriginalMessage && this.settings.general.showOriginalDirectly) this.ensureElementChildrenArray(e.returnvalue).push(this.createOriginalMessageBlock(view.translation.originalContent));
 					return;
 				}
 				if (view.showLoading) this.ensureElementChildrenArray(e.returnvalue).push(BDFDB.ReactUtils.createElement("span", {

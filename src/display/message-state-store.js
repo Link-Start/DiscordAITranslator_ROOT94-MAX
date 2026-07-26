@@ -217,9 +217,14 @@ function createMessageStateStore({journal = null} = {}) {
 		},
 		commitBatch(results) {
 			const channelIds = new Set(results.map(result => normalizeIdentity(result && result.channelId)));
-			const rejected = channelIds.size === 1 ? results.filter(result => !validatesTerminalResult(result)) : results.slice();
-			if (rejected.length) return {committed: [], rejected};
-			return {committed: results.map(applyResult), rejected: []};
+			if (channelIds.size !== 1) return {committed: [], rejected: results.slice()};
+			// A result for a message this store never captured cannot display here and must
+			// not poison the batch; atomicity covers only results with a tracked record.
+			const recordless = results.filter(result => !result || typeof result !== "object" || !records.has(normalizeIdentity(result.messageId)));
+			const recorded = results.filter(result => !recordless.includes(result));
+			const rejected = recorded.filter(result => !validatesTerminalResult(result));
+			if (rejected.length) return {committed: [], rejected: rejected.concat(recordless)};
+			return {committed: recorded.map(applyResult), rejected: recordless};
 		},
 		releasePending(request) {
 			if (!request || typeof request !== "object") return null;

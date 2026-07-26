@@ -490,3 +490,18 @@ test("restoreMessage cancels one automatic record and leaves manual-origin recor
 	assert.deepEqual(store.restoreMessage("missing"), []);
 	assert.deepEqual(store.restoreMessage("m1"), []);
 });
+
+test("commitBatch rejects unrecorded results individually without discarding the batch", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "One"));
+
+	const outcome = store.commitBatch([
+		translated("m1", "c1", "One", "一"),
+		{messageId: "never-captured", channelId: "c1", generation: 1, sourceSignature: "c1:never-captured:x", origin: "automatic", status: "translated", translation: {content: "孤儿"}}
+	]);
+
+	assert.deepEqual(outcome.committed.map(record => record.messageId), ["m1"]);
+	assert.deepEqual(outcome.rejected.map(result => result.messageId), ["never-captured"]);
+	assert.equal(store.getDisplayState("m1").status, "translated");
+	assert.equal(store.getDisplayState("never-captured"), null);
+});
