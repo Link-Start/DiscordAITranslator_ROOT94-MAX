@@ -1226,9 +1226,9 @@ module.exports = (_ => {
 					preserveSuppressed: false
 				}, options);
 				plugin.ensureReceivedDisplayRuntime().clearDisplayedTranslation(messageId, {preserveArchive: true, preserveSuppressed: config.preserveSuppressed, clearPreview: config.clearReplyPreview});
-				// oldMessages[messageId] intentionally survives this clear: a rendered message
-				// whose props still carry translated text needs the clone on its next render
-				// to restore the original; the render path deletes the clone after consuming it.
+				// preserveArchive is not an optimisation: a rendered message whose props still
+				// carry translated text needs the archived source on its next render to restore
+				// the original, and the render path consumes the archive once it has done so.
 				if (!config.preserveSuppressed) plugin.ensureReceivedDisplayRuntime().clearSuppression(messageId);
 				if (config.clearReplyPreview) {
 					plugin.ensureReceivedDisplayRuntime().clearPreview(messageId);
