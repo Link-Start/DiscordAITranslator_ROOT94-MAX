@@ -1278,7 +1278,7 @@ git commit -m "refactor: route received display through one state owner"
 - Modify: `src/legacy/runtime.js`
 - Create: `tests/integration/received-display-lifecycle.test.js`
 
-- [ ] **Step 1: Write failing lifecycle regressions**
+- [x] **Step 1: Write failing lifecycle regressions**
 
 Create `tests/integration/received-display-lifecycle.test.js`:
 
@@ -1406,7 +1406,7 @@ test("plugin start replaces the stopped display runtime", async () => {
 });
 ```
 
-- [ ] **Step 2: Verify the tests fail**
+- [x] **Step 2: Verify the tests fail**
 
 ```powershell
 npm run build
@@ -1415,7 +1415,7 @@ node --test tests/integration/received-display-lifecycle.test.js
 
 Expected: FAIL on the current clear-then-rerender lifecycle.
 
-- [ ] **Step 3: Make restoration a controller transaction**
+- [x] **Step 3: Make restoration a controller transaction**
 
 When disabling, `toggleTranslation(channelId)` becomes async and executes in this order:
 
@@ -1434,7 +1434,7 @@ Do not delete immutable source snapshots during channel disable.
 
 `onStart()` creates a fresh display runtime before accepting new work. It does not reuse the stopped runtime, so a reload cannot expose stale translated state from the previous plugin instance.
 
-- [ ] **Step 4: Run focused and full verification**
+- [x] **Step 4: Run focused and full verification**
 
 ```powershell
 npm run build
@@ -1444,12 +1444,14 @@ npm run verify
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src DiscordAITranslator.plugin.js tests
 git commit -m "fix: restore received originals through display transactions"
 ```
+
+**Verification evidence (2026-07-26):** `adcfa60`; red phase observed 4/6 lifecycle failures on the clear-then-rerender lifecycle (the two passing tests exercised Task 5 machinery only); focused lifecycle plus channel-enablement and translation regressions `83/83`; full `npm run verify` `268/268`. Adjustments against the plan baseline: `toggleTranslation` performs the legacy clears synchronously before awaiting the restore transaction because existing regressions assert cleared state immediately after an un-awaited call; the disable path increments the store channel generation only when the store already tracks the channel; the harness scroller stubs `addEventListener`/`getBoundingClientRect` and the harness document stubs `getElementById` so the immediate rerender path runs under tests.
 
 ## Task 7: Make Historical And Live Display Commits Explicit
 
