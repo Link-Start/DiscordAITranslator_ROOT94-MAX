@@ -20,6 +20,43 @@ function createPluginInstance(options = {}) {
 			load: () => ({}),
 			save: () => {}
 		},
+		// The render patches build class names and nodes through these. Without them every
+		// assertion about how a translated message is styled dies on an undefined
+		// namespace, which is why the styling had no coverage at all.
+		DOMUtils: {
+			formatClassName: (...names) => names.filter(Boolean).join(" "),
+			addClass: () => {},
+			removeClass: () => {},
+			containsClass: () => false
+		},
+		ReactUtils: {
+			createElement: (type, props) => ({type, props}),
+			forceUpdate: () => {},
+			findParent: () => null,
+			getValue: () => null
+		},
+		// Any component, and any namespace it might expose (Colors, Looks, Sizes, Tags,
+		// Align, Names, ...), answers with the key name. Enough for render code to build
+		// a tree; nothing here asserts what Discord would actually draw.
+		LibraryComponents: new Proxy({}, {
+			get(target, name) {
+				if (typeof name == "symbol") return undefined;
+				if (!target[name]) {
+					const Component = function () {};
+					Component.displayName = String(name);
+					target[name] = new Proxy(Component, {
+						get(component, key) {
+							if (typeof key == "symbol" || key in component) return component[key];
+							if (!component["__ns_" + String(key)]) component["__ns_" + String(key)] = new Proxy({}, {get: (_, inner) => typeof inner == "symbol" ? undefined : String(inner)});
+							return component["__ns_" + String(key)];
+						}
+					});
+				}
+				return target[name];
+			}
+		}),
+		disCN: new Proxy({}, {get: (_, name) => typeof name == "symbol" ? undefined : String(name)}),
+		disCNS: new Proxy({}, {get: (_, name) => typeof name == "symbol" ? undefined : String(name) + " "}),
 		DiscordObjects: {
 			Message: class Message {
 				constructor(data) {
