@@ -346,6 +346,13 @@ function configureHistoricalCoordinatorPlugin(options = {}) {
 	plugin.updateLoadedAutoTranslationStatus = () => {};
 	plugin.persistTranslationCacheEntry = () => {};
 	plugin.persistReceivedSkipDecision = () => {};
+	// Store batch commits resolve synchronously in coordinator tests; recorded calls let
+	// commit-count tests assert the acknowledged display contract.
+	plugin.historicalDisplayBatchCommits = [];
+	plugin.commitHistoricalReceivedDisplayBatch = results => {
+		plugin.historicalDisplayBatchCommits.push(results);
+		return Promise.resolve({confirmedIds: results.map(result => String(result.messageId)), missingIds: [], fallbackUsed: false});
+	};
 	return plugin;
 }
 
@@ -647,7 +654,7 @@ test("one loaded message render snapshot starts one atomic ID batch without a wa
 			resolveBatch = resolve;
 		});
 	};
-	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("historical automatic results must not write the legacy display map");};
 	plugin.rerenderMessagesWithScrollPreserved = () => {
 		rerenderCount++;
 	};
@@ -669,7 +676,10 @@ test("one loaded message render snapshot starts one atomic ID batch without a wa
 
 		resolveBatch({"100": "first translated", "200": "second translated", "300": "third translated"});
 		await plugin.waitForHistoricalTranslationJobs(channel.id);
-		assert.equal(rerenderCount, 1);
+		assert.equal(rerenderCount, 0);
+		assert.equal(plugin.historicalDisplayBatchCommits.length, 1);
+		assert.deepEqual(plugin.historicalDisplayBatchCommits[0].map(result => result.messageId), ["100", "200", "300"]);
+		assert.equal(plugin.historicalDisplayBatchCommits[0].every(result => result.status === "translated" && result.origin === "automatic" && result.channelId === "channel-history-job"), true);
 	}
 	finally {
 		plugin.cancelHistoricalTranslationJobs(channel.id, "test-cleanup");
@@ -702,16 +712,12 @@ test("synchronous fallback historical collections coalesce into one ID snapshot"
 
 test("historical coordinator keeps loading state until one atomic commit", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
-	const appliedIds = [];
 	let rerenderCount = 0;
 	let resolveBatch;
 	plugin.requestAiBatchTranslation = () => new Promise(resolve => {
 		resolveBatch = resolve;
 	});
-	plugin.applyStoredTranslationToMessage = message => {
-		appliedIds.push(message.id);
-		return {};
-	};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("historical automatic results must not write the legacy display map");};
 	plugin.rerenderMessagesWithScrollPreserved = () => {
 		rerenderCount++;
 	};
@@ -728,14 +734,16 @@ test("historical coordinator keeps loading state until one atomic commit", async
 
 	assert.equal(plugin.isHistoricalMessagePending("100", "channel-history-job"), true);
 	assert.equal(plugin.isHistoricalMessagePending("200", "channel-history-job"), true);
-	assert.deepEqual(appliedIds, []);
+	assert.deepEqual(plugin.historicalDisplayBatchCommits, []);
 	assert.equal(rerenderCount, 0);
 
 	resolveBatch({"100": "第一条", "200": "第二条"});
 	await running;
 
-	assert.deepEqual(appliedIds, ["100", "200"]);
-	assert.equal(rerenderCount, 1);
+	assert.equal(plugin.historicalDisplayBatchCommits.length, 1);
+	assert.deepEqual(plugin.historicalDisplayBatchCommits[0].map(result => result.messageId), ["100", "200"]);
+	assert.equal(plugin.historicalDisplayBatchCommits[0].every(result => result.status === "translated"), true);
+	assert.equal(rerenderCount, 0);
 	assert.equal(plugin.isHistoricalMessagePending("100", "channel-history-job"), false);
 });
 
@@ -781,7 +789,7 @@ test("messages loaded during a running historical job form the next atomic job",
 			requestedIds.push(preparedItems.map(item => item.message.id));
 			return new Promise(resolve => batchResolvers.push(resolve));
 		};
-		plugin.applyStoredTranslationToMessage = () => ({});
+		plugin.applyStoredTranslationToMessage = () => {throw new Error("historical automatic results must not write the legacy display map");};
 		plugin.rerenderMessagesWithScrollPreserved = () => {
 			rerenderCount++;
 		};
@@ -802,7 +810,10 @@ test("messages loaded during a running historical job form the next atomic job",
 		batchResolvers.shift()({"200": "第二条"});
 		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
 
-		assert.equal(rerenderCount, 2);
+		assert.equal(rerenderCount, 0);
+		assert.equal(plugin.historicalDisplayBatchCommits.length, 2);
+		assert.deepEqual(plugin.historicalDisplayBatchCommits[0].map(result => result.messageId), ["100"]);
+		assert.deepEqual(plugin.historicalDisplayBatchCommits[1].map(result => result.messageId), ["200"]);
 	}
 	finally {
 		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
@@ -838,16 +849,12 @@ test("live messages run while a historical provider request is pending", async (
 test("cached historical translations commit without a provider request", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
 	let providerRequests = 0;
-	const appliedIds = [];
 	let rerenderCount = 0;
 	plugin.requestAiBatchTranslation = () => {
 		providerRequests++;
 		return Promise.resolve(null);
 	};
-	plugin.applyStoredTranslationToMessage = message => {
-		appliedIds.push(message.id);
-		return {};
-	};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("historical automatic results must not write the legacy display map");};
 	plugin.rerenderMessagesWithScrollPreserved = () => {
 		rerenderCount++;
 	};
@@ -869,14 +876,17 @@ test("cached historical translations commit without a provider request", async (
 	await plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
 
 	assert.equal(providerRequests, 0);
-	assert.deepEqual(appliedIds, ["cached-1"]);
-	assert.equal(rerenderCount, 1);
+	assert.equal(rerenderCount, 0);
+	assert.equal(plugin.historicalDisplayBatchCommits.length, 1);
+	assert.equal(plugin.historicalDisplayBatchCommits[0].length, 1);
+	assert.equal(plugin.historicalDisplayBatchCommits[0][0].messageId, "cached-1");
+	assert.equal(plugin.historicalDisplayBatchCommits[0][0].status, "translated");
+	assert.equal(plugin.historicalDisplayBatchCommits[0][0].translation.translatedContent, "缓存译文");
 });
 
 test("invalid batch items are repaired before one atomic coordinator commit", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
 	const repairedIds = [];
-	const appliedIds = [];
 	let rerenderCount = 0;
 	plugin.requestAiBatchTranslation = () => Promise.resolve({
 		"invalid-skip": "__SKIP_TRANSLATION__",
@@ -900,10 +910,7 @@ test("invalid batch items are repaired before one atomic coordinator commit", as
 			}
 		});
 	};
-	plugin.applyStoredTranslationToMessage = message => {
-		appliedIds.push(message.id);
-		return {};
-	};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("historical automatic results must not write the legacy display map");};
 	plugin.rerenderMessagesWithScrollPreserved = () => {
 		rerenderCount++;
 	};
@@ -916,15 +923,16 @@ test("invalid batch items are repaired before one atomic coordinator commit", as
 	await plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
 
 	assert.deepEqual(repairedIds.sort(), ["invalid-language", "invalid-placeholder", "invalid-skip"]);
-	assert.deepEqual(appliedIds.sort(), ["invalid-language", "invalid-placeholder", "invalid-skip"]);
-	assert.equal(rerenderCount, 1);
+	assert.equal(plugin.historicalDisplayBatchCommits.length, 1);
+	assert.deepEqual(plugin.historicalDisplayBatchCommits[0].filter(result => result.status === "translated").map(result => result.messageId).sort(), ["invalid-language", "invalid-placeholder", "invalid-skip"]);
+	assert.equal(rerenderCount, 0);
 });
 
 test("failed historical items are retained by channel and retried in a new bounded job", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
 	const channelId = "channel-history-retry";
 	const requestedIds = [];
-	const appliedIds = [];
+	const appliedIds = () => plugin.historicalDisplayBatchCommits.flatMap(results => results.filter(result => result.status === "translated").map(result => result.messageId));
 	const statusUpdates = [];
 	let shouldFail = true;
 	let holdRetry = false;
@@ -940,10 +948,7 @@ test("failed historical items are retained by channel and retried in a new bound
 	};
 	plugin.repairHistoricalTranslationJobBatch = () => Promise.resolve(null);
 	plugin.repairHistoricalTranslationJobItem = () => Promise.resolve({status: "failed", reason: "provider_failed"});
-	plugin.applyStoredTranslationToMessage = message => {
-		appliedIds.push(message.id);
-		return {};
-	};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("historical automatic results must not write the legacy display map");};
 	plugin.rerenderMessagesWithScrollPreserved = () => {};
 	plugin.updateLoadedAutoTranslationStatus = updates => {
 		statusUpdates.push(updates);
@@ -955,7 +960,7 @@ test("failed historical items are retained by channel and retried in a new bound
 	await plugin.startCollectedHistoricalTranslationJobs(channelId);
 
 	assert.equal(plugin.getFailedHistoricalTranslationCount(channelId), 2);
-	assert.deepEqual(appliedIds, []);
+	assert.deepEqual(appliedIds(), []);
 
 	shouldFail = false;
 	holdRetry = true;
@@ -967,7 +972,7 @@ test("failed historical items are retained by channel and retried in a new bound
 	await firstRetry;
 
 	assert.deepEqual(requestedIds, [["retry-1", "retry-2"], ["retry-1"]]);
-	assert.deepEqual(appliedIds, ["retry-1"]);
+	assert.deepEqual(appliedIds(), ["retry-1"]);
 	assert.equal(plugin.getFailedHistoricalTranslationCount(channelId), 1);
 	const partialRetryStatus = statusUpdates.findLast(status => status && status.done && status.active === false);
 	assert.equal(partialRetryStatus.total, 1);
@@ -981,7 +986,7 @@ test("failed historical items are retained by channel and retried in a new bound
 	await plugin.retryFailedHistoricalTranslations(channelId);
 
 	assert.deepEqual(requestedIds, [["retry-1", "retry-2"], ["retry-1"], ["retry-2"]]);
-	assert.deepEqual(appliedIds, ["retry-1", "retry-2"]);
+	assert.deepEqual(appliedIds(), ["retry-1", "retry-2"]);
 	assert.equal(plugin.getFailedHistoricalTranslationCount(channelId), 0);
 });
 
@@ -1312,4 +1317,28 @@ test("plugin stop cancels pending historical work and ignores its late result", 
 	assert.equal(appliedCount, 0);
 	assert.equal(rerenderCount, 0);
 	assert.equal(plugin.isHistoricalMessagePending("stop-late", "channel-history-job"), false);
+});
+
+test("one historical job performs one acknowledged display commit", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin();
+	const commits = [];
+	plugin.isHistoricalTranslationJobItemCurrent = () => true;
+	plugin.commitHistoricalReceivedDisplayBatch = async results => {
+		commits.push(results);
+		return {confirmedIds: results.map(result => String(result.messageId)), missingIds: [], fallbackUsed: false};
+	};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("historical automatic results must not write the legacy display map");};
+	const messages = [createMessage("100", "first"), createMessage("200", "second"), createMessage("300", "third")];
+	const summary = {
+		translated: messages.map(message => ({message, originalContentData: {content: message.content, embeds: []}, translation: {channelId: message.channel_id, auto: true, content: `${message.content} translated`, translatedContent: `${message.content} translated`, signature: `sig-${message.id}`}})),
+		skipped: [],
+		failed: []
+	};
+	const job = {channelId: "channel-history-job", generation: 1, items: new Map(messages.map(message => [message.id, {message}]))};
+
+	await plugin.commitHistoricalTranslationJob(summary, job);
+
+	assert.equal(commits.length, 1);
+	assert.deepEqual(commits[0].map(result => result.messageId), ["100", "200", "300"]);
+	assert.equal(commits[0].every(result => result.status === "translated" && result.generation === 1), true);
 });

@@ -88,7 +88,10 @@ test("createDisplayView freezes the complete translated projection", () => {
 		"renderReason",
 		"translation",
 		"source",
-		"origin"
+		"origin",
+		"generation",
+		"sourceSignature",
+		"requestIdentity"
 	]);
 	assert.equal(Object.isFrozen(view), true);
 	assert.equal(view.messageId, "m1");
@@ -224,6 +227,23 @@ test("markPending refreshes a loading source view", async () => {
 	assert.equal(refreshes[0].views[0].translated, false);
 	assert.equal(refreshes[0].views[0].showLoading, true);
 	assert.equal(store.getDisplayState("m1").requestIdentity, "c1:m1:request");
+});
+
+test("commitMessageResult can defer refresh without losing the committed translation", async () => {
+	const {store, refreshes, controller} = createHarness();
+	capture(store, "m1");
+
+	const outcome = await controller.commitMessageResult(result("m1"), {refresh: false});
+
+	assert.deepEqual(outcome, {
+		confirmedIds: [],
+		missingIds: [],
+		fallbackUsed: false,
+		deferredIds: ["m1"]
+	});
+	assert.equal(refreshes.length, 0);
+	assert.equal(store.getDisplayState("m1").status, "translated");
+	assert.equal(store.getDisplayState("m1").renderStatus, "pending");
 });
 
 test("markPending can defer refresh without losing the committed state", async () => {
@@ -425,4 +445,21 @@ test("a late missing acknowledgement cannot mark a newer display revision unconf
 	assert.equal(store.getDisplayState("m1"), newerState);
 	assert.equal(newerState.renderStatus, "pending");
 	assert.equal(newerState.renderReason, null);
+});
+
+test("restoreMessage cancels one automatic record through an acknowledged refresh", async () => {
+	const {store, refreshes, controller} = createHarness();
+	capture(store, "m1");
+	store.commitResult(result("m1"));
+	refreshes.length = 0;
+
+	const outcome = await controller.restoreMessage("m1");
+
+	assert.deepEqual(outcome, {confirmedIds: ["m1"], missingIds: [], fallbackUsed: false});
+	assert.equal(refreshes.length, 1);
+	assert.equal(refreshes[0].views[0].content, "m1 source");
+	assert.equal(refreshes[0].views[0].translated, false);
+	assert.equal(store.getDisplayState("m1").status, "cancelled");
+	assert.deepEqual(await controller.restoreMessage("m1"), emptyOutcome());
+	assert.deepEqual(await controller.restoreMessage("missing"), emptyOutcome());
 });
