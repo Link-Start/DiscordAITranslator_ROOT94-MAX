@@ -52,7 +52,7 @@ feature — this is what produced the current dual ownership) and **by-layer** (
 slices across every var at once, so each layer must preserve every var for the layers not yet
 moved — correct destination shape, fatal migration unit).
 
-## Baseline (HEAD, this document's commit)
+## Baseline (when this document was written)
 
 | Metric | Value |
 | --- | --- |
@@ -61,6 +61,31 @@ moved — correct destination shape, fatal migration unit).
 | Modular code (`src/display`, `src/diagnostics`, `src/plugin`) | 592 lines |
 | Artifact | 725,356 bytes, readable |
 | Tests | 312 |
+
+## Progress
+
+| Metric | Baseline | Now |
+| --- | --- | --- |
+| `src/legacy/runtime.js` | 11,974 | 7,636 |
+| Module-level var declarators | 83 | 16 |
+| Modular code | 592 | 6,524 |
+| Tests | 312 | 566 |
+
+Extracted so far: presentation data (`src/ui`, `src/i18n`), channel titles, viewport and
+scroll intent, the loaded-translation status HUD, the provider client, the translation
+cache, the sent-message pipeline, the live translation queue, historical job bookkeeping,
+and the repaint scheduler.
+
+Remaining state, all of it in one of three groups: the displayed-translation maps
+(`translatedMessages`, `oldMessages`, `suppressedAutoTranslations`) plus reply-preview
+state, which move together in M7; the settings and credential cluster; and two
+infrastructure bindings (`_this`, `pluginRuntimeActive`) that belong to the plugin shell.
+
+Bugs the extraction surfaced and fixed along the way, each with its own regression test:
+translations waiting out a 1500 ms delay meant for a full-list repaint; every provider
+adapter throwing instead of settling on a hard network failure; and the automatic dedupe
+guard reading a map the display migration had made permanently empty, so re-entering a
+channel could wipe visible translations and re-spend on the provider.
 
 ## Milestones
 
