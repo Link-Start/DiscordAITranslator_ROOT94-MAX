@@ -513,19 +513,50 @@ test("a translation arriving while the settings panel is open does not repaint t
 	}
 });
 
-test("repaint waits longer while you are reading back through history", async () => {
+
+test("a targeted repaint appears promptly even while reading back through history", async () => {
 	const harness = createHarness();
 	try {
 		const {plugin, calls} = harness;
-		const channelId = "channel-history-delay";
+		const channelId = "channel-prompt-history";
 		plugin.isViewingMessageHistory = () => true;
 		plugin.captureReceivedMessageSource({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", source: {content: "hello", embeds: []}});
 		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
 		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
 
-		// The live delay is 120ms; reading history must use the calmer legacy delay.
-		await new Promise(resolve => setTimeout(resolve, 400));
-		assert.equal(calls.forceUpdate, 0, "reading history must not be interrupted at the live cadence");
+		// The old 1500ms history delay existed to protect readers from a FULL-LIST
+		// repaint. This path repaints only the committed message ids, so a translation
+		// must not sit invisible for a second and a half.
+		await new Promise(resolve => setTimeout(resolve, 350));
+		assert.equal(calls.forceUpdate, 1, "a targeted repaint must not wait out the full-list history delay");
+		assert.equal(plugin.getReceivedDisplayRuntimeView("m1").translated, true);
+	}
+	finally {
+		harness.plugin.clearReceivedDisplayFlushQueue();
+		harness.restore();
+	}
+});
+
+test("a repaint that needed the full-list fallback backs off before the next one", async () => {
+	const harness = createHarness({confirmDirectly: false});
+	try {
+		const {plugin, calls} = harness;
+		const channelId = "channel-fallback-backoff";
+		plugin.isViewingMessageHistory = () => true;
+		for (const messageId of ["m1", "m2"]) {
+			plugin.captureReceivedMessageSource({messageId, channelId, generation: 1, sourceSignature: `sig-${messageId}`, source: {content: "hello", embeds: []}});
+		}
+		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
+		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
+		await new Promise(resolve => setTimeout(resolve, 350));
+		assert.equal(calls.rerenderAll >= 1, true, "this harness forces the full-list fallback");
+
+		// A full-list remount does disturb a reader, so the next one waits longer.
+		await plugin.commitReceivedDisplayResult({messageId: "m2", channelId, generation: 1, sourceSignature: "sig-m2", origin: "automatic", status: "translated", translation: {content: "你好二"}}, {refresh: false});
+		const updatesBefore = calls.forceUpdate;
+		plugin.scheduleReceivedDisplayFlush(channelId, "m2");
+		await new Promise(resolve => setTimeout(resolve, 350));
+		assert.equal(calls.forceUpdate, updatesBefore, "after a disruptive fallback the next repaint waits out the calm delay");
 	}
 	finally {
 		harness.plugin.clearReceivedDisplayFlushQueue();
