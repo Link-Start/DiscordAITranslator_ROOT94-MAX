@@ -61,6 +61,7 @@ module.exports = (_ => {
 		// Extracted modules. Declared before any state so module-backed stores can be
 		// constructed in the state block below.
 		const {createDisplayRuntime} = require("../display/display-runtime");
+		const {createDisplayRepaintScheduler} = require("../display/repaint-scheduler");
 		const {createTranslatorStyles} = require("../ui/styles");
 		const {createChannelTitleStore} = require("../channel-title/channel-title-store");
 		const {getLabelsForUiLanguage} = require("../i18n/labels");
@@ -615,8 +616,6 @@ module.exports = (_ => {
 		var autoTranslationUserScrollChannelId = null;
 		var autoTranslationUserScrollIntentSequence = 0;
 		var lastProgrammaticScrollWriteTime = 0;
-		var receivedDisplayFlushTimer = null;
-		var receivedDisplayFlushQueues = new Map();
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		var autoTranslationBackoffUntil = 0;
@@ -7335,53 +7334,36 @@ module.exports = (_ => {
 			// Live automatic commits write the store immediately and coalesce their visible
 			// refresh: one acknowledged display transaction per channel per debounce window
 			// instead of one full-list repaint (plus scroll restore) per message.
-			// The single choke point for "may a store commit repaint the chat list right now".
-			// Repainting under either condition is what the legacy path went out of its way to
-			// avoid: it disturbs an open translator settings surface and interrupts typing.
+			// Repaint cadence lives in the scheduler module; the plugin only supplies the
+			// predicates that depend on Discord state.
 			canRepaintReceivedDisplayNow () {
-				if (this.isTranslatorSettingsSurfaceOpen()) return false;
-				if (this.isChannelTextAreaFocused()) return false;
-				return true;
+				return !this.isTranslatorSettingsSurfaceOpen() && !this.isChannelTextAreaFocused();
+			}
+
+			ensureReceivedDisplayRepaintScheduler () {
+				if (!this.receivedDisplayRepaintSchedulerInstance) this.receivedDisplayRepaintSchedulerInstance = createDisplayRepaintScheduler({
+					renderMessages: messageIds => this.ensureReceivedDisplayRuntime().renderMessages(messageIds),
+					canRepaintNow: () => this.canRepaintReceivedDisplayNow(),
+					isViewingHistory: () => this.isViewingMessageHistory(),
+					lastRenderUsedFallback: () => this.ensureReceivedDisplayRuntime().lastRenderUsedFallback()
+				});
+				return this.receivedDisplayRepaintSchedulerInstance;
 			}
 
 			getReceivedDisplayFlushDelay () {
-				return this.isViewingMessageHistory() ? AUTO_TRANSLATION_HISTORY_RERENDER_DELAY : AUTO_TRANSLATION_RERENDER_DELAY;
+				return this.ensureReceivedDisplayRepaintScheduler().getNextDelay();
 			}
 
 			scheduleReceivedDisplayFlush (channelId, messageId, delay = null) {
-				if (!channelId || messageId == null) return;
-				const key = String(channelId);
-				if (!receivedDisplayFlushQueues.has(key)) receivedDisplayFlushQueues.set(key, new Set());
-				receivedDisplayFlushQueues.get(key).add(String(messageId));
-				if (receivedDisplayFlushTimer) return;
-				receivedDisplayFlushTimer = setTimeout(_ => {
-					receivedDisplayFlushTimer = null;
-					this.flushReceivedDisplayQueues();
-				}, delay == null ? this.getReceivedDisplayFlushDelay() : delay);
+				this.ensureReceivedDisplayRepaintScheduler().schedule(channelId, messageId, delay);
 			}
 
 			flushReceivedDisplayQueues () {
-				if (!receivedDisplayFlushQueues.size) return;
-				// The commit already landed in the store; only the visible repaint waits, so
-				// nothing is lost by deferring until the user is no longer busy.
-				if (!this.canRepaintReceivedDisplayNow()) {
-					const [firstChannelId, firstMessageIds] = [...receivedDisplayFlushQueues.entries()][0];
-					const anyMessageId = [...firstMessageIds][0];
-					this.scheduleReceivedDisplayFlush(firstChannelId, anyMessageId, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY);
-					return;
-				}
-				const queues = [...receivedDisplayFlushQueues.entries()];
-				receivedDisplayFlushQueues.clear();
-				for (const [, messageIds] of queues) {
-					const flush = this.ensureReceivedDisplayRuntime().renderMessages([...messageIds]);
-					if (flush && flush.catch) flush.catch(_ => {});
-				}
+				this.ensureReceivedDisplayRepaintScheduler().flush();
 			}
 
 			clearReceivedDisplayFlushQueue () {
-				if (receivedDisplayFlushTimer) clearTimeout(receivedDisplayFlushTimer);
-				receivedDisplayFlushTimer = null;
-				receivedDisplayFlushQueues.clear();
+				this.ensureReceivedDisplayRepaintScheduler().clear();
 			}
 
 			restoreReceivedDisplayMessage (messageId, options) {
