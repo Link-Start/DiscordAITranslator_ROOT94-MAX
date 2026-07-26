@@ -1792,7 +1792,7 @@ git commit -m "refactor: remove legacy received display ownership"
 - Modify only if review finds a tested defect
 - Update: `docs/recovery-plan.md` after evidence exists
 
-- [ ] **Step 1: Run the complete verification gate**
+- [x] **Step 1: Run the complete verification gate**
 
 ```powershell
 npm run build
@@ -1803,16 +1803,18 @@ git status --short
 
 Expected: zero failures, clean diff check, and only intended milestone changes.
 
-- [ ] **Step 2: Run Standards and Spec reviews against the milestone base commit**
+- [x] **Step 2: Run Standards and Spec reviews against the milestone base commit**
 
 The Standards review uses `AGENTS.md`, `docs/architecture.md`, and ADR-0002. The Spec review uses `docs/product.md`, `docs/settings.md`, and the current plan. Resolve every P0-P2 finding with a failing test before proceeding.
 
-- [ ] **Step 3: Create a milestone commit if review fixes were required**
+- [x] **Step 3: Create a milestone commit if review fixes were required**
 
 ```powershell
 git add src scripts tests package.json package-lock.json DiscordAITranslator.plugin.js docs/recovery-plan.md
 git commit -m "fix: address display milestone review"
 ```
+
+**Verification evidence (2026-07-26):** `5a1fe17`; Standards and Spec reviews ran against `92406ca..HEAD`. One P1 and two P2 findings were each resolved with an observed failing test first: (P1) a disabled channel's repaint recaptured cancelled records with the bumped generation, replacing them mid-transaction so the restore could never confirm and always fell back to the full-list rerender — capture now skips disabled channels; (P2) store-owned translations froze the Display composition (inline original and related settings) at commit time — the compatibility appliers now compose the painted content at render time from the stored translation facts; (P2) a result for a never-captured message (for example queued from a pins or search surface) poisoned the whole historical batch through the all-or-nothing commit — `commitBatch` now rejects unrecorded results individually while keeping atomicity over recorded ones, and the controller surfaces partial `rejectedIds`. Accepted P3 remainders: the live queue's rAF pause while the window is hidden (documented in Task 7 evidence), and the pre-existing dead duplicate `icon` key was removed, making the deterministic build warning-free. Final gate after fixes: `npm run verify` `292/292`; `git diff --check` clean.
 
 - [ ] **Step 4: Back up and deploy the generated plugin**
 
@@ -1868,10 +1870,11 @@ git commit -m "docs: record display milestone verification"
 ## Display Milestone Evidence
 
 - Base commit: `92406ca`
-- Implementation commit: not created
-- Automated verification: not run for this milestone
-- Generated artifact bytes: not measured for this milestone
-- Deployed SHA-256: not deployed for this milestone
+- Implementation commits: `7ffad07`, `640e01b`, `adcfa60`, `179552a`, `bd908bd`, `345e406`, `5a1fe17`
+- Automated verification: `npm run verify` `292/292` at `5a1fe17`; `git diff --check` clean; deterministic build warning-free
+- Generated artifact bytes: `711035` (700 KB guard enforced by `tests/build-contract.test.js`)
+- Repository artifact SHA-256: `4d0d1c0f0e3938865c5179b9fe878820affe1d1efbfa5ebe2a1caf997d280821`
+- Deployed SHA-256: not deployed — Step 4 deployment and the Steps 5-8 renderer-log and DiscordPTB smoke checks require the operator at the machine and remain open
 - DiscordPTB smoke gate: not run for this milestone
 
 ## Later Milestones
