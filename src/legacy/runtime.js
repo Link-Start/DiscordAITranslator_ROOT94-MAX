@@ -64,6 +64,7 @@ module.exports = (_ => {
 		const {createDisplayRepaintScheduler} = require("../display/repaint-scheduler");
 		const {createTranslatorStyles} = require("../ui/styles");
 		const {createChannelTitleStore} = require("../channel-title/channel-title-store");
+		const {createMessageViewportStore} = require("../viewport/message-viewport-store");
 		const {getLabelsForUiLanguage} = require("../i18n/labels");
 		const {getCustomTextValue} = require("../i18n/text");
 
@@ -612,23 +613,10 @@ module.exports = (_ => {
 		var autoTranslationEligibleReplyPreviewMessages = {};
 		var replyPreviewRenderMessageIds = {};
 		var lastAutoTranslationChannelId = null;
-		var lastAutoTranslationUserScrollTime = 0;
-		var autoTranslationUserScrollChannelId = null;
-		var autoTranslationUserScrollIntentSequence = 0;
-		var lastProgrammaticScrollWriteTime = 0;
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		var autoTranslationBackoffUntil = 0;
 		var autoTranslationBackoffStep = 0;
-		var autoTranslationScrollWatcherAttached = false;
-		var autoTranslationScrollWatcherElement = null;
-		var autoTranslationScrollActivityHandler = null;
-		var autoTranslationScrollIntentHandler = null;
-		var autoTranslationScrollIntentEndHandler = null;
-		var autoTranslationScrollEndHandler = null;
-		var autoTranslationScrollIntentPending = false;
-		var autoTranslationScrollIntentTimer = null;
-		var autoTranslationScrollIdleTimer = null;
 		var deferredTranslationRerenderPending = false;
 		var historicalTranslationJobQueues = new Map();
 		var historicalTranslationJobSequence = 0;
@@ -636,15 +624,11 @@ module.exports = (_ => {
 		var failedHistoricalTranslationSnapshots = new Map();
 		const channelTitleStore = createChannelTitleStore();
 		var pluginRuntimeActive = true;
-		var lastAutoTranslationInputActivityTime = 0;
-		var autoTranslationInputActivityHandler = null;
 		var loadedAutoTranslationSeenMessages = {};
 		var loadedAutoTranslationStatus = {active: false, collecting: false, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""};
 		var loadedAutoTranslationStatusHideTimer = null;
 		var deferredSettingsRerenderTimer = null;
 		var manualMessageTranslationRequests = {};
-		var manualTranslationScrollAnchor = null;
-		var manualTranslationScrollLockTimer = null;
 		const MAX_TRANSLATION_CACHE_ENTRIES = 500;
 		const AUTO_TRANSLATION_RERENDER_DELAY = 120;
 		const AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500;
@@ -657,18 +641,11 @@ module.exports = (_ => {
 		// How often a deferred repaint re-checks whether the user stopped typing or closed
 		// the settings surface. Matches the legacy text-area deferral.
 		const AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450;
-		const AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900;
-		const AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300;
-		// Scroll events delivered shortly after our own scroll restores are echoes of the
-		// programmatic write, not user activity; they must not extend the user-scroll window.
-		const AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE = 150;
 		const HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100;
 		const DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50;
 		const LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1;
 		const LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100;
 		const LOADED_AUTO_TRANSLATE_RANGE_MODES = {COUNT: "count", TIME: "time"};
-		const AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD = 80;
-		const MANUAL_TRANSLATION_SCROLL_LOCK_MS = 4500;
 		const TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"];
 		const DISCORD_EPOCH = 1420070400000;
 		
@@ -2893,9 +2870,7 @@ module.exports = (_ => {
 				if (deferredTextAreaRerenderTimer) clearTimeout(deferredTextAreaRerenderTimer);
 				if (autoTranslationQueueRetryTimer) clearTimeout(autoTranslationQueueRetryTimer);
 				if (deferredSettingsRerenderTimer) clearTimeout(deferredSettingsRerenderTimer);
-				if (manualTranslationScrollLockTimer) clearTimeout(manualTranslationScrollLockTimer);
-				manualTranslationScrollLockTimer = null;
-				manualTranslationScrollAnchor = null;
+				this.ensureMessageViewportStore().clearManualScrollLock();
 				deferredSettingsRerenderTimer = null;
 				// Restore store-owned automatic records synchronously before legacy cleanup so the
 				// final rerender paints originals; onStop must not reload settings via forceUpdateAll.
@@ -5203,10 +5178,7 @@ module.exports = (_ => {
 			}
 
 			pauseHistoricalAutoTranslationForNavigation (duration = 1800) {
-				const channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-				autoTranslationUserScrollChannelId = channelId || null;
-				lastAutoTranslationUserScrollTime = Date.now() + Math.max(0, duration - AUTO_TRANSLATION_SCROLL_IDLE_DELAY);
-				if (channelId) this.scheduleAutoTranslationScrollIdleFinish(channelId, duration);
+				return this.ensureMessageViewportStore().pauseForNavigation(duration);
 			}
 
 			wrapReplyPreviewJumpPause (node) {
@@ -5270,168 +5242,47 @@ module.exports = (_ => {
 			}
 
 			getMessagesScroller () {
-				if (typeof document == "undefined") return null;
-				return document.querySelector(BDFDB.dotCN.messagesscroller);
+				return this.ensureMessageViewportStore().getMessagesScroller();
 			}
 
 			extractMessageIdFromElement (element) {
-				if (!element) return null;
-				const values = [
-					element.getAttribute && element.getAttribute("data-list-item-id"),
-					element.getAttribute && element.getAttribute("aria-labelledby"),
-					element.id
-				].filter(Boolean);
-				for (const value of values) {
-					const match = String(value).match(/(\d{15,25})(?!.*\d)/);
-					if (match) return match[1];
-				}
-				return null;
+				return this.ensureMessageViewportStore().extractMessageIdFromElement(element);
 			}
 
 			findMessageElementById (messageId) {
-				if (!messageId || typeof document == "undefined") return null;
-				const escapedId = typeof CSS != "undefined" && CSS.escape ? CSS.escape(String(messageId)) : String(messageId).replace(/(["\\])/g, "\\$1");
-				const selectors = [
-					`[id="chat-messages-${escapedId}"]`,
-					`[id$="-${escapedId}"]`,
-					`[data-list-item-id$="-${escapedId}"]`,
-					`[data-list-item-id*="${escapedId}"]`,
-					`[aria-labelledby*="${escapedId}"]`
-				];
-				for (const selector of selectors) {
-					try {
-						const element = document.querySelector(selector);
-						if (element) return element.closest && element.closest('[id^="chat-messages-"], [data-list-item-id*="chat-messages"]') || element;
-					}
-					catch (err) {}
-				}
-				return null;
+				return this.ensureMessageViewportStore().findMessageElementById(messageId);
 			}
 
 			findVisibleMessageAnchorElement (messagesScroller = null) {
-				messagesScroller = messagesScroller || this.getMessagesScroller();
-				if (!messagesScroller || typeof document == "undefined") return null;
-				const scrollerRect = messagesScroller.getBoundingClientRect();
-				let candidates = [];
-				try {
-					candidates = Array.from(messagesScroller.querySelectorAll('[id^="chat-messages-"], [data-list-item-id*="chat-messages"]'));
-				}
-				catch (err) {candidates = [];}
-				const seen = new Set();
-				for (const element of candidates) {
-					if (!element || seen.has(element)) continue;
-					seen.add(element);
-					const messageId = this.extractMessageIdFromElement(element);
-					if (!messageId) continue;
-					const rect = element.getBoundingClientRect();
-					if (!rect || rect.height <= 0) continue;
-					if (rect.bottom <= scrollerRect.top + 8 || rect.top >= scrollerRect.bottom - 8) continue;
-					return {messageId, element};
-				}
-				return null;
+				return this.ensureMessageViewportStore().findVisibleMessageAnchor(messagesScroller);
 			}
 
 			captureMessageAnchorState (messageId = null) {
-				const messagesScroller = this.getMessagesScroller();
-				let element = messageId ? this.findMessageElementById(messageId) : null;
-				if (!element) {
-					const visibleAnchor = this.findVisibleMessageAnchorElement(messagesScroller);
-					if (visibleAnchor) {
-						messageId = visibleAnchor.messageId;
-						element = visibleAnchor.element;
-					}
-				}
-				if (!messagesScroller || !element || !messageId) return null;
-				const elementRect = element.getBoundingClientRect();
-				const scrollerRect = messagesScroller.getBoundingClientRect();
-				return {
-					messageId,
-					scrollTop: messagesScroller.scrollTop,
-					elementTop: elementRect.top,
-					relativeTop: elementRect.top - scrollerRect.top,
-					expiresAt: Date.now() + MANUAL_TRANSLATION_SCROLL_LOCK_MS
-				};
+				return this.ensureMessageViewportStore().captureAnchorState(messageId);
 			}
 
 			restoreMessageAnchorPosition (anchorState) {
-				if (!anchorState) return;
-				const messagesScroller = this.getMessagesScroller();
-				const element = this.findMessageElementById(anchorState.messageId);
-				if (!messagesScroller || !element) return;
-				const scrollerRect = messagesScroller.getBoundingClientRect();
-				const elementRect = element.getBoundingClientRect();
-				const desiredTop = scrollerRect.top + (typeof anchorState.relativeTop == "number" ? anchorState.relativeTop : elementRect.top - scrollerRect.top);
-				const delta = elementRect.top - desiredTop;
-				if (Math.abs(delta) < 1) return;
-				const maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
-				lastProgrammaticScrollWriteTime = Date.now();
-				messagesScroller.scrollTop = Math.max(0, Math.min(messagesScroller.scrollTop + delta, maxScrollTop));
+				return this.ensureMessageViewportStore().restoreAnchorPosition(anchorState);
 			}
 
 			restoreMessageAnchorState (anchorState) {
-				if (!anchorState) return;
-				const restore = () => this.restoreMessageAnchorPosition(anchorState);
-				requestAnimationFrame(() => requestAnimationFrame(restore));
-				setTimeout(restore, 60);
-				setTimeout(restore, 180);
-				setTimeout(restore, 420);
-				setTimeout(restore, 900);
+				return this.ensureMessageViewportStore().restoreAnchorState(anchorState);
 			}
 
 			lockManualTranslationScroll (messageId) {
-				const anchorState = this.captureMessageAnchorState(messageId);
-				if (!anchorState) return;
-				manualTranslationScrollAnchor = anchorState;
-				if (manualTranslationScrollLockTimer) clearTimeout(manualTranslationScrollLockTimer);
-				manualTranslationScrollLockTimer = setTimeout(_ => {
-					manualTranslationScrollLockTimer = null;
-					manualTranslationScrollAnchor = null;
-				}, MANUAL_TRANSLATION_SCROLL_LOCK_MS);
+				return this.ensureMessageViewportStore().lockManualScroll(messageId);
 			}
 
 			getActiveManualTranslationScrollAnchor () {
-				if (!manualTranslationScrollAnchor) return null;
-				if (Date.now() > manualTranslationScrollAnchor.expiresAt) {
-					manualTranslationScrollAnchor = null;
-					return null;
-				}
-				return manualTranslationScrollAnchor;
+				return this.ensureMessageViewportStore().getActiveManualScrollAnchor();
 			}
 
 			captureMessageScrollerState () {
-				const messagesScroller = this.getMessagesScroller();
-				if (!messagesScroller) return null;
-				const maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
-				const distanceToBottom = Math.max(0, maxScrollTop - messagesScroller.scrollTop);
-				const keepBottom = distanceToBottom <= AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD;
-				return {
-					scrollTop: messagesScroller.scrollTop,
-					keepBottom,
-					userScrollIntentSequence: autoTranslationUserScrollIntentSequence,
-					anchor: keepBottom ? null : this.captureMessageAnchorState()
-				};
+				return this.ensureMessageViewportStore().captureScrollerState();
 			}
 
 			restoreMessageScrollerState (scrollerState) {
-				if (!scrollerState) return;
-				const restore = () => {
-					if (scrollerState.userScrollIntentSequence != autoTranslationUserScrollIntentSequence) return;
-					const messagesScroller = this.getMessagesScroller();
-					if (!messagesScroller) return;
-					if (scrollerState.keepBottom) {
-						lastProgrammaticScrollWriteTime = Date.now();
-						messagesScroller.scrollTop = messagesScroller.scrollHeight;
-						return;
-					}
-					if (scrollerState.anchor) {
-						this.restoreMessageAnchorPosition(scrollerState.anchor);
-						return;
-					}
-					const maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
-					lastProgrammaticScrollWriteTime = Date.now();
-					messagesScroller.scrollTop = Math.max(0, Math.min(scrollerState.scrollTop, maxScrollTop));
-				};
-				requestAnimationFrame(() => requestAnimationFrame(restore));
+				return this.ensureMessageViewportStore().restoreScrollerState(scrollerState);
 			}
 
 			rerenderMessagesWithScrollPreserved () {
@@ -5611,17 +5462,7 @@ module.exports = (_ => {
 			}
 
 			isChannelTextAreaFocused () {
-				if (typeof document == "undefined") return false;
-				const activeElement = document.activeElement;
-				if (!activeElement || activeElement == document.body) return false;
-				const isTextInput = activeElement.tagName == "TEXTAREA" || activeElement.tagName == "INPUT" || activeElement.getAttribute && activeElement.getAttribute("role") == "textbox" || activeElement.isContentEditable;
-				if (!isTextInput) return false;
-				const selectors = [BDFDB.dotCN && BDFDB.dotCN.channeltextarea, '[class*="channelTextArea"]', "form"];
-				return selectors.some(selector => {
-					if (!selector) return false;
-					try {return !!(activeElement.matches && activeElement.matches(selector) || activeElement.closest && activeElement.closest(selector));}
-					catch (err) {return false;}
-				});
+				return this.ensureMessageViewportStore().isChannelTextAreaFocused();
 			}
 
 			ensureLoadedAutoTranslationStatusPositionWatcher () {
@@ -6019,133 +5860,43 @@ module.exports = (_ => {
 			}
 
 			attachAutoTranslationInputActivityWatcher () {
-				if (autoTranslationInputActivityHandler || typeof document == "undefined") return;
-				autoTranslationInputActivityHandler = event => {
-					const target = event && event.target;
-					if (!target) return;
-					let isTextInput = false;
-					try {
-						isTextInput = !!(target.matches && target.matches("textarea, input, [contenteditable='true']") || target.closest && target.closest("textarea, input, [contenteditable='true']"));
-					}
-					catch (error) {}
-					if (isTextInput) lastAutoTranslationInputActivityTime = Date.now();
-				};
-				for (const eventName of ["beforeinput", "input", "keydown"]) document.addEventListener(eventName, autoTranslationInputActivityHandler, true);
+				return this.ensureMessageViewportStore().attachInputActivityWatcher();
 			}
 
 			detachAutoTranslationInputActivityWatcher () {
-				if (!autoTranslationInputActivityHandler || typeof document == "undefined") {
-					autoTranslationInputActivityHandler = null;
-					return;
-				}
-				for (const eventName of ["beforeinput", "input", "keydown"]) document.removeEventListener(eventName, autoTranslationInputActivityHandler, true);
-				autoTranslationInputActivityHandler = null;
+				return this.ensureMessageViewportStore().detachInputActivityWatcher();
 			}
 
 			clearAutoTranslationScrollIntent () {
-				if (autoTranslationScrollIntentTimer) clearTimeout(autoTranslationScrollIntentTimer);
-				autoTranslationScrollIntentTimer = null;
-				autoTranslationScrollIntentPending = false;
+				return this.ensureMessageViewportStore().clearScrollIntent();
 			}
 
 			markAutoTranslationScrollIntent () {
-				this.clearAutoTranslationScrollIntent();
-				autoTranslationScrollIntentPending = true;
-				autoTranslationScrollIntentTimer = setTimeout(() => {
-					autoTranslationScrollIntentTimer = null;
-					autoTranslationScrollIntentPending = false;
-				}, AUTO_TRANSLATION_SCROLL_INTENT_WINDOW);
+				return this.ensureMessageViewportStore().markScrollIntent();
 			}
 
 			finishAutoTranslationScrollActivity (channelId) {
-				if (autoTranslationScrollIdleTimer) clearTimeout(autoTranslationScrollIdleTimer);
-				autoTranslationScrollIdleTimer = null;
-				this.clearAutoTranslationScrollIntent();
-				if (!channelId || autoTranslationUserScrollChannelId == channelId) {
-					lastAutoTranslationUserScrollTime = 0;
-					autoTranslationUserScrollChannelId = null;
-				}
-				if (channelId) this.finishHistoricalTranslationSnapshot(channelId);
+				return this.ensureMessageViewportStore().finishScrollActivity(channelId);
 			}
 
-			scheduleAutoTranslationScrollIdleFinish (channelId, delay = AUTO_TRANSLATION_SCROLL_IDLE_DELAY) {
-				if (!channelId) return;
-				if (autoTranslationScrollIdleTimer) clearTimeout(autoTranslationScrollIdleTimer);
-				autoTranslationScrollIdleTimer = setTimeout(() => {
-					autoTranslationScrollIdleTimer = null;
-					this.finishAutoTranslationScrollActivity(channelId);
-				}, delay);
+			scheduleAutoTranslationScrollIdleFinish (channelId, delay = null) {
+				return this.ensureMessageViewportStore().scheduleScrollIdleFinish(channelId, delay);
 			}
 
 			attachAutoTranslationScrollWatcher () {
-				if (typeof document == "undefined") return;
-				const messagesScroller = document.querySelector(BDFDB.dotCN.messagesscroller);
-				if (!messagesScroller) return;
-				if (autoTranslationScrollWatcherAttached && autoTranslationScrollWatcherElement == messagesScroller) return;
-				this.detachAutoTranslationScrollWatcher();
-				autoTranslationScrollActivityHandler = _ => {
-					const now = Date.now();
-					if (now - lastProgrammaticScrollWriteTime < AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE) return;
-					const channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-					if (autoTranslationScrollIntentPending) {
-						this.clearAutoTranslationScrollIntent();
-						autoTranslationUserScrollChannelId = channelId || null;
-						lastAutoTranslationUserScrollTime = now;
-						this.scheduleAutoTranslationScrollIdleFinish(channelId);
-					}
-					else if (channelId && autoTranslationUserScrollChannelId == channelId && lastAutoTranslationUserScrollTime && now - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY) {
-						lastAutoTranslationUserScrollTime = now;
-						this.scheduleAutoTranslationScrollIdleFinish(channelId);
-					}
-				};
-				autoTranslationScrollIntentHandler = event => {
-					if (event && event.type == "keydown" && !["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) return;
-					autoTranslationUserScrollIntentSequence++;
-					this.markAutoTranslationScrollIntent();
-				};
-				autoTranslationScrollIntentEndHandler = _ => {
-					this.clearAutoTranslationScrollIntent();
-				};
-				autoTranslationScrollEndHandler = _ => {
-					const channelId = autoTranslationUserScrollChannelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-					this.finishAutoTranslationScrollActivity(channelId);
-				};
-				autoTranslationScrollWatcherElement = messagesScroller;
-				autoTranslationScrollWatcherAttached = true;
-				messagesScroller.addEventListener("scroll", autoTranslationScrollActivityHandler, {passive: true});
-				messagesScroller.addEventListener("scrollend", autoTranslationScrollEndHandler, {passive: true});
-				for (const eventName of ["wheel", "touchmove", "pointerdown", "keydown"]) messagesScroller.addEventListener(eventName, autoTranslationScrollIntentHandler, {passive: eventName != "keydown"});
-				for (const eventName of ["pointerup", "pointercancel"]) messagesScroller.addEventListener(eventName, autoTranslationScrollIntentEndHandler, {passive: true});
+				return this.ensureMessageViewportStore().attachScrollWatcher();
 			}
 
 			detachAutoTranslationScrollWatcher () {
-				if (autoTranslationScrollIdleTimer) clearTimeout(autoTranslationScrollIdleTimer);
-				autoTranslationScrollIdleTimer = null;
-				this.clearAutoTranslationScrollIntent();
-				lastAutoTranslationUserScrollTime = 0;
-				autoTranslationUserScrollChannelId = null;
-				if (autoTranslationScrollWatcherElement) {
-					if (autoTranslationScrollActivityHandler) autoTranslationScrollWatcherElement.removeEventListener("scroll", autoTranslationScrollActivityHandler);
-					if (autoTranslationScrollEndHandler) autoTranslationScrollWatcherElement.removeEventListener("scrollend", autoTranslationScrollEndHandler);
-					if (autoTranslationScrollIntentHandler) for (const eventName of ["wheel", "touchmove", "pointerdown", "keydown"]) autoTranslationScrollWatcherElement.removeEventListener(eventName, autoTranslationScrollIntentHandler);
-					if (autoTranslationScrollIntentEndHandler) for (const eventName of ["pointerup", "pointercancel"]) autoTranslationScrollWatcherElement.removeEventListener(eventName, autoTranslationScrollIntentEndHandler);
-				}
-				autoTranslationScrollWatcherAttached = false;
-				autoTranslationScrollWatcherElement = null;
-				autoTranslationScrollActivityHandler = null;
-				autoTranslationScrollIntentHandler = null;
-				autoTranslationScrollIntentEndHandler = null;
-				autoTranslationScrollEndHandler = null;
+				return this.ensureMessageViewportStore().detachScrollWatcher();
 			}
 
 			isViewingMessageHistory () {
-				const scrollerState = this.captureMessageScrollerState();
-				return !!(scrollerState && !scrollerState.keepBottom);
+				return this.ensureMessageViewportStore().isViewingMessageHistory();
 			}
 
 			isUserActivelyScrollingMessages (channelId = null) {
-				channelId = channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-				return !!channelId && autoTranslationUserScrollChannelId == channelId && !!lastAutoTranslationUserScrollTime && Date.now() - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY;
+				return this.ensureMessageViewportStore().isUserActivelyScrolling(channelId);
 			}
 
 			scheduleAutoTranslationQueueRetry () {
@@ -6791,9 +6542,8 @@ module.exports = (_ => {
 				return new Promise(resolve => {
 					const waitUntilIdle = _ => {
 						if (!this.isHistoricalTranslationJobCurrent(job)) return resolve();
-						const now = Date.now();
-						const userScrollingThisChannel = autoTranslationUserScrollChannelId == job.channelId && now - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY;
-						if (now - lastAutoTranslationInputActivityTime >= 300 && !userScrollingThisChannel) return resolve();
+						const messageViewport = this.ensureMessageViewportStore();
+						if (messageViewport.getTimeSinceInputActivity() >= 300 && !messageViewport.isUserScrollingChannel(job.channelId)) return resolve();
 						setTimeout(waitUntilIdle, 120);
 					};
 					waitUntilIdle();
@@ -7251,6 +7001,23 @@ module.exports = (_ => {
 				e.returnvalue.props.children = children;
 			}
 
+			ensureMessageViewportStore () {
+				if (!this.messageViewportStoreInstance) this.messageViewportStoreInstance = createMessageViewportStore({
+					getDocument: () => typeof document == "undefined" ? null : document,
+					setTimeout: (callback, delay) => setTimeout(callback, delay),
+					clearTimeout: timer => clearTimeout(timer),
+					requestAnimationFrame: callback => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0),
+					now: () => Date.now(),
+					getSelectedChannelId: () => BDFDB.LibraryStores.SelectedChannelStore.getChannelId(),
+					getMessagesScrollerSelector: () => BDFDB.dotCN && BDFDB.dotCN.messagesscroller,
+					getChannelTextAreaSelector: () => BDFDB.dotCN && BDFDB.dotCN.channeltextarea,
+					escapeSelectorValue: value => typeof CSS != "undefined" && CSS.escape ? CSS.escape(value) : String(value).replace(/(["\\])/g, "\\$1"),
+					// Closing the user-scroll window is the moment a historical snapshot may commit.
+					onScrollActivityFinished: channelId => this.finishHistoricalTranslationSnapshot(channelId)
+				});
+				return this.messageViewportStoreInstance;
+			}
+
 			ensureReceivedDisplayRuntime () {
 				if (!this.receivedDisplayRuntimeInstance) this.receivedDisplayRuntimeInstance = createDisplayRuntime({
 					BDFDB: {
@@ -7263,7 +7030,7 @@ module.exports = (_ => {
 					},
 					requestAnimationFrame: callback => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0),
 					setTimeout: (callback, delay) => setTimeout(callback, delay),
-					getUserScrollIntentSequence: () => autoTranslationUserScrollIntentSequence,
+					getUserScrollIntentSequence: () => this.ensureMessageViewportStore().getUserScrollIntentSequence(),
 					// Scroll preservation is best-effort: a capture or restore failure must never
 					// break an acknowledged display transaction.
 					captureScrollState: () => {
