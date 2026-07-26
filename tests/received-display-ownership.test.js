@@ -39,10 +39,17 @@ test("the received display compatibility path delegates to the display runtime",
 test("automatic received translation flows never call the legacy display writer", () => {
 	const flowSlices = [
 		methodSlice("commitCachedDisplayResult", "resolveCheckMessageDisplay"),
-		methodSlice("handleCachedQueueItem", "handleQueueItemGuardFailure"),
 		methodSlice("resolveLoadedMessageContentTranslation", "prepareMessageContentDisplay")
 	];
 	for (const flow of flowSlices) {
 		assert.doesNotMatch(flow, /applyStoredTranslationToMessage|scheduleTranslationRerender/);
 	}
+});
+
+test("the extracted live queue cannot reach the legacy display maps at all", () => {
+	// The queue moved out of runtime.js, so the contract is now structural rather
+	// than textual: a module has no access to the factory closure that holds those
+	// maps, and naming one would be a bug rather than a legacy call.
+	const queueSource = fs.readFileSync(path.resolve(__dirname, "..", "src", "orchestrator", "live-translation-queue.js"), "utf8");
+	assert.doesNotMatch(queueSource, /translatedMessages|oldMessages|applyStoredTranslationToMessage|scheduleTranslationRerender/);
 });

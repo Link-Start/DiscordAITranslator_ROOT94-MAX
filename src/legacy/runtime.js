@@ -69,6 +69,7 @@ module.exports = (_ => {
 		const {createTranslationCacheStore} = require("../cache/translation-cache-store");
 		const {createProviderClient, translationEngines, enginePortals} = require("../providers/provider-client");
 		const {createSentTranslationStore} = require("../sent/sent-translation-store");
+		const {createLiveTranslationQueue} = require("../orchestrator/live-translation-queue");
 		const {getLabelsForUiLanguage} = require("../i18n/labels");
 		const {getCustomTextValue} = require("../i18n/text");
 
@@ -389,24 +390,15 @@ module.exports = (_ => {
 		var favorites = [];
 		var authKeys = {};
 		var channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {};
-		var translationEnabledStates = {globalDefault: false, channelOverrides: {}}, isTranslating;
+		var translationEnabledStates = {globalDefault: false, channelOverrides: {}};
 		var translatedMessages = {}, oldMessages = {};
-		var autoTranslationQueue = [];
-		var queuedAutoTranslations = {};
-		var liveTranslationRequests = {};
-		var liveTranslationRequestSequence = 0;
-		var liveTranslationRuntimeGeneration = 0;
 		var suppressedAutoTranslations = {};
-		var isLiveAutoTranslating = false;
 		var translationRerenderTimer = null;
 		var deferredTextAreaRerenderTimer = null;
-		var autoTranslationQueueRetryTimer = null;
-		var autoTranslationChannelStates = {};
 		var replyPreviewTranslations = {};
 		var queuedReplyPreviewTranslations = {};
 		var autoTranslationEligibleReplyPreviewMessages = {};
 		var replyPreviewRenderMessageIds = {};
-		var lastAutoTranslationChannelId = null;
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		var deferredTranslationRerenderPending = false;
@@ -420,10 +412,8 @@ module.exports = (_ => {
 		var deferredSettingsRerenderTimer = null;
 		const AUTO_TRANSLATION_RERENDER_DELAY = 120;
 		const AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500;
-		const AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900;
 		// A live burst drains into one AI batch request instead of one request per
 		// message; the cap keeps a single prompt within comfortable output limits.
-		const LIVE_AI_BATCH_ITEM_LIMIT = 10;
 		// How often a deferred repaint re-checks whether the user stopped typing or closed
 		// the settings surface. Matches the legacy text-area deferral.
 		const AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450;
@@ -976,384 +966,10 @@ module.exports = (_ => {
 		};
 
 		const receivedTranslationRuntime = {
-			resetLoadedMessageTracking(channelId = null) {
-				loadedTranslationStatusStore.resetSeen(channelId);
-			},
-			resetQueueTimer() {
-				if (autoTranslationQueueRetryTimer) clearTimeout(autoTranslationQueueRetryTimer);
-				autoTranslationQueueRetryTimer = null;
-			},
-			resetAutoTranslationTracking(plugin, channelId = null) {
-				if (channelId) {
-					delete autoTranslationChannelStates[channelId];
-					receivedTranslationRuntime.resetLoadedMessageTracking(channelId);
-				}
-				else {
-					autoTranslationChannelStates = {};
-					receivedTranslationRuntime.resetLoadedMessageTracking();
-				}
-				plugin.clearAutoTranslationEligibleReplyPreviewMessages(channelId);
-				if (!channelId || lastAutoTranslationChannelId == channelId) lastAutoTranslationChannelId = null;
-			},
-			getAutoTranslationChannelState(_plugin, channelId) {
-				if (!channelId) return null;
-				if (!autoTranslationChannelStates[channelId]) autoTranslationChannelStates[channelId] = {
-					initialized: false,
-					boundaryMessageId: null
-				};
-				return autoTranslationChannelStates[channelId];
-			},
-			prepareAutoTranslationChannelSession(plugin, channelId) {
-				if (!channelId || lastAutoTranslationChannelId == channelId) return;
-				const previousChannelId = lastAutoTranslationChannelId;
-				if (previousChannelId) {
-					plugin.clearAutoTranslationQueue(previousChannelId);
-					// The seen map only serves boundary dedup inside the active channel session;
-					// keeping it for left channels grows memory for the whole Discord session.
-					receivedTranslationRuntime.resetLoadedMessageTracking(previousChannelId);
-				}
-				lastAutoTranslationChannelId = channelId;
-				const channelState = receivedTranslationRuntime.getAutoTranslationChannelState(plugin, channelId);
-				channelState.initialized = false;
-				channelState.boundaryMessageId = null;
-				receivedTranslationRuntime.resetLoadedMessageTracking(channelId);
-				plugin.clearAutoTranslationEligibleReplyPreviewMessages(channelId);
-				if (plugin.getReceivedAutoTranslateScope() == "new_only") plugin.clearDisplayedAutoTranslations(channelId);
-			},
-			getLiveTranslationRequestKey(_plugin, messageId, channelId) {
-				return `${channelId || "__global"}:${String(messageId || "")}`;
-			},
-			createLiveTranslationRequest(plugin, message, channelId, originalContentData = null, signature = null) {
-				if (!message || !message.id || !channelId) return null;
-				const request = {
-					id: ++liveTranslationRequestSequence,
-					generation: liveTranslationRuntimeGeneration,
-					channelId,
-					messageId: String(message.id),
-					signature: signature || plugin.createReceivedTranslationSignature(message, channelId, originalContentData || plugin.extractOriginalContentData(message))
-				};
-				liveTranslationRequests[receivedTranslationRuntime.getLiveTranslationRequestKey(plugin, request.messageId, channelId)] = request;
-				return request;
-			},
-			isLiveTranslationRequestCurrent(plugin, request, message = null) {
-				if (!request || !pluginRuntimeActive || request.generation != liveTranslationRuntimeGeneration || !plugin.isTranslationEnabled(request.channelId)) return false;
-				const key = receivedTranslationRuntime.getLiveTranslationRequestKey(plugin, request.messageId, request.channelId);
-				if (liveTranslationRequests[key] !== request) return false;
-				if (!message) return true;
-				const currentContentData = plugin.extractOriginalContentData(message);
-				return plugin.createReceivedTranslationSignature(message, request.channelId, currentContentData) == request.signature;
-			},
-			releaseLiveDisplayPending(plugin, request) {
-				// A live request that ends without a terminal commit must return its store
-				// record to idle; a lingering pending identity would poison later commits.
-				plugin.releaseReceivedDisplayPending({
-					messageId: request.messageId,
-					channelId: request.channelId,
-					requestIdentity: String(request.id)
-				});
-			},
-			finishLiveTranslationRequest(plugin, request) {
-				if (!request) return false;
-				const key = receivedTranslationRuntime.getLiveTranslationRequestKey(plugin, request.messageId, request.channelId);
-				if (liveTranslationRequests[key] === request) delete liveTranslationRequests[key];
-				if (queuedAutoTranslations[request.messageId] === request) delete queuedAutoTranslations[request.messageId];
-				receivedTranslationRuntime.releaseLiveDisplayPending(plugin, request);
-				return true;
-			},
-			invalidateLiveTranslationRequests(plugin, channelId = null) {
-				if (!channelId) liveTranslationRuntimeGeneration++;
-				for (const key of Object.keys(liveTranslationRequests)) {
-					const request = liveTranslationRequests[key];
-					if (channelId && request.channelId != channelId) continue;
-					delete liveTranslationRequests[key];
-					if (queuedAutoTranslations[request.messageId] === request) delete queuedAutoTranslations[request.messageId];
-					receivedTranslationRuntime.releaseLiveDisplayPending(plugin, request);
-				}
-			},
-			invalidateLiveTranslationMessage(plugin, messageId, channelId, currentSignature) {
-				if (!messageId || !channelId || !currentSignature) return false;
-				const key = receivedTranslationRuntime.getLiveTranslationRequestKey(plugin, messageId, channelId);
-				const request = liveTranslationRequests[key];
-				if (!request || request.signature == currentSignature) return false;
-				delete liveTranslationRequests[key];
-				if (queuedAutoTranslations[request.messageId] === request) delete queuedAutoTranslations[request.messageId];
-				receivedTranslationRuntime.releaseLiveDisplayPending(plugin, request);
-				return true;
-			},
-			clearAutoTranslationQueue(plugin, channelId = null) {
-				plugin.cancelHistoricalTranslationJobs(channelId, channelId ? "channel-queue-cleared" : "all-queues-cleared");
-				plugin.cancelPendingChannelTitleTranslation(channelId);
-				receivedTranslationRuntime.invalidateLiveTranslationRequests(plugin, channelId);
-				plugin.invalidateSentAutomaticTranslationRequests(channelId);
-				if (!channelId) {
-					autoTranslationQueue = [];
-					queuedAutoTranslations = {};
-					queuedReplyPreviewTranslations = {};
-					autoTranslationEligibleReplyPreviewMessages = {};
-					replyPreviewRenderMessageIds = {};
-					deferredTranslationRerenderPending = false;
-					receivedTranslationRuntime.resetLoadedMessageTracking();
-					receivedTranslationRuntime.resetQueueTimer();
-					plugin.clearLoadedAutoTranslationStatus();
-					return;
-				}
-				autoTranslationQueue = autoTranslationQueue.filter(queueItem => {
-					const shouldRemove = queueItem && queueItem.channel && queueItem.channel.id == channelId;
-					if (shouldRemove && queueItem.message && queueItem.message.id && (!queueItem.liveRequest || queuedAutoTranslations[queueItem.message.id] === queueItem.liveRequest)) delete queuedAutoTranslations[queueItem.message.id];
-					return !shouldRemove;
-				});
-				for (const messageId of Object.keys(queuedReplyPreviewTranslations)) {
-					const request = queuedReplyPreviewTranslations[messageId];
-					if (request == channelId || request && request.channelId == channelId) delete queuedReplyPreviewTranslations[messageId];
-				}
-				delete autoTranslationEligibleReplyPreviewMessages[channelId];
-				receivedTranslationRuntime.resetLoadedMessageTracking(channelId);
-				if (!autoTranslationQueue.length && autoTranslationQueueRetryTimer) {
-					clearTimeout(autoTranslationQueueRetryTimer);
-					autoTranslationQueueRetryTimer = null;
-				}
-				if (loadedTranslationStatusStore.isForChannel(channelId)) plugin.clearLoadedAutoTranslationStatus();
-			},
-			scheduleAutoTranslationQueueRetry(plugin) {
-				if (autoTranslationQueueRetryTimer) return;
-				autoTranslationQueueRetryTimer = setTimeout(_ => {
-					autoTranslationQueueRetryTimer = null;
-					plugin.processAutoTranslationQueue();
-				}, AUTO_TRANSLATION_QUEUE_RETRY_DELAY);
-			},
-			scheduleAutoTranslationBackoff(plugin, ms) {
-				plugin.ensureProviderClient().scheduleBackoff(ms);
-				receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
-			},
-			awaitProviderBackoff(_plugin) {
-				return _plugin.ensureProviderClient().awaitBackoff();
-			},
-			createQueueItem(plugin, message, channel, originalContentData = null, queueOptions = {}) {
-				const normalizedOriginalContentData = originalContentData || plugin.extractOriginalContentData(message);
-				return {
-					message,
-					channel,
-					originalContentData: normalizedOriginalContentData,
-					historicalLoad: !!queueOptions.historicalLoad,
-					deferHistoricalSnapshotStart: !!queueOptions.deferHistoricalSnapshotStart,
-					deferWhileReading: !!queueOptions.deferWhileReading,
-					cachedTranslation: queueOptions.cachedTranslation || null,
-					liveRequest: null
-				};
-			},
-			enqueueLiveItem(plugin, queueItem) {
-				autoTranslationQueue.unshift(queueItem);
-				plugin.processAutoTranslationQueue();
-				return true;
-			},
-			queueAutoTranslateMessage(plugin, message, channel, originalContentData = null, queueOptions = {}) {
-				const cachedTranslation = queueOptions.cachedTranslation || null;
-				if (!cachedTranslation && !plugin.shouldAutoTranslateReceivedMessage(message, channel, originalContentData)) return false;
-				if (queueOptions.historicalLoad && !plugin.isMessageWithinLoadedRange(message)) return false;
-				const queueItem = receivedTranslationRuntime.createQueueItem(plugin, message, channel, originalContentData, queueOptions);
-				if (queueItem.historicalLoad) return plugin.collectHistoricalTranslationMessage(queueItem);
-				const channelId = channel && channel.id || plugin.getMessageChannelId(message);
-				queueItem.liveRequest = receivedTranslationRuntime.createLiveTranslationRequest(plugin, message, channelId, queueItem.originalContentData);
-				if (!queueItem.liveRequest) return false;
-				queuedAutoTranslations[message.id] = queueItem.liveRequest;
-				const pendingMark = plugin.markReceivedDisplayPending({
-					messageId: message.id,
-					channelId,
-					generation: plugin.getReceivedDisplayCommitGeneration(channelId),
-					origin: "automatic",
-					requestIdentity: String(queueItem.liveRequest.id)
-				}, {refresh: false});
-				if (pendingMark && pendingMark.catch) pendingMark.catch(_ => {});
-				return receivedTranslationRuntime.enqueueLiveItem(plugin, queueItem);
-			},
-			beginQueueProcessing(plugin) {
-				if (isTranslating || isLiveAutoTranslating) return false;
-				if (plugin.ensureProviderClient().isBackoffActive()) {
-					receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
-					return false;
-				}
-				return true;
-			},
-			finishQueueIfEmpty() {
-				return !autoTranslationQueue.length;
-			},
-			handleCachedQueueItem(plugin, queueItem) {
-				if (!queueItem || !queueItem.cachedTranslation) return false;
-				const channelId = queueItem.channel && queueItem.channel.id || "__global";
-				const storedTranslation = plugin.refreshTranslationDisplay(Object.assign({channelId, auto: true}, queueItem.cachedTranslation));
-				const commit = plugin.commitReceivedDisplayResult(plugin.createReceivedDisplayCommitResult(queueItem.message, channelId, {
-					sourceSignature: storedTranslation.signature != null ? String(storedTranslation.signature) : plugin.createReceivedTranslationSignature(queueItem.message, channelId, queueItem.originalContentData),
-					requestIdentity: queueItem.liveRequest ? String(queueItem.liveRequest.id) : null,
-					status: "translated",
-					translation: storedTranslation
-				}), {refresh: false});
-				const finishRequest = outcome => {
-					if (outcome && outcome.deferredIds && outcome.deferredIds.length) plugin.scheduleReceivedDisplayFlush(channelId, queueItem.message.id);
-					receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-				};
-				Promise.resolve(commit).then(finishRequest, _ => finishRequest(null));
-				return true;
-			},
-			handleQueueItemGuardFailure(plugin, queueItem) {
-				if (!queueItem) return false;
-				if (plugin.shouldAutoTranslateReceivedMessage(queueItem.message, queueItem.channel, queueItem.originalContentData, true)) return false;
-				receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-				return true;
-			},
 			// Drains queued live items that can share one AI batch request with the first
 			// item: same channel, no cached result, and not already batch-rejected.
-			collectLiveBatchItems(plugin, firstItem) {
-				const channelId = firstItem.channel && firstItem.channel.id || plugin.getMessageChannelId(firstItem.message);
-				if (!channelId || firstItem.skipLiveBatch || firstItem.cachedTranslation) return null;
-				if (!plugin.getHistoricalAiBatchEngineKey(channelId)) return null;
-				const items = [firstItem];
-				for (let index = 0; index < autoTranslationQueue.length && items.length < LIVE_AI_BATCH_ITEM_LIMIT;) {
-					const candidate = autoTranslationQueue[index];
-					const candidateChannelId = candidate && candidate.channel && candidate.channel.id || candidate && plugin.getMessageChannelId(candidate.message);
-					if (!candidate || !candidate.message || candidate.historicalLoad || candidate.cachedTranslation || candidate.skipLiveBatch || candidateChannelId != channelId) {
-						index++;
-						continue;
-					}
-					autoTranslationQueue.splice(index, 1);
-					items.push(candidate);
-				}
-				return items.length > 1 ? {channelId, items} : null;
-			},
-			finishBurstItem(plugin, queueItem, channelId, result) {
-				const commit = plugin.commitReceivedDisplayResult(plugin.createReceivedDisplayCommitResult(queueItem.message, channelId, Object.assign({
-					requestIdentity: queueItem.liveRequest ? String(queueItem.liveRequest.id) : null
-				}, result)), {refresh: false});
-				const finishRequest = outcome => {
-					if (outcome && outcome.deferredIds && outcome.deferredIds.length) plugin.scheduleReceivedDisplayFlush(channelId, queueItem.message.id);
-					receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-				};
-				return Promise.resolve(commit).then(finishRequest, _ => finishRequest(null));
-			},
 			// Returns a burst item to the single-message path, preserving the queue's
 			// newest-first order so a retry is never starved behind later arrivals.
-			requeueBurstItem(plugin, queueItem, settled) {
-				settled.add(queueItem);
-				queueItem.skipLiveBatch = true;
-				// A cancelled channel already emptied its queue; re-injecting the item there
-				// would restart provider traffic the cancellation was meant to stop.
-				if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-					receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-					return;
-				}
-				autoTranslationQueue.unshift(queueItem);
-			},
-			async translateQueuedBurst(plugin, burst) {
-				const {channelId, items} = burst;
-				// Every drained item must reach a terminal state; anything still unsettled when
-				// this returns is released so no message is left with a stuck loading indicator.
-				const settled = new Set();
-				isLiveAutoTranslating = true;
-				try {
-					const engineKey = plugin.getHistoricalAiBatchEngineKey(channelId);
-					const input = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {});
-					const output = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {});
-					const prepared = [];
-					for (const queueItem of items) {
-						try {
-							// A source edit or channel switch between queueing and now invalidates
-							// the item; the request guard is the same one the single path uses.
-							if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-								settled.add(queueItem);
-								receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-								continue;
-							}
-							const preparedItem = plugin.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
-							if (!preparedItem || preparedItem.skipped || preparedItem.cachedTranslation || !preparedItem.protectedText) {
-								// Anything the batch cannot carry goes back to the single path.
-								receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
-								continue;
-							}
-							prepared.push(preparedItem);
-						}
-						catch (error) {
-							receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
-						}
-					}
-					if (!prepared.length) return;
-					let resultMap = null;
-					try {resultMap = await plugin.requestAiBatchTranslation(engineKey, prepared);}
-					catch (error) {resultMap = null;}
-					const commits = [];
-					for (const preparedItem of prepared) {
-						const queueItem = preparedItem.queueItem;
-						try {
-							const messageId = String(preparedItem.message.id);
-							const rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null;
-							// An explicit skip verdict is a terminal answer, not a failure: paying
-							// for a second full-price request to reach the same verdict is waste.
-							if (rawTranslation != null && plugin.isSkipTranslationSignal(rawTranslation)) {
-								settled.add(queueItem);
-								plugin.persistReceivedSkipDecision(messageId, preparedItem.signature, "ai_skip_signal", preparedItem.protectedText);
-								commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
-									sourceSignature: preparedItem.signature,
-									status: "skipped",
-									reason: "ai_skip_signal"
-								}));
-								continue;
-							}
-							let validation = {ok: false};
-							try {validation = plugin.validateHistoricalTranslationJobResult(preparedItem, rawTranslation, {channelId}) || {ok: false};}
-							catch (error) {validation = {ok: false};}
-							if (!validation.ok) {
-								// One unusable item must not cost the whole burst: retry it alone.
-								receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
-								continue;
-							}
-							// The result is paid for and valid, so it is cached even when the live
-							// request went stale; a retry then hits the cache instead of the provider.
-							try {plugin.persistTranslationCacheEntry(messageId, preparedItem.signature, validation.translation);}
-							catch (error) {}
-							if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-								settled.add(queueItem);
-								receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-								continue;
-							}
-							settled.add(queueItem);
-							commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
-								sourceSignature: preparedItem.signature,
-								status: "translated",
-								translation: validation.translation
-							}));
-						}
-						catch (error) {
-							receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
-						}
-					}
-					await Promise.all(commits);
-				}
-				finally {
-					for (const queueItem of items) {
-						if (settled.has(queueItem)) continue;
-						try {receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);}
-						catch (error) {}
-					}
-					isLiveAutoTranslating = false;
-					plugin.processAutoTranslationQueue();
-				}
-			},
-			translateQueuedItem(plugin, queueItem) {
-				isLiveAutoTranslating = true;
-				plugin.translateMessage(queueItem.message, queueItem.channel, {
-					auto: true,
-					silent: true,
-					trackBusy: false,
-					originalContentData: queueItem.originalContentData,
-					liveRequest: queueItem.liveRequest
-				}).then(_ => {
-					receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-					isLiveAutoTranslating = false;
-					plugin.processAutoTranslationQueue();
-				}).catch(_ => {
-					receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-					isLiveAutoTranslating = false;
-					plugin.processAutoTranslationQueue();
-				});
-			},
 			createProcessMessagesContext(plugin, e) {
 				e.instance.props.channelStream = [].concat(e.instance.props.channelStream);
 				const channel = e.instance.props.channel;
@@ -1546,27 +1162,6 @@ module.exports = (_ => {
 				const outcome = receivedTranslationRuntime.resolveCheckMessageDisplay(plugin, stream, message, context);
 				receivedTranslationRuntime.queueCheckMessageTranslation(plugin, message, channel, context, outcome);
 			},
-			processAutoTranslationQueue(plugin) {
-				if (!receivedTranslationRuntime.beginQueueProcessing(plugin)) return;
-				if (receivedTranslationRuntime.finishQueueIfEmpty(plugin)) return;
-				const nextItem = autoTranslationQueue.shift();
-				if (!nextItem || !nextItem.message) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
-				if (nextItem.historicalLoad) {
-					plugin.collectHistoricalTranslationMessage(nextItem);
-					return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
-				}
-				if (receivedTranslationRuntime.handleCachedQueueItem(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
-				if (receivedTranslationRuntime.handleQueueItemGuardFailure(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
-				// beginQueueProcessing already refused to run inside a provider backoff window,
-				// so the burst never holds the live lock across a backoff sleep.
-				let burst = null;
-				try {burst = receivedTranslationRuntime.collectLiveBatchItems(plugin, nextItem);}
-				catch (error) {burst = null;}
-				// The burst runs detached; its own finally resumes the queue, and a failure
-				// there must never surface as an unhandled rejection.
-				if (burst) return receivedTranslationRuntime.translateQueuedBurst(plugin, burst).catch(_ => {});
-				return receivedTranslationRuntime.translateQueuedItem(plugin, nextItem);
-			}
 		};
 
 		const translationDisplayLogic = {
@@ -1739,7 +1334,7 @@ module.exports = (_ => {
 				}
 			},
 			resolveLoadedMessageContentTranslation(plugin, message, channelId) {
-				if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || queuedAutoTranslations[message.id]) return null;
+				if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return null;
 				// A store record that is already translated or has an active request must not
 				// re-enter the queue on every render; that would loop commit -> repaint -> requeue.
 				const storeView = plugin.getReceivedDisplayRuntimeView(message.id);
@@ -2360,7 +1955,7 @@ module.exports = (_ => {
 				if (!channel || !channel.id || !message || !message.id) return false;
 				if (!plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message)) return false;
 				if (suppressedAutoTranslations[message.id]) return false;
-				if (plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && queuedAutoTranslations[message.id]) return false;
+				if (plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return false;
 				const sourceData = originalContentData || plugin.extractOriginalContentData(message);
 				if (plugin.getCachedReceivedSkipDecision(message, channel.id, sourceData)) return false;
 				if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, sourceData)) return false;
@@ -2502,8 +2097,7 @@ module.exports = (_ => {
 			onStart () {
 				pluginRuntimeActive = true;
 				this.resetReceivedDisplayRuntime();
-				liveTranslationRuntimeGeneration++;
-				liveTranslationRequests = {};
+				this.ensureLiveTranslationQueue().restartRequestGeneration();
 				this.ensureSentTranslationStore().resetForStart();
 				historicalTranslationRuntimeGeneration++;
 				this.attachAutoTranslationInputActivityWatcher();
@@ -2546,7 +2140,7 @@ module.exports = (_ => {
 				this.ensureTranslationCacheStore().cancelPendingSave();
 				if (translationRerenderTimer) clearTimeout(translationRerenderTimer);
 				if (deferredTextAreaRerenderTimer) clearTimeout(deferredTextAreaRerenderTimer);
-				if (autoTranslationQueueRetryTimer) clearTimeout(autoTranslationQueueRetryTimer);
+				this.ensureLiveTranslationQueue().cancelQueueRetry();
 				if (deferredSettingsRerenderTimer) clearTimeout(deferredSettingsRerenderTimer);
 				this.ensureMessageViewportStore().clearManualScrollLock();
 				deferredSettingsRerenderTimer = null;
@@ -2558,13 +2152,13 @@ module.exports = (_ => {
 				failedHistoricalTranslationSnapshots.clear();
 				this.ensureSentTranslationStore().clearManualRequests();
 				suppressedAutoTranslations = {};
-				queuedAutoTranslations = {};
+				this.ensureLiveTranslationQueue().clearAllQueuedMessages();
 				queuedReplyPreviewTranslations = {};
 				autoTranslationEligibleReplyPreviewMessages = {};
 				replyPreviewRenderMessageIds = {};
 				deferredTranslationRerenderPending = false;
-				isTranslating = false;
-				isLiveAutoTranslating = false;
+				this.ensureLiveTranslationQueue().setBusyTranslating(false);
+				this.ensureLiveTranslationQueue().setLiveAutoTranslating(false);
 				this.clearLoadedAutoTranslationStatus();
 				BDFDB.MessageUtils.rerenderAll(true);
 			}
@@ -4678,15 +4272,15 @@ module.exports = (_ => {
 			}
 
 			resetAutoTranslationTracking (channelId = null) {
-				return receivedTranslationRuntime.resetAutoTranslationTracking(this, channelId);
+				return this.ensureLiveTranslationQueue().resetTracking(channelId);
 			}
 
 			getAutoTranslationChannelState (channelId) {
-				return receivedTranslationRuntime.getAutoTranslationChannelState(this, channelId);
+				return this.ensureLiveTranslationQueue().getChannelState(channelId);
 			}
 
 			prepareAutoTranslationChannelSession (channelId) {
-				return receivedTranslationRuntime.prepareAutoTranslationChannelSession(this, channelId);
+				return this.ensureLiveTranslationQueue().prepareChannelSession(channelId);
 			}
 
 			compareMessageIds (messageIdA, messageIdB) {
@@ -5214,27 +4808,48 @@ module.exports = (_ => {
 			}
 
 			createLiveTranslationRequest (message, channelId, originalContentData = null, signature = null) {
-				return receivedTranslationRuntime.createLiveTranslationRequest(this, message, channelId, originalContentData, signature);
+				return this.ensureLiveTranslationQueue().createRequest(message, channelId, originalContentData, signature);
 			}
 
 			isLiveTranslationRequestCurrent (request, message = null) {
-				return receivedTranslationRuntime.isLiveTranslationRequestCurrent(this, request, message);
+				return this.ensureLiveTranslationQueue().isRequestCurrent(request, message);
 			}
 
 			finishLiveTranslationRequest (request) {
-				return receivedTranslationRuntime.finishLiveTranslationRequest(this, request);
+				return this.ensureLiveTranslationQueue().finishRequest(request);
 			}
 
 			invalidateLiveTranslationRequests (channelId = null) {
-				return receivedTranslationRuntime.invalidateLiveTranslationRequests(this, channelId);
+				return this.ensureLiveTranslationQueue().invalidateRequests(channelId);
 			}
 
 			invalidateLiveTranslationMessage (messageId, channelId, currentSignature) {
-				return receivedTranslationRuntime.invalidateLiveTranslationMessage(this, messageId, channelId, currentSignature);
+				return this.ensureLiveTranslationQueue().invalidateRequestForMessage(messageId, channelId, currentSignature);
 			}
 
 			clearAutoTranslationQueue (channelId = null) {
-				return receivedTranslationRuntime.clearAutoTranslationQueue(this, channelId);
+				// The queue module owns the queue itself; the surrounding cancellations are
+				// cross-feature and stay here.
+				this.cancelHistoricalTranslationJobs(channelId, channelId ? "channel-queue-cleared" : "all-queues-cleared");
+				this.cancelPendingChannelTitleTranslation(channelId);
+				this.invalidateSentAutomaticTranslationRequests(channelId);
+				this.ensureLiveTranslationQueue().clearQueue(channelId);
+				if (!channelId) {
+					queuedReplyPreviewTranslations = {};
+					autoTranslationEligibleReplyPreviewMessages = {};
+					replyPreviewRenderMessageIds = {};
+					deferredTranslationRerenderPending = false;
+					loadedTranslationStatusStore.resetSeen(null);
+					this.clearLoadedAutoTranslationStatus();
+					return;
+				}
+				for (const messageId of Object.keys(queuedReplyPreviewTranslations)) {
+					const request = queuedReplyPreviewTranslations[messageId];
+					if (request == channelId || request && request.channelId == channelId) delete queuedReplyPreviewTranslations[messageId];
+				}
+				delete autoTranslationEligibleReplyPreviewMessages[channelId];
+				loadedTranslationStatusStore.resetSeen(channelId);
+				if (loadedTranslationStatusStore.isForChannel(channelId)) this.clearLoadedAutoTranslationStatus();
 			}
 
 			clearDisplayedTranslations (channelId = null) {
@@ -5318,7 +4933,7 @@ module.exports = (_ => {
 			}
 
 			isMessageTranslationPending (messageId, channelId = null) {
-				return this.isHistoricalMessagePending(messageId, channelId) || !!queuedAutoTranslations[messageId];
+				return this.isHistoricalMessagePending(messageId, channelId) || this.ensureLiveTranslationQueue().isMessageQueued(messageId);
 			}
 
 			applyMessageContentRenderDecorations (e, message, translation) {
@@ -5449,7 +5064,7 @@ module.exports = (_ => {
 			}
 
 			scheduleAutoTranslationQueueRetry () {
-				return receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(this);
+				return this.ensureLiveTranslationQueue().scheduleQueueRetry();
 			}
 
 			scheduleAutoTranslationBackoff (ms) {
@@ -5730,7 +5345,7 @@ module.exports = (_ => {
 			}
 
 			queueAutoTranslateMessage (message, channel, originalContentData = null, queueOptions = {}) {
-				return receivedTranslationRuntime.queueAutoTranslateMessage(this, message, channel, originalContentData, queueOptions);
+				return this.ensureLiveTranslationQueue().queueMessage(message, channel, originalContentData, queueOptions);
 			}
 
 
@@ -5887,7 +5502,7 @@ module.exports = (_ => {
 				if (job && job.state == "collecting" && !job.sealed && job.items.size >= this.getReceivedAutoTranslateLoadedLimit()) return false;
 				if (!job || job.state != "collecting" || job.sealed) job = this.createCollectedHistoricalTranslationJob(channelId);
 				if (!job.add(queueItem)) return false;
-				queuedAutoTranslations[queueItem.message.id] = {type: "historical", channelId, jobId: job.id};
+				this.ensureLiveTranslationQueue().markMessageQueued(queueItem.message.id, {type: "historical", channelId, jobId: job.id});
 				if (!queueItem.deferHistoricalSnapshotStart) this.scheduleHistoricalTranslationJobStart(channelId);
 				this.updateHistoricalTranslationJobStatus(job);
 				return true;
@@ -5932,8 +5547,8 @@ module.exports = (_ => {
 				const runningPromise = Promise.resolve(job.start()).finally(_ => {
 					for (const record of job.items.values()) {
 						const messageId = record && record.source && record.source.message && record.source.message.id;
-						const queuedMarker = messageId && queuedAutoTranslations[messageId];
-						if (queuedMarker && queuedMarker.type == "historical" && queuedMarker.jobId == job.id) delete queuedAutoTranslations[messageId];
+						const queuedMarker = messageId && this.ensureLiveTranslationQueue().getQueuedMarker(messageId);
+						if (queuedMarker && queuedMarker.type == "historical" && queuedMarker.jobId == job.id) this.ensureLiveTranslationQueue().clearQueuedMessage(messageId);
 					}
 					if (entry.runningPromise == runningPromise) entry.runningPromise = null;
 					entry.jobs = entry.jobs.filter(candidate => candidate != job);
@@ -5985,7 +5600,7 @@ module.exports = (_ => {
 					else failedHistoricalTranslationSnapshots.delete(channelId);
 				}
 				if (invalidated) {
-					delete queuedAutoTranslations[messageId];
+					this.ensureLiveTranslationQueue().clearQueuedMessage(messageId);
 					this.clearCachedTranslation(messageId);
 					const repairStatus = loadedTranslationStatusStore.getStatus();
 					if (repairStatus.channelId == channelId && repairStatus.done) {
@@ -6004,7 +5619,7 @@ module.exports = (_ => {
 					entry.startToken = null;
 					for (const job of entry.jobs) {
 						job.cancel(reason);
-						for (const record of job.items.values()) if (record.source && record.source.message) delete queuedAutoTranslations[record.source.message.id];
+						for (const record of job.items.values()) if (record.source && record.source.message) this.ensureLiveTranslationQueue().clearQueuedMessage(record.source.message.id);
 					}
 					entry.jobs = [];
 					if (channelId) historicalTranslationJobQueues.delete(channelId);
@@ -6135,19 +5750,19 @@ module.exports = (_ => {
 						translation: storedTranslation
 					});
 					this.persistTranslationCacheEntry(item.message.id, storedTranslation.signature, storedTranslation);
-					delete queuedAutoTranslations[item.message.id];
+					this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id);
 				}
 				for (const item of summary.skipped) {
 					if (!item || !item.message) continue;
 					const signature = this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData);
 					this.persistReceivedSkipDecision(item.message.id, signature, item.reason || "local_guard", this.buildTranslationRequestText(item.originalContentData || {}));
 					results.push({messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: signature, requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "skipped", reason: item.reason || "local_guard"});
-					delete queuedAutoTranslations[item.message.id];
+					this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id);
 				}
 				for (const item of summary.failed) {
 					if (!item || !item.message) continue;
 					results.push({messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData), requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "failed", reason: item.reason || "provider_failed"});
-					delete queuedAutoTranslations[item.message.id];
+					this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id);
 				}
 				let batchOutcome = null;
 				if (results.length) {
@@ -6218,7 +5833,7 @@ module.exports = (_ => {
 			}
 
 			processAutoTranslationQueue () {
-				return receivedTranslationRuntime.processAutoTranslationQueue(this);
+				return this.ensureLiveTranslationQueue().processQueue();
 			}
 		
 			forceUpdateAll () {
@@ -6241,7 +5856,7 @@ module.exports = (_ => {
 				this.clearAutoTranslationQueue();
 				this.resetAutoTranslationTracking();
 				this.clearLoadedAutoTranslationStatus();
-				isLiveAutoTranslating = false;
+				this.ensureLiveTranslationQueue().setLiveAutoTranslating(false);
 				replyPreviewTranslations = {};
 				if (translationRerenderTimer) clearTimeout(translationRerenderTimer);
 				translationRerenderTimer = null;
@@ -6287,7 +5902,7 @@ module.exports = (_ => {
 							icon: _ => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
 								icon: translateIcon
 							}),
-							disabled: isTranslating,
+							disabled: this.ensureLiveTranslationQueue().isBusyTranslating(),
 							label: this.labels.context_translator,
 							persisting: true,
 							action: event => {
@@ -6466,6 +6081,81 @@ module.exports = (_ => {
 
 			get modelCatalogState () {
 				return this.ensureProviderClient().getModelCatalogState();
+			}
+
+			ensureLiveTranslationQueue () {
+				if (!this.liveTranslationQueueInstance) this.liveTranslationQueueInstance = createLiveTranslationQueue({
+
+					isRuntimeActive: () => pluginRuntimeActive,
+					isTranslationEnabled: channelId => this.isTranslationEnabled(channelId),
+					extractOriginalContentData: message => this.extractOriginalContentData(message),
+					createTranslationSignature: (message, channelId, originalContentData) => this.createReceivedTranslationSignature(message, channelId, originalContentData),
+					getMessageChannelId: message => this.getMessageChannelId(message),
+					isProviderBackoffActive: () => this.ensureProviderClient().isBackoffActive(),
+					shouldAutoTranslateMessage: (message, channel, originalContentData, ignoreQueued) => this.shouldAutoTranslateReceivedMessage(message, channel, originalContentData, ignoreQueued),
+					isMessageWithinLoadedRange: message => this.isMessageWithinLoadedRange(message),
+					getDisplayCommitGeneration: channelId => this.getReceivedDisplayCommitGeneration(channelId),
+					markDisplayPending: (record, options) => this.markReceivedDisplayPending(record, options),
+					releaseDisplayPending: record => this.releaseReceivedDisplayPending(record),
+					scheduleDisplayFlush: (channelId, messageId) => this.scheduleReceivedDisplayFlush(channelId, messageId),
+					collectHistoricalMessage: queueItem => this.collectHistoricalTranslationMessage(queueItem),
+					resetLoadedMessageTracking: (channelId = null) => loadedTranslationStatusStore.resetSeen(channelId),
+					clearEligibleReplyPreviewMessages: channelId => this.clearAutoTranslationEligibleReplyPreviewMessages(channelId),
+					clearChannelTranslationQueue: channelId => this.clearAutoTranslationQueue(channelId),
+					// new_only hides what is already on screen, so a fresh session drops the
+					// automatic records the previous one painted.
+					onChannelSessionStarted: channelId => {
+					if (this.getReceivedAutoTranslateScope() == "new_only") this.clearDisplayedAutoTranslations(channelId);
+					},
+					getBatchEngineKey: channelId => this.getHistoricalAiBatchEngineKey(channelId),
+					createBurstContext: channelId => ({
+					engineKey: this.getHistoricalAiBatchEngineKey(channelId),
+					input: Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {}),
+					output: Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {})
+					}),
+					prepareBurstItem: (queueItem, channelId, context) => this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, context.input, context.output),
+					requestBurstTranslation: (context, prepared) => this.requestAiBatchTranslation(context.engineKey, prepared),
+					// Skip detection, validation and caching are translation policy and stay here;
+					// the queue only learns whether the item is done, done-as-skipped, or must be
+					// retried alone.
+					resolveBurstItemResult: (preparedItem, resultMap, channelId) => {
+					const messageId = String(preparedItem.message.id);
+					const rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null;
+					// An explicit skip verdict is a terminal answer, not a failure: paying for a
+					// second full-price request to reach the same verdict is waste.
+					if (rawTranslation != null && this.isSkipTranslationSignal(rawTranslation)) {
+					this.persistReceivedSkipDecision(messageId, preparedItem.signature, "ai_skip_signal", preparedItem.protectedText);
+					return {status: "skipped", result: {sourceSignature: preparedItem.signature, status: "skipped", reason: "ai_skip_signal"}};
+					}
+					let validation = {ok: false};
+					try {validation = this.validateHistoricalTranslationJobResult(preparedItem, rawTranslation, {channelId}) || {ok: false};}
+					catch (error) {validation = {ok: false};}
+					if (!validation.ok) return {status: "retry"};
+					// The result is paid for and valid, so it is cached even when the live request
+					// went stale; a retry then hits the cache instead of the provider.
+					try {this.persistTranslationCacheEntry(messageId, preparedItem.signature, validation.translation);}
+					catch (error) {}
+					return {status: "translated", result: {sourceSignature: preparedItem.signature, status: "translated", translation: validation.translation}};
+					},
+					commitBurstResult: (queueItem, channelId, result) => this.commitReceivedDisplayResult(this.createReceivedDisplayCommitResult(queueItem.message, channelId, result), {refresh: false}),
+					commitCachedResult: (queueItem, channelId) => {
+					const storedTranslation = this.refreshTranslationDisplay(Object.assign({channelId, auto: true}, queueItem.cachedTranslation));
+					return this.commitReceivedDisplayResult(this.createReceivedDisplayCommitResult(queueItem.message, channelId, {
+					sourceSignature: storedTranslation.signature != null ? String(storedTranslation.signature) : this.createReceivedTranslationSignature(queueItem.message, channelId, queueItem.originalContentData),
+					requestIdentity: queueItem.liveRequest ? String(queueItem.liveRequest.id) : null,
+					status: "translated",
+					translation: storedTranslation
+					}), {refresh: false});
+					},
+					translateSingleItem: queueItem => this.translateMessage(queueItem.message, queueItem.channel, {
+					auto: true,
+					silent: true,
+					trackBusy: false,
+					originalContentData: queueItem.originalContentData,
+					liveRequest: queueItem.liveRequest
+					})
+				});
+				return this.liveTranslationQueueInstance;
 			}
 
 			ensureSentTranslationStore () {
@@ -7564,7 +7254,7 @@ module.exports = (_ => {
 						skipSafetyNetHandler(translation);
 						return;
 					}
-					if (trackBusy) isTranslating = false;
+					if (trackBusy) this.ensureLiveTranslationQueue().setBusyTranslating(false);
 					if (toast) toast.close();
 					BDFDB.TimeUtils.clear(toastInterval);
 
@@ -7610,7 +7300,7 @@ module.exports = (_ => {
 					}
 					else {
 						const startTranslating = engine => {
-							if (trackBusy) isTranslating = true;
+							if (trackBusy) this.ensureLiveTranslationQueue().setBusyTranslating(true);
 							if (toast) toast.close();
 							BDFDB.TimeUtils.clear(toastInterval);
 							
