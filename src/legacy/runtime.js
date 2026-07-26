@@ -647,6 +647,9 @@ module.exports = (_ => {
 		const AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900;
 		const SENT_ORIGINAL_MATCH_TTL = 2 * 60 * 1000;
 		const MAX_SENT_ORIGINAL_ENTRIES = 200;
+		// A live burst drains into one AI batch request instead of one request per
+		// message; the cap keeps a single prompt within comfortable output limits.
+		const LIVE_AI_BATCH_ITEM_LIMIT = 10;
 		const AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900;
 		const AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300;
 		// Scroll events delivered shortly after our own scroll restores are echoes of the
@@ -1442,6 +1445,92 @@ module.exports = (_ => {
 				receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
 				return true;
 			},
+			// Drains queued live items that can share one AI batch request with the first
+			// item: same channel, no cached result, and not already batch-rejected.
+			collectLiveBatchItems(plugin, firstItem) {
+				const channelId = firstItem.channel && firstItem.channel.id || plugin.getMessageChannelId(firstItem.message);
+				if (!channelId || firstItem.skipLiveBatch || firstItem.cachedTranslation) return null;
+				if (!plugin.getHistoricalAiBatchEngineKey(channelId)) return null;
+				const items = [firstItem];
+				for (let index = 0; index < autoTranslationQueue.length && items.length < LIVE_AI_BATCH_ITEM_LIMIT;) {
+					const candidate = autoTranslationQueue[index];
+					const candidateChannelId = candidate && candidate.channel && candidate.channel.id || candidate && plugin.getMessageChannelId(candidate.message);
+					if (!candidate || !candidate.message || candidate.historicalLoad || candidate.cachedTranslation || candidate.skipLiveBatch || candidateChannelId != channelId) {
+						index++;
+						continue;
+					}
+					autoTranslationQueue.splice(index, 1);
+					items.push(candidate);
+				}
+				return items.length > 1 ? {channelId, items} : null;
+			},
+			finishBurstItem(plugin, queueItem, channelId, result) {
+				const commit = plugin.commitReceivedDisplayResult(plugin.createReceivedDisplayCommitResult(queueItem.message, channelId, Object.assign({
+					requestIdentity: queueItem.liveRequest ? String(queueItem.liveRequest.id) : null
+				}, result)), {refresh: false});
+				const finishRequest = outcome => {
+					if (outcome && outcome.deferredIds && outcome.deferredIds.length) plugin.scheduleReceivedDisplayFlush(channelId, queueItem.message.id);
+					receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+				};
+				return Promise.resolve(commit).then(finishRequest, _ => finishRequest(null));
+			},
+			async translateQueuedBurst(plugin, burst) {
+				const {channelId, items} = burst;
+				isLiveAutoTranslating = true;
+				try {
+					const engineKey = plugin.getHistoricalAiBatchEngineKey(channelId);
+					const input = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {});
+					const output = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {});
+					const prepared = [];
+					for (const queueItem of items) {
+						// A source edit or channel switch between queueing and now invalidates
+						// the item; the request guard is the same one the single path uses.
+						if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+							receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+							continue;
+						}
+						const preparedItem = plugin.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
+						if (!preparedItem || preparedItem.skipped || preparedItem.cachedTranslation || !preparedItem.protectedText) {
+							// Anything the batch cannot carry goes back to the single path.
+							queueItem.skipLiveBatch = true;
+							autoTranslationQueue.push(queueItem);
+							continue;
+						}
+						prepared.push(preparedItem);
+					}
+					if (!prepared.length) return;
+					await plugin.awaitProviderBackoff();
+					let resultMap = null;
+					try {resultMap = await plugin.requestAiBatchTranslation(engineKey, prepared);}
+					catch (error) {resultMap = null;}
+					const commits = [];
+					for (const preparedItem of prepared) {
+						const queueItem = preparedItem.queueItem;
+						const messageId = String(preparedItem.message.id);
+						const rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null;
+						let validation = {ok: false};
+						try {validation = plugin.validateHistoricalTranslationJobResult(preparedItem, rawTranslation, {channelId}) || {ok: false};}
+						catch (error) {validation = {ok: false};}
+						if (!validation.ok || !plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+							// One unusable item must not cost the whole burst: retry it alone.
+							queueItem.skipLiveBatch = true;
+							autoTranslationQueue.push(queueItem);
+							continue;
+						}
+						plugin.persistTranslationCacheEntry(messageId, preparedItem.signature, validation.translation);
+						commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
+							sourceSignature: preparedItem.signature,
+							status: "translated",
+							translation: validation.translation
+						}));
+					}
+					await Promise.all(commits);
+				}
+				finally {
+					isLiveAutoTranslating = false;
+					plugin.processAutoTranslationQueue();
+				}
+			},
 			translateQueuedItem(plugin, queueItem) {
 				isLiveAutoTranslating = true;
 				plugin.translateMessage(queueItem.message, queueItem.channel, {
@@ -1663,6 +1752,10 @@ module.exports = (_ => {
 				}
 				if (receivedTranslationRuntime.handleCachedQueueItem(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
 				if (receivedTranslationRuntime.handleQueueItemGuardFailure(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+				const burst = receivedTranslationRuntime.collectLiveBatchItems(plugin, nextItem);
+				// The burst runs detached; its own finally resumes the queue, and a failure
+				// there must never surface as an unhandled rejection.
+				if (burst) return receivedTranslationRuntime.translateQueuedBurst(plugin, burst).catch(_ => {});
 				return receivedTranslationRuntime.translateQueuedItem(plugin, nextItem);
 			}
 		};
@@ -6031,7 +6124,7 @@ module.exports = (_ => {
 				if (!message || !translationCache[message.id]) return null;
 				const sourceData = originalContentData || this.extractOriginalContentData(message);
 				const signature = this.createReceivedTranslationSignature(message, channelId, sourceData);
-				if (translationCache[message.id].signature != signature) return null;
+				if (!this.matchesCachedTranslationSignature(translationCache[message.id], signature)) return null;
 				if (translationCache[message.id].skipped) return null;
 				let cachedTranslation = Object.assign({signature, channelId}, translationCache[message.id].translation);
 				const beforeSerialized = JSON.stringify(cachedTranslation || {});
@@ -6056,8 +6149,10 @@ module.exports = (_ => {
 				// Upgrade legacy cache entries in-place when the live Discord message still provides the original content.
 				// This prevents old cached translations from coming back as plain text without the original block.
 				if (JSON.stringify(cachedTranslation || {}) != beforeSerialized) {
-					translationCache[message.id].translation = Object.assign({}, cachedTranslation);
-					translationCache[message.id].signature = signature;
+					const upgradedTranslation = Object.assign({}, cachedTranslation);
+					delete upgradedTranslation.signature;
+					translationCache[message.id].translation = upgradedTranslation;
+					translationCache[message.id].signature = this.hashReceivedTranslationSignature(signature);
 					translationCache[message.id].cachedAt = translationCache[message.id].cachedAt || Date.now();
 					this.scheduleTranslationCacheSave();
 				}
@@ -6068,7 +6163,7 @@ module.exports = (_ => {
 				if (!message || !translationCache[message.id]) return null;
 				const sourceData = originalContentData || this.extractOriginalContentData(message);
 				const signature = this.createReceivedTranslationSignature(message, channelId, sourceData);
-				if (translationCache[message.id].signature != signature) return null;
+				if (!this.matchesCachedTranslationSignature(translationCache[message.id], signature)) return null;
 				const skipped = translationCache[message.id].skipped;
 				if (!skipped || !skipped.reason) return null;
 				if (skipped.policyVersion !== RECEIVED_SKIP_CACHE_POLICY_VERSION) {
@@ -6088,10 +6183,13 @@ module.exports = (_ => {
 			}
 
 			persistTranslationCacheEntry (messageId, signature, translation) {
+				const storedTranslation = Object.assign({}, translation);
+				// The signature already lives on the entry; the nested copy doubled its cost.
+				delete storedTranslation.signature;
 				translationCache[messageId] = {
-					signature,
+					signature: this.hashReceivedTranslationSignature(signature),
 					cachedAt: Date.now(),
-					translation: Object.assign({}, translation)
+					translation: storedTranslation
 				};
 				const cacheKeys = Object.keys(translationCache);
 				if (cacheKeys.length > MAX_TRANSLATION_CACHE_ENTRIES) {
@@ -6111,6 +6209,34 @@ module.exports = (_ => {
 
 			hasCachedTranslationEntry (messageId) {
 				return !!(messageId && translationCache[messageId]);
+			}
+
+			getPersistedTranslationCacheEntry (messageId) {
+				return messageId && translationCache[messageId] || null;
+			}
+
+			seedRawTranslationCacheEntryForTest (messageId, signature, translation) {
+				translationCache[messageId] = {signature, cachedAt: Date.now(), translation: Object.assign({}, translation)};
+			}
+
+			// The raw signature embeds the whole request configuration, so storing it verbatim
+			// made it the majority of the persisted cache file. Every use is an equality check,
+			// so a compact digest carries the same information at a fraction of the size.
+			hashReceivedTranslationSignature (signature) {
+				const text = String(signature == null ? "" : signature);
+				let hash = 0x811c9dc5;
+				for (let index = 0; index < text.length; index++) {
+					hash ^= text.charCodeAt(index);
+					hash = Math.imul(hash, 0x01000193) >>> 0;
+				}
+				return `h1:${hash.toString(36)}:${text.length.toString(36)}`;
+			}
+
+			matchesCachedTranslationSignature (entry, signature) {
+				if (!entry || entry.signature == null) return false;
+				// Entries written before digests exist keep matching on their raw value.
+				if (String(entry.signature).indexOf("h1:") !== 0) return entry.signature == signature;
+				return entry.signature == this.hashReceivedTranslationSignature(signature);
 			}
 
 			getLoadedAutoTranslationSeenCount (channelId) {
@@ -6133,7 +6259,7 @@ module.exports = (_ => {
 			persistReceivedSkipDecision (messageId, signature, reason, preview = "") {
 				if (!messageId || !signature || !reason || !this.shouldPersistReceivedSkipDecision(reason)) return;
 				translationCache[messageId] = {
-					signature,
+					signature: this.hashReceivedTranslationSignature(signature),
 					cachedAt: Date.now(),
 					skipped: {
 						policyVersion: RECEIVED_SKIP_CACHE_POLICY_VERSION,

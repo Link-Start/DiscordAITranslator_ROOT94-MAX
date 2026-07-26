@@ -190,3 +190,174 @@ test("a cleared translation keeps its original clone until the render path consu
 	assert.equal(event.instance.props.message.content, "original text");
 	assert.equal(plugin.hasStoredOriginalMessageClone("manual-clone-1"), false, "the render path consumes and releases the clone");
 });
+
+function createLiveBurstPlugin(providerLatencyMs = 40) {
+	const harness = createHarness();
+	const {plugin} = harness;
+	plugin.settings.engines.translator = "deepseek";
+	plugin.settings.engines.backup = "----";
+	plugin.settings.filters.receivedAutoTranslateScope = "new_only";
+	plugin.settings.filters.minimumAutoTranslateLength = 2;
+	plugin.settings.choices.received = {input: "auto", output: "zh-CN"};
+	plugin.setLanguages();
+	plugin.isEngineConfiguredForRuntime = () => true;
+	plugin.captureSentOriginalMessage = () => {};
+	plugin.shouldAutoTranslateReceivedMessage = () => true;
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => null;
+	plugin.getCachedReceivedSkipDecision = () => null;
+	plugin.getAutoTranslatedResultRejectReason = () => null;
+	plugin.isTranslationResultTooSimilar = () => false;
+	plugin.isTranslationLikelyInTargetLanguage = () => true;
+	plugin.persistTranslationCacheEntry = () => {};
+	const calls = {single: 0, batch: 0, batchedItems: 0};
+	plugin.translateText = (text, _place, callback) => {
+		calls.single++;
+		setTimeout(() => callback(`译文:${text}`, {id: "en"}, {id: "zh-CN"}, {}), providerLatencyMs);
+	};
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		calls.batch++;
+		calls.batchedItems += preparedItems.length;
+		return new Promise(resolve => setTimeout(() => resolve(
+			Object.fromEntries(preparedItems.map(item => [String(item.message.id), `译文:${item.message.id}`]))
+		), providerLatencyMs));
+	};
+	return {harness, plugin, calls};
+}
+
+function createBurstMessages(channelId, count) {
+	const messages = [];
+	for (let index = 0; index < count; index++) {
+		messages.push({
+			id: String(2000 + index),
+			channel_id: channelId,
+			content: `burst message number ${index} that needs translation`,
+			embeds: [],
+			attachments: [],
+			author: {id: "other-user"}
+		});
+	}
+	return messages;
+}
+
+async function drainBurst(plugin, messages, timeoutMs = 5000) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const done = messages.filter(message => {
+			const view = plugin.getReceivedDisplayView(message.id);
+			return view && (view.translated || view.status === "skipped" || view.status === "failed");
+		}).length;
+		if (done === messages.length) return true;
+		await new Promise(resolve => setTimeout(resolve, 15));
+	}
+	return false;
+}
+
+test("a live message burst coalesces into batched provider requests", async () => {
+	const {harness, plugin, calls} = createLiveBurstPlugin();
+	try {
+		const channel = {id: "channel-burst"};
+		const messages = createBurstMessages(channel.id, 8);
+		for (const message of messages) {
+			plugin.captureReceivedMessageSource({
+				messageId: message.id,
+				channelId: channel.id,
+				generation: plugin.getReceivedDisplayCommitGeneration(channel.id),
+				sourceSignature: plugin.createReceivedTranslationSignature(message, channel.id, {content: message.content, embeds: []}),
+				source: {content: message.content, embeds: []}
+			});
+			plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+		}
+
+		assert.equal(await drainBurst(plugin, messages), true, "every burst message must reach a terminal display state");
+		assert.equal(messages.every(message => plugin.getReceivedDisplayView(message.id).translated), true);
+		assert.ok(calls.batch >= 1, "the burst must use the batch provider path");
+		assert.ok(calls.single + calls.batch <= 3, `8 messages must cost at most 3 requests, got ${calls.single} single + ${calls.batch} batch`);
+	}
+	finally {harness.restore();}
+});
+
+test("a single live message still uses the direct provider path", async () => {
+	const {harness, plugin, calls} = createLiveBurstPlugin();
+	try {
+		const channel = {id: "channel-single"};
+		const [message] = createBurstMessages(channel.id, 1);
+		plugin.captureReceivedMessageSource({
+			messageId: message.id,
+			channelId: channel.id,
+			generation: plugin.getReceivedDisplayCommitGeneration(channel.id),
+			sourceSignature: plugin.createReceivedTranslationSignature(message, channel.id, {content: message.content, embeds: []}),
+			source: {content: message.content, embeds: []}
+		});
+		plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+
+		assert.equal(await drainBurst(plugin, [message]), true);
+		assert.equal(plugin.getReceivedDisplayView(message.id).translated, true);
+		assert.equal(calls.batch, 0, "a lone message must not pay batch-prompt overhead");
+		assert.equal(calls.single, 1);
+	}
+	finally {harness.restore();}
+});
+
+test("a failed batch response falls back to the single provider path without losing messages", async () => {
+	const {harness, plugin, calls} = createLiveBurstPlugin();
+	try {
+		const channel = {id: "channel-batch-fail"};
+		const messages = createBurstMessages(channel.id, 4);
+		// The provider answers the batch with unusable content; every item must still translate.
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			calls.batch++;
+			calls.batchedItems += preparedItems.length;
+			return Promise.resolve(null);
+		};
+		for (const message of messages) {
+			plugin.captureReceivedMessageSource({
+				messageId: message.id,
+				channelId: channel.id,
+				generation: plugin.getReceivedDisplayCommitGeneration(channel.id),
+				sourceSignature: plugin.createReceivedTranslationSignature(message, channel.id, {content: message.content, embeds: []}),
+				source: {content: message.content, embeds: []}
+			});
+			plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+		}
+
+		assert.equal(await drainBurst(plugin, messages), true, "a failed batch must not strand queued messages");
+		assert.equal(messages.every(message => plugin.getReceivedDisplayView(message.id).translated), true);
+		assert.ok(calls.single >= 1, "rejected batch items must retry on the single path");
+	}
+	finally {harness.restore();}
+});
+
+test("a burst never sweeps in another channel's queued messages", async () => {
+	const {harness, plugin, calls} = createLiveBurstPlugin();
+	try {
+		const channelA = {id: "channel-a-burst"};
+		const channelB = {id: "channel-b-burst"};
+		const batchChannels = [];
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			calls.batch++;
+			batchChannels.push([...new Set(preparedItems.map(item => item.message.channel_id))]);
+			return Promise.resolve(Object.fromEntries(preparedItems.map(item => [String(item.message.id), `译文:${item.message.id}`])));
+		};
+		const messagesA = createBurstMessages(channelA.id, 3);
+		const messagesB = createBurstMessages(channelB.id, 3).map(message => Object.assign({}, message, {id: `b-${message.id}`, channel_id: channelB.id}));
+		const all = [];
+		for (const [messages, channel] of [[messagesA, channelA], [messagesB, channelB]]) {
+			for (const message of messages) {
+				all.push(message);
+				plugin.captureReceivedMessageSource({
+					messageId: message.id,
+					channelId: channel.id,
+					generation: plugin.getReceivedDisplayCommitGeneration(channel.id),
+					sourceSignature: plugin.createReceivedTranslationSignature(message, channel.id, {content: message.content, embeds: []}),
+					source: {content: message.content, embeds: []}
+				});
+				plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+			}
+		}
+
+		assert.equal(await drainBurst(plugin, all), true);
+		assert.equal(batchChannels.every(channels => channels.length === 1), true, `every batch must stay inside one channel, got ${JSON.stringify(batchChannels)}`);
+	}
+	finally {harness.restore();}
+});
