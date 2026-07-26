@@ -66,10 +66,10 @@ moved — correct destination shape, fatal migration unit).
 
 | Metric | Baseline | Now |
 | --- | --- | --- |
-| `src/legacy/runtime.js` | 11,974 | 4,812 |
+| `src/legacy/runtime.js` | 11,974 | 4,512 |
 | Module-level var declarators | 83 | 2 |
 | Modular code | 592 | 10,914 (26 files) |
-| Tests | 312 | 905 |
+| Tests | 312 | 906 |
 
 Extracted so far: presentation data (`src/ui`, `src/i18n`), channel titles, viewport and
 scroll intent, the loaded-translation status HUD, the provider client, the translation
@@ -126,10 +126,19 @@ gone. The vars column is the column that mattered, and it landed at 2 against a 
 original split had put in M5.
 
 M11 ran wider than the row describes. Beyond the policy and heuristics objects it also took
-the settings panel (1,239 lines), both React components, the display composition logic, and
-the historical job class - everything in the file that was not the `Translator` class. Each
-of those moved by copy-and-import with the extracted block verified byte-identical to what
-it replaced, so no call site changed shape.
+the settings panel (1,239 lines), both React components, the display composition logic, the
+historical job class, and received message handling - everything in the file that was not
+the `Translator` class. Each of those moved by copy-and-import with the extracted block
+verified byte-identical to what it replaced, so no call site changed shape.
+
+Two live bugs surfaced while reading those blocks closely enough to move them, neither
+introduced by the extraction. A nested pair of protected spans - a quoted string inside
+backticks - restored with a raw placeholder still in the text, and its translation was
+discarded outright because the response guard demanded a placeholder the provider had
+never been sent. And `awaitProviderBackoff` delegated to an object that has never defined
+it in this branch's history, so both historical repair paths threw on their first line and
+a failed historical batch could not be repaired at all. Both are fixed with tests that fail
+against the old code.
 
 ### M12 is not the same shape as M0 through M11
 
