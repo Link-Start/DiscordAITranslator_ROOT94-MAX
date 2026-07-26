@@ -66,28 +66,35 @@ moved — correct destination shape, fatal migration unit).
 
 | Metric | Baseline | Now |
 | --- | --- | --- |
-| `src/legacy/runtime.js` | 11,974 | 7,536 |
+| `src/legacy/runtime.js` | 11,974 | 4,812 |
 | Module-level var declarators | 83 | 2 |
-| Modular code | 592 | 7,449 |
-| Tests | 312 | 680 |
+| Modular code | 592 | 10,914 (26 files) |
+| Tests | 312 | 905 |
 
 Extracted so far: presentation data (`src/ui`, `src/i18n`), channel titles, viewport and
 scroll intent, the loaded-translation status HUD, the provider client, the translation
-cache, the sent-message pipeline, the live translation queue, historical job bookkeeping,
-the repaint scheduler, displayed-translation ownership including reply previews, and the
-settings and credentials cluster.
+cache, the sent-message pipeline, the live translation queue, historical job bookkeeping
+and the job class itself, the repaint scheduler, displayed-translation ownership including
+reply previews, the settings and credentials cluster, text protection, language policy and
+heuristics, display composition, the settings panel, and the two React components.
 
 **The state-ownership axis is finished.** Two module-level bindings remain and neither is
 feature state: `_this`, the plugin self-reference the helper objects close over, and
 `pluginRuntimeActive`, the lifecycle flag. Both belong to the plugin shell and die with
-`runtime.js` itself, not to a store. What is left in `runtime.js` is behaviour, not state:
-the plugin class, the settings panel React tree, and the stateless helper objects.
+`runtime.js` itself, not to a store.
+
+What is left in `runtime.js` is the `Translator` class and the constants it reads. Splitting
+that further is a different kind of work from everything above: the class is `this`-heavy
+and its methods are the seams Discord patches into, so a cut there has to be argued on
+its own terms rather than by following the state.
 
 Bugs the extraction surfaced and fixed along the way, each with its own regression test:
 translations waiting out a 1500 ms delay meant for a full-list repaint; every provider
-adapter throwing instead of settling on a hard network failure; and the automatic dedupe
-guard reading a map the display migration had made permanently empty, so re-entering a
-channel could wipe visible translations and re-spend on the provider.
+adapter throwing instead of settling on a hard network failure; the automatic dedupe guard
+reading a map the display migration had made permanently empty, so re-entering a channel
+could wipe visible translations and re-spend on the provider; and a nested pair of
+protected spans - a quoted string inside backticks - whose translation was discarded
+outright because the response guard demanded a placeholder the provider was never sent.
 
 ## Milestones
 
@@ -109,19 +116,29 @@ daily use. Both metric columns decrease monotonically.
 | M10 | Settings, language config, channel enablement | 8 | ~2,980 | 15 |
 | M11 | Policy, protection, heuristics, delegator sweep | 0 | ~1,780 | 15 |
 
-Rows M0 through M10 are done. The `runtime.js after` estimates were drawn up before the
+| M12 | Delete `src/legacy/runtime.js`; plugin shell only | remainder | 0 | 0 |
+
+Rows M0 through M11 are done. The `runtime.js after` estimates were drawn up before the
 work and ran low from M5 onward: they assumed each cluster took its call sites with it,
 where in practice a delegating method stays behind until the last reader of the cluster is
 gone. The vars column is the column that mattered, and it landed at 2 against a predicted
 15 - the settings milestone took the language table and credentials with it, which the
 original split had put in M5.
 
-Remaining work is no longer state migration. M11 moves the stateless helper objects
-(`protectionLogic`, the five policy objects, the language and similarity heuristics) out
-by copy-and-import; they already take `plugin` as a parameter, so nothing about their
-shape changes. What remains after that is the plugin class itself and the settings panel
-React tree, which is M12.
-| M12 | Delete `src/legacy/runtime.js`; plugin shell only | remainder | 0 | 0 |
+M11 ran wider than the row describes. Beyond the policy and heuristics objects it also took
+the settings panel (1,239 lines), both React components, the display composition logic, and
+the historical job class - everything in the file that was not the `Translator` class. Each
+of those moved by copy-and-import with the extracted block verified byte-identical to what
+it replaced, so no call site changed shape.
+
+### M12 is not the same shape as M0 through M11
+
+Every milestone so far had a seam already cut for it: a cluster of state, or a helper object
+that already took `plugin` as a parameter. The `Translator` class has neither. Its methods
+are the patch points Discord calls into, they reference each other through `this`, and there
+is no state left to follow - the state is already gone. Splitting it means choosing new
+seams and arguing for them, which is a design question rather than a mechanical move, and it
+should not start until the plugin has been exercised by hand against the current tree.
 
 ### Where new work lands during the transition
 
