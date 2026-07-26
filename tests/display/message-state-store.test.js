@@ -449,3 +449,44 @@ test("a message identity cannot be silently moved to another channel", () => {
 	assert.equal(store.commitResult(translated("m1", "c2", "Channel two", "wrong channel")), null);
 	assert.equal(store.getDisplayState("m1"), original);
 });
+
+test("releasePending returns a matching pending request to idle without display change", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.markPending({messageId: "m1", channelId: "c1", generation: 1, origin: "automatic", requestIdentity: "request-1"});
+
+	const released = store.releasePending({messageId: "m1", channelId: "c1", requestIdentity: "request-1"});
+
+	assert.equal(released.status, "idle");
+	assert.equal(released.requestIdentity, null);
+	assert.equal(released.translation, null);
+	assert.equal(store.getDisplayState("m1").status, "idle");
+});
+
+test("releasePending ignores mismatched identities and terminal records", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.markPending({messageId: "m1", channelId: "c1", generation: 1, origin: "automatic", requestIdentity: "request-1"});
+
+	assert.equal(store.releasePending({messageId: "m1", channelId: "c1", requestIdentity: "request-other"}), null);
+	assert.equal(store.getDisplayState("m1").status, "pending");
+
+	store.commitResult({messageId: "m1", channelId: "c1", generation: 1, sourceSignature: "c1:m1:Hello", requestIdentity: "request-1", origin: "automatic", status: "translated", translation: {content: "你好"}});
+	assert.equal(store.releasePending({messageId: "m1", channelId: "c1", requestIdentity: "request-1"}), null);
+	assert.equal(store.getDisplayState("m1").status, "translated");
+});
+
+test("restoreMessage cancels one automatic record and leaves manual-origin records alone", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult({messageId: "m1", channelId: "c1", generation: 1, sourceSignature: "c1:m1:Hello", origin: "automatic", status: "translated", translation: {content: "你好"}});
+
+	const restored = store.restoreMessage("m1");
+
+	assert.equal(restored.length, 1);
+	assert.equal(store.getDisplayState("m1").status, "cancelled");
+	assert.equal(store.getDisplayState("m1").reason, "manual-untranslate");
+	assert.equal(store.getDisplayState("m1").translation, null);
+	assert.deepEqual(store.restoreMessage("missing"), []);
+	assert.deepEqual(store.restoreMessage("m1"), []);
+});

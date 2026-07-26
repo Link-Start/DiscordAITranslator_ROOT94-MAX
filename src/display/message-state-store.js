@@ -208,6 +208,26 @@ function createMessageStateStore() {
 			if (rejected.length) return {committed: [], rejected};
 			return {committed: results.map(applyResult), rejected: []};
 		},
+		releasePending(request) {
+			if (!request || typeof request !== "object") return null;
+			const record = records.get(normalizeIdentity(request.messageId));
+			if (!record) return null;
+			if (request.channelId !== undefined && normalizeIdentity(request.channelId) !== record.channelId) return null;
+			if (record.status !== MESSAGE_STATUSES.PENDING && record.status !== MESSAGE_STATUSES.TRANSLATING) return null;
+			const requestIdentity = normalizeRequestIdentity(request.requestIdentity);
+			if (requestIdentity === INVALID_REQUEST_IDENTITY || requestIdentity === null) return null;
+			if (record.requestIdentity !== requestIdentity) return null;
+			return update(record.messageId, {
+				status: MESSAGE_STATUSES.IDLE,
+				translation: null,
+				reason: null,
+				requestIdentity: null
+			});
+		},
+		restoreMessage(messageId, reason = "manual-untranslate") {
+			const record = records.get(normalizeIdentity(messageId));
+			return restoreRecords(record ? [record] : [], reason);
+		},
 		restoreChannel(channelId, reason = "channel-disabled") {
 			return restoreRecords(listChannel(channelId), reason);
 		},

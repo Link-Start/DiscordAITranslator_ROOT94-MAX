@@ -16,7 +16,10 @@ function createDisplayView(state) {
 		renderReason: state.renderReason,
 		translation: state.translation,
 		source: state.source,
-		origin: state.origin
+		origin: state.origin,
+		generation: state.generation,
+		sourceSignature: state.sourceSignature,
+		requestIdentity: state.requestIdentity
 	});
 }
 
@@ -89,15 +92,21 @@ function createTranslationDisplayController({store, renderAdapter}) {
 			if (!record) return createEmptyOutcome({rejectedIds: [String(request.messageId)]});
 			return refresh ? refreshRecords([record]) : createEmptyOutcome({deferredIds: [record.messageId]});
 		},
-		async commitMessageResult(result) {
+		async commitMessageResult(result, {refresh = true} = {}) {
 			const record = store.commitResult(result);
-			return record ? refreshRecords([record]) : createEmptyOutcome({rejectedIds: [String(result.messageId)]});
+			if (!record) return createEmptyOutcome({rejectedIds: [String(result.messageId)]});
+			return refresh ? refreshRecords([record]) : createEmptyOutcome({deferredIds: [record.messageId]});
 		},
 		async commitHistoricalBatch(results) {
 			const outcome = store.commitBatch(results);
 			if (outcome.committed.length) return refreshRecords(outcome.committed);
 			if (!outcome.rejected.length) return createEmptyOutcome();
 			return createEmptyOutcome({rejectedIds: outcome.rejected.map(result => String(result.messageId))});
+		},
+		async restoreMessage(messageId, {refresh = true} = {}) {
+			const records = store.restoreMessage(messageId);
+			if (!records.length) return createEmptyOutcome();
+			return refresh ? refreshRecords(records) : createEmptyOutcome({deferredIds: records.map(record => record.messageId)});
 		},
 		async restoreChannel(channelId) {
 			return refreshRecords(store.restoreChannel(channelId));

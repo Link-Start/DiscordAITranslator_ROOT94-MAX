@@ -110,3 +110,64 @@ test("checkMessage captures the received source into the display store", () => {
 	}
 	finally {harness.restore();}
 });
+
+test("manual untranslate restores a store-owned automatic translation", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(sourceSnapshot());
+		await plugin.commitReceivedDisplayResult(translatedResult());
+		assert.equal(plugin.getReceivedDisplayView("message-1").translated, true);
+		const message = {id: "message-1", channel_id: "channel-1", content: "Original", embeds: [], attachments: [], author: {id: "other-user"}};
+		plugin.lockManualTranslationScroll = () => {};
+
+		const handled = await plugin.translateMessage(message, {id: "channel-1"}, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false});
+
+		assert.equal(handled, false);
+		const view = plugin.getReceivedDisplayView("message-1");
+		assert.equal(view.translated, false);
+		assert.equal(view.status, "cancelled");
+		assert.equal(view.content, "Original");
+	}
+	finally {harness.restore();}
+});
+
+test("a store-committed translation renders its embed translations", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(sourceSnapshot());
+		const result = translatedResult();
+		result.translation = Object.assign({}, result.translation, {embeds: {"embed-1": {title: "标题", description: "描述", fields: [], footerText: "页脚"}}});
+		await plugin.commitReceivedDisplayResult(result);
+		const event = {instance: {props: {embed: {id: "embed-1", message_id: "message-1", rawDescription: "Description", rawTitle: "Title", footer: {text: "Footer"}, fields: []}}}};
+
+		plugin.processEmbed(event);
+
+		assert.equal(event.instance.props.embed.rawDescription, "描述");
+		assert.equal(event.instance.props.embed.rawTitle, "标题");
+	}
+	finally {harness.restore();}
+});
+
+test("a store-translated message does not requeue in loaded scope", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
+		plugin.captureReceivedMessageSource(sourceSnapshot());
+		await plugin.commitReceivedDisplayResult(translatedResult());
+		let queueCalls = 0;
+		plugin.queueAutoTranslateMessage = () => {queueCalls++; return true;};
+		plugin.getCachedReceivedTranslation = () => ({content: "译文", translatedContent: "译文", originalContent: "Original", signature: "signature-1"});
+		const message = {id: "message-1", channel_id: "channel-1", content: "Original", embeds: [], attachments: [], author: {id: "other-user"}};
+		const event = {instance: {props: {message}}, returnvalue: {props: {children: [], className: "", style: {}}}};
+
+		plugin.processMessageContent(event);
+
+		assert.equal(queueCalls, 0);
+		assert.match(event.returnvalue.props.className, /translator-translated-message/);
+		assert.equal(event.returnvalue.props["data-translator-revision"], String(plugin.getReceivedDisplayView("message-1").revision));
+	}
+	finally {harness.restore();}
+});

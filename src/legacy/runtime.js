@@ -1264,11 +1264,21 @@ module.exports = (_ => {
 				const currentContentData = plugin.extractOriginalContentData(message);
 				return plugin.createReceivedTranslationSignature(message, request.channelId, currentContentData) == request.signature;
 			},
+			releaseLiveDisplayPending(plugin, request) {
+				// A live request that ends without a terminal commit must return its store
+				// record to idle; a lingering pending identity would poison later commits.
+				plugin.releaseReceivedDisplayPending({
+					messageId: request.messageId,
+					channelId: request.channelId,
+					requestIdentity: String(request.id)
+				});
+			},
 			finishLiveTranslationRequest(plugin, request) {
 				if (!request) return false;
 				const key = receivedTranslationRuntime.getLiveTranslationRequestKey(plugin, request.messageId, request.channelId);
 				if (liveTranslationRequests[key] === request) delete liveTranslationRequests[key];
 				if (queuedAutoTranslations[request.messageId] === request) delete queuedAutoTranslations[request.messageId];
+				receivedTranslationRuntime.releaseLiveDisplayPending(plugin, request);
 				return true;
 			},
 			invalidateLiveTranslationRequests(plugin, channelId = null) {
@@ -1278,6 +1288,7 @@ module.exports = (_ => {
 					if (channelId && request.channelId != channelId) continue;
 					delete liveTranslationRequests[key];
 					if (queuedAutoTranslations[request.messageId] === request) delete queuedAutoTranslations[request.messageId];
+					receivedTranslationRuntime.releaseLiveDisplayPending(plugin, request);
 				}
 			},
 			invalidateLiveTranslationMessage(plugin, messageId, channelId, currentSignature) {
@@ -1287,6 +1298,7 @@ module.exports = (_ => {
 				if (!request || request.signature == currentSignature) return false;
 				delete liveTranslationRequests[key];
 				if (queuedAutoTranslations[request.messageId] === request) delete queuedAutoTranslations[request.messageId];
+				receivedTranslationRuntime.releaseLiveDisplayPending(plugin, request);
 				return true;
 			},
 			clearAutoTranslationQueue(plugin, channelId = null) {
@@ -1363,6 +1375,14 @@ module.exports = (_ => {
 				queueItem.liveRequest = receivedTranslationRuntime.createLiveTranslationRequest(plugin, message, channelId, queueItem.originalContentData);
 				if (!queueItem.liveRequest) return false;
 				queuedAutoTranslations[message.id] = queueItem.liveRequest;
+				const pendingMark = plugin.markReceivedDisplayPending({
+					messageId: message.id,
+					channelId,
+					generation: plugin.getReceivedDisplayCommitGeneration(channelId),
+					origin: "automatic",
+					requestIdentity: String(queueItem.liveRequest.id)
+				}, {refresh: false});
+				if (pendingMark && pendingMark.catch) pendingMark.catch(_ => {});
 				return receivedTranslationRuntime.enqueueLiveItem(plugin, queueItem);
 			},
 			beginQueueProcessing(plugin) {
@@ -1379,9 +1399,15 @@ module.exports = (_ => {
 			handleCachedQueueItem(plugin, queueItem) {
 				if (!queueItem || !queueItem.cachedTranslation) return false;
 				const channelId = queueItem.channel && queueItem.channel.id || "__global";
-				plugin.applyStoredTranslationToMessage(queueItem.message, Object.assign({channelId, auto: true}, queueItem.cachedTranslation), queueItem.originalContentData);
-				receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-				plugin.scheduleTranslationRerender({batched: true, allowWhileTyping: true});
+				const storedTranslation = plugin.refreshTranslationDisplay(Object.assign({channelId, auto: true}, queueItem.cachedTranslation));
+				const commit = plugin.commitReceivedDisplayResult(plugin.createReceivedDisplayCommitResult(queueItem.message, channelId, {
+					sourceSignature: storedTranslation.signature != null ? String(storedTranslation.signature) : plugin.createReceivedTranslationSignature(queueItem.message, channelId, queueItem.originalContentData),
+					requestIdentity: queueItem.liveRequest ? String(queueItem.liveRequest.id) : null,
+					status: "translated",
+					translation: storedTranslation
+				}));
+				const finishRequest = () => receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+				Promise.resolve(commit).then(finishRequest, finishRequest);
 				return true;
 			},
 			handleQueueItemGuardFailure(plugin, queueItem) {
@@ -1515,8 +1541,9 @@ module.exports = (_ => {
 			},
 			captureReceivedDisplaySource(plugin, message, context) {
 				if (!context.channelId || plugin.isOwnMessage(message)) return null;
+				const previousView = plugin.getReceivedDisplayRuntimeView(message.id);
 				const generation = plugin.getReceivedDisplayGeneration(context.channelId);
-				return plugin.captureReceivedMessageSource({
+				const record = plugin.captureReceivedMessageSource({
 					messageId: message.id,
 					channelId: context.channelId,
 					generation: generation === undefined ? 1 : generation,
@@ -1526,6 +1553,26 @@ module.exports = (_ => {
 						embeds: context.originalContentData && context.originalContentData.embeds || []
 					}
 				});
+				// A same-generation signature change on a non-idle record is a source edit:
+				// the fresh idle record replaced stale display state, so the message must
+				// requeue and its stale cache entry must go.
+				const sourceChanged = !!(previousView && record && previousView.status !== "idle" && previousView.generation === record.generation && previousView.sourceSignature !== record.sourceSignature);
+				if (sourceChanged) {
+					context.forceQueue = true;
+					plugin.clearCachedTranslation(message.id);
+				}
+				return record;
+			},
+			commitCachedDisplayResult(plugin, message, context, cachedTranslation) {
+				const storedTranslation = plugin.refreshTranslationDisplay(Object.assign({channelId: context.channelId, auto: true}, cachedTranslation));
+				const commit = plugin.commitReceivedDisplayResult(plugin.createReceivedDisplayCommitResult(message, context.channelId, {
+					sourceSignature: storedTranslation.signature != null ? String(storedTranslation.signature) : context.expectedSignature,
+					status: "translated",
+					translation: storedTranslation
+				}), {refresh: false});
+				if (commit && commit.catch) commit.catch(_ => {});
+				const committedView = plugin.getReceivedDisplayRuntimeView(message.id);
+				return !!(committedView && committedView.translated);
 			},
 			resolveCheckMessageDisplay(plugin, stream, message, context) {
 				const hadDisplayedTranslation = !!translatedMessages[message.id];
@@ -1534,10 +1581,14 @@ module.exports = (_ => {
 				const canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !suppressedAutoTranslations[message.id];
 				const canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary);
 				let cachedTranslation = null;
+				let storeCommitted = false;
 				if (canAutoTranslateReplyPreviewForBase) plugin.markAutoTranslationEligibleReplyPreviewMessage(context.channelId, message.id);
 				if (!translation && canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad || context.forceQueue || messageChanged || context.isNewerThanBoundary)) {
 					cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData);
-					if (cachedTranslation && !context.historicalLoad) translation = plugin.applyStoredTranslationToMessage(message, Object.assign({channelId: context.channelId, auto: true}, cachedTranslation), context.originalContentData);
+					// A cached automatic result commits into the display store without a refresh:
+					// the render pass that triggered checkMessage paints text and decoration
+					// together from the committed view.
+					if (cachedTranslation && !context.historicalLoad) storeCommitted = receivedTranslationRuntime.commitCachedDisplayResult(plugin, message, context, cachedTranslation);
 				}
 				const storeView = !translation && plugin.getReceivedDisplayRuntimeView(message.id);
 				if (translation) {
@@ -1552,10 +1603,10 @@ module.exports = (_ => {
 					delete oldMessages[message.id];
 					messageChanged = true;
 				}
-				return {translation, messageChanged, cachedTranslation, canAutoTranslateMessage};
+				return {translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage};
 			},
 			queueCheckMessageTranslation(plugin, message, channel, context, outcome) {
-				if (outcome.translation || context.skipAutoQueue || !outcome.canAutoTranslateMessage) return;
+				if (outcome.translation || outcome.storeCommitted || context.skipAutoQueue || !outcome.canAutoTranslateMessage) return;
 				if (context.channelState) context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, message.id);
 				if (context.forceQueue || outcome.messageChanged || context.isNewerThanBoundary || context.historicalLoad) {
 					const liveMessage = !context.historicalLoad && (context.isNewerThanBoundary || plugin.isLikelyLiveAutoTranslateMessage(message, context.channelId));
@@ -1757,22 +1808,24 @@ module.exports = (_ => {
 				}
 			},
 			resolveLoadedMessageContentTranslation(plugin, message, channelId) {
-				let translation = null;
-				if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || queuedAutoTranslations[message.id]) return translation;
+				if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || queuedAutoTranslations[message.id]) return null;
+				// A store record that is already translated or has an active request must not
+				// re-enter the queue on every render; that would loop commit -> repaint -> requeue.
+				const storeView = plugin.getReceivedDisplayRuntimeView(message.id);
+				if (storeView && (storeView.translated || storeView.showLoading)) return null;
 				const originalContentData = plugin.extractOriginalContentData(message);
 				const cachedTranslation = plugin.getCachedReceivedTranslation(message, channelId, originalContentData);
 				const liveMessage = plugin.isLikelyLiveAutoTranslateMessage(message, channelId);
-				if (cachedTranslation && liveMessage) {
-					translation = translationDisplayLogic.applyStoredTranslationToMessage(plugin, message, Object.assign({channelId, auto: true}, cachedTranslation), originalContentData);
-				}
-				else if (cachedTranslation || plugin.shouldAutoTranslateReceivedMessage(message, {id: channelId}, originalContentData)) {
+				// Cached live results also queue: the acknowledged display commit repaints text
+				// and decoration atomically instead of decorating a still-original render.
+				if (cachedTranslation || plugin.shouldAutoTranslateReceivedMessage(message, {id: channelId}, originalContentData)) {
 					plugin.queueAutoTranslateMessage(message, {id: channelId}, originalContentData, {
 						historicalLoad: !liveMessage,
 						deferWhileReading: false,
-						cachedTranslation: !liveMessage ? cachedTranslation : null
+						cachedTranslation
 					});
 				}
-				return translation;
+				return null;
 			},
 			prepareMessageContentDisplay(plugin, e) {
 				let message = e.instance.props.message;
@@ -1843,6 +1896,10 @@ module.exports = (_ => {
 			processEmbed(plugin, e) {
 				if (!e.instance.props.embed || !e.instance.props.embed.message_id) return;
 				let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, {id: e.instance.props.embed.message_id}, plugin.getDisplayedTranslationChannelId(e.instance.props.embed.message_id));
+				if (!translation) {
+					const storeView = plugin.getReceivedDisplayRuntimeView(e.instance.props.embed.message_id);
+					if (storeView && storeView.translated && storeView.translation && storeView.translation.embeds) translation = storeView.translation;
+				}
 				if (translation && Object.keys(translation.embeds).length) {
 					if (!e.returnvalue) e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
 						rawDescription: translation.embeds[e.instance.props.embed.id].description,
@@ -3508,7 +3565,7 @@ module.exports = (_ => {
 				BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageToolbarUtils, "useMessageMenu", {after: e => {
 					if (e.instance.props.message && e.instance.props.channel) {
 						const channelId = e.instance.props.channel && e.instance.props.channel.id || null;
-						let translated = !!this.getActiveMessageTranslation(e.instance.props.message, channelId);
+						let translated = this.isMessageDisplayTranslated(e.instance.props.message, channelId);
 						let [children, index] = BDFDB.ContextMenuUtils.findItem(e.returnValue, {id: ["copy-text", "pin", "unpin"]});
 						if (index == -1) [children, index] = BDFDB.ContextMenuUtils.findItem(e.returnValue, {id: ["edit", "add-reaction", "add-reaction-1", "quote"]});
 						children.splice(index + 1, 0, BDFDB.ContextMenuUtils.createItem(BDFDB.LibraryComponents.MenuItems.MenuItem, {
@@ -7869,30 +7926,60 @@ module.exports = (_ => {
 				return this.createReceivedTranslationSignature(item.message, job.channelId, expectedContentData) == this.createReceivedTranslationSignature(currentMessage, job.channelId, currentContentData);
 			}
 
-			commitHistoricalTranslationJob (summary, job) {
+			async commitHistoricalTranslationJob (summary, job) {
 				if (!this.isHistoricalTranslationJobCurrent(job)) return;
 				summary.translated = summary.translated.filter(item => this.isHistoricalTranslationJobItemCurrent(item, job));
 				summary.skipped = summary.skipped.filter(item => this.isHistoricalTranslationJobItemCurrent(item, job));
 				summary.failed = summary.failed.filter(item => this.isHistoricalTranslationJobItemCurrent(item, job));
+				const generation = this.getReceivedDisplayCommitGeneration(job.channelId);
+				// The batch result must echo each record's active request identity: the store
+				// commit supersedes a concurrent live request instead of rejecting the batch.
+				const getRecordRequestIdentity = messageId => {
+					const recordView = this.getReceivedDisplayRuntimeView(messageId);
+					return recordView && recordView.requestIdentity != null ? recordView.requestIdentity : null;
+				};
+				const results = [];
 				for (const item of summary.translated) {
 					if (!item || !item.message || !item.translation) continue;
-					this.applyStoredTranslationToMessage(item.message, item.translation, item.originalContentData);
-					this.persistTranslationCacheEntry(item.message.id, item.translation.signature, item.translation);
+					const storedTranslation = this.refreshTranslationDisplay(Object.assign({channelId: job.channelId, auto: true}, item.translation));
+					results.push({
+						messageId: item.message.id,
+						channelId: job.channelId,
+						generation,
+						sourceSignature: storedTranslation.signature != null ? String(storedTranslation.signature) : this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData),
+						requestIdentity: getRecordRequestIdentity(item.message.id),
+						origin: "automatic",
+						status: "translated",
+						translation: storedTranslation
+					});
+					this.persistTranslationCacheEntry(item.message.id, storedTranslation.signature, storedTranslation);
 					delete queuedAutoTranslations[item.message.id];
 				}
 				for (const item of summary.skipped) {
 					if (!item || !item.message) continue;
 					const signature = this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData);
 					this.persistReceivedSkipDecision(item.message.id, signature, item.reason || "local_guard", this.buildTranslationRequestText(item.originalContentData || {}));
+					results.push({messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: signature, requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "skipped", reason: item.reason || "local_guard"});
 					delete queuedAutoTranslations[item.message.id];
 				}
-				for (const item of summary.failed) if (item && item.message) delete queuedAutoTranslations[item.message.id];
+				for (const item of summary.failed) {
+					if (!item || !item.message) continue;
+					results.push({messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData), requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "failed", reason: item.reason || "provider_failed"});
+					delete queuedAutoTranslations[item.message.id];
+				}
+				let batchOutcome = null;
+				if (results.length) {
+					try {batchOutcome = await this.commitHistoricalReceivedDisplayBatch(results);}
+					catch (error) {batchOutcome = null;}
+				}
+				const batchRejected = !!(results.length && (!batchOutcome || Array.isArray(batchOutcome.rejectedIds) && batchOutcome.rejectedIds.length));
 				const failedCount = this.updateFailedHistoricalTranslationSnapshots(summary, job.channelId);
-				this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed: summary.translated.length, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length});
+				this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed: batchRejected ? 0 : summary.translated.length, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length});
 			}
 
 			rerenderHistoricalTranslationJob (_job) {
-				this.rerenderMessagesWithScrollPreserved();
+				// The acknowledged historical batch commit repaints exact message IDs; a full-list
+				// rerender here would reintroduce the flicker the display transaction removes.
 			}
 
 			updateHistoricalTranslationJobStatus (job) {
@@ -8137,7 +8224,7 @@ module.exports = (_ => {
 				let [children, index] = BDFDB.ReactUtils.findParent(e.returnvalue, {props: [["className", BDFDB.disCN.messagebuttons]]});
 				if (index == -1) return;
 				const channelId = e.instance.props.channel && e.instance.props.channel.id || null;
-				let translated = !!this.getActiveMessageTranslation(e.instance.props.message, channelId);
+				let translated = this.isMessageDisplayTranslated(e.instance.props.message, channelId);
 				children.unshift(BDFDB.ReactUtils.createElement(class extends BdApi.React.Component {
 					render() {
 						return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
@@ -8148,7 +8235,7 @@ module.exports = (_ => {
 								className: BDFDB.disCNS.messagetoolbarhoverbutton + BDFDB.disCN.messagetoolbarbutton,
 								onClick: _ => {
 									_this.translateMessage(e.instance.props.message, e.instance.props.channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false}).then(_ => {
-										translated = !!_this.getActiveMessageTranslation(e.instance.props.message, channelId);
+										translated = _this.isMessageDisplayTranslated(e.instance.props.message, channelId);
 										BDFDB.ReactUtils.forceUpdate(this);
 									});
 								},
@@ -8299,8 +8386,8 @@ module.exports = (_ => {
 				return this.ensureReceivedDisplayRuntime().markPending(request, options);
 			}
 
-			commitReceivedDisplayResult (result) {
-				return this.ensureReceivedDisplayRuntime().commitMessageResult(result);
+			commitReceivedDisplayResult (result, options) {
+				return this.ensureReceivedDisplayRuntime().commitMessageResult(result, options);
 			}
 
 			commitHistoricalReceivedDisplayBatch (results) {
@@ -8355,6 +8442,36 @@ module.exports = (_ => {
 
 			getReceivedDisplayGeneration (channelId) {
 				return this.ensureReceivedDisplayRuntime().getChannelGeneration(channelId);
+			}
+
+			getReceivedDisplayCommitGeneration (channelId) {
+				const generation = this.getReceivedDisplayGeneration(channelId);
+				return generation === undefined ? 1 : generation;
+			}
+
+			releaseReceivedDisplayPending (request) {
+				return this.ensureReceivedDisplayRuntime().releasePending(request);
+			}
+
+			restoreReceivedDisplayMessage (messageId, options) {
+				return this.ensureReceivedDisplayRuntime().restoreMessage(messageId, options);
+			}
+
+			isMessageDisplayTranslated (message, channelId = null) {
+				if (!message || !message.id) return false;
+				if (this.getActiveMessageTranslation(message, channelId)) return true;
+				const displayView = this.getReceivedDisplayRuntimeView(message.id);
+				return !!(displayView && displayView.translated);
+			}
+
+			createReceivedDisplayCommitResult (message, channelId, overrides) {
+				return Object.assign({
+					messageId: message.id,
+					channelId,
+					generation: this.getReceivedDisplayCommitGeneration(channelId),
+					origin: "automatic",
+					requestIdentity: null
+				}, overrides);
 			}
 
 			applyReceivedDisplayViewToStream (stream, view) {
@@ -9055,7 +9172,9 @@ module.exports = (_ => {
 					const isManualTranslation = !!options.manual || !options.auto;
 					if (isManualTranslation) manualRequestKey = `${channelId || "__global"}:${String(message.id)}`;
 					const activeTranslation = this.getActiveMessageTranslation(message, channelId);
-					if (isManualTranslation && !activeTranslation && manualMessageTranslationRequests[manualRequestKey]) return finish(false);
+					const storeDisplayView = !activeTranslation && this.getReceivedDisplayRuntimeView(message.id);
+					const storeTranslated = !!(storeDisplayView && storeDisplayView.translated && storeDisplayView.origin === "automatic");
+					if (isManualTranslation && !activeTranslation && !storeTranslated && manualMessageTranslationRequests[manualRequestKey]) return finish(false);
 					if (isManualTranslation) this.lockManualTranslationScroll(message.id);
 					if (activeTranslation) {
 						if (options.auto) return finish(false);
@@ -9067,6 +9186,17 @@ module.exports = (_ => {
 						this.scheduleTranslationRerender();
 						finish(false);
 					}
+					else if (storeTranslated) {
+						// Manual untranslate of a store-owned automatic translation restores the
+						// original through one acknowledged display transaction.
+						if (options.auto) return finish(false);
+						suppressedAutoTranslations[message.id] = true;
+						this.clearDisplayedTranslationState(message.id, {
+							clearReplyPreview: true,
+							preserveSuppressed: true
+						});
+						this.restoreReceivedDisplayMessage(message.id).then(_ => finish(false), _ => finish(false));
+					}
 					else {
 						if (options.auto && !this.isTranslationEnabled(channelId)) return finish(false);
 						const rerenderOptions = {
@@ -9077,7 +9207,17 @@ module.exports = (_ => {
 						if (!this.hasTranslatableMessageContent(originalContentData)) return finish(false);
 						if (this.shouldSkipReceivedTranslationBeforeRequest(originalContentData, channelId)) {
 							const skipReason = this.getReceivedAutoTranslateSkipReason(originalContentData, channelId) || "same_language";
-							this.persistReceivedSkipDecision(message.id, this.createReceivedTranslationSignature(message, channelId, originalContentData), skipReason, this.buildTranslationRequestText(originalContentData));
+							const skipSignature = this.createReceivedTranslationSignature(message, channelId, originalContentData);
+							this.persistReceivedSkipDecision(message.id, skipSignature, skipReason, this.buildTranslationRequestText(originalContentData));
+							if (options.auto) {
+								this.commitReceivedDisplayResult(this.createReceivedDisplayCommitResult(message, channelId, {
+									sourceSignature: skipSignature,
+									requestIdentity: liveRequest ? String(liveRequest.id) : null,
+									status: "skipped",
+									reason: skipReason
+								}), {refresh: false}).then(_ => finish(false), _ => finish(false));
+								return;
+							}
 							return finish(false);
 						}
 						const signature = this.createReceivedTranslationSignature(message, channelId, originalContentData);
@@ -9091,6 +9231,16 @@ module.exports = (_ => {
 								manual: isManualTranslation,
 								independentOfTextAreaSwitch: !!options.independentOfTextAreaSwitch
 							});
+							if (options.auto) {
+								this.refreshTranslationDisplay(storedCachedTranslation);
+								this.commitReceivedDisplayResult(this.createReceivedDisplayCommitResult(message, channelId, {
+									sourceSignature: storedCachedTranslation.signature != null ? String(storedCachedTranslation.signature) : signature,
+									requestIdentity: liveRequest ? String(liveRequest.id) : null,
+									status: "translated",
+									translation: storedCachedTranslation
+								})).then(_ => finish(true), _ => finish(false));
+								return;
+							}
 							this.applyStoredTranslationToMessage(message, storedCachedTranslation, originalContentData);
 							this.scheduleTranslationRerender(rerenderOptions);
 							return finish(true);
@@ -9143,7 +9293,26 @@ module.exports = (_ => {
 								const rejectReason = this.getAutoTranslatedResultRejectReason(storedTranslation, channelId);
 								if ((options.auto && rejectReason) || this.isTranslationResultTooSimilar(storedTranslation)) {
 									this.persistReceivedSkipDecision(message.id, signature, rejectReason || "too_similar", storedTranslation.originalContent || storedTranslation.translatedContent);
+									if (options.auto) {
+										this.commitReceivedDisplayResult(this.createReceivedDisplayCommitResult(message, channelId, {
+											sourceSignature: signature,
+											requestIdentity: liveRequest ? String(liveRequest.id) : null,
+											status: "skipped",
+											reason: rejectReason || "too_similar"
+										}), {refresh: false}).then(_ => finish(false), _ => finish(false));
+										return;
+									}
 									return finish(false);
+								}
+								if (options.auto) {
+									this.persistTranslationCacheEntry(message.id, signature, storedTranslation);
+									this.commitReceivedDisplayResult(this.createReceivedDisplayCommitResult(message, channelId, {
+										sourceSignature: signature,
+										requestIdentity: liveRequest ? String(liveRequest.id) : null,
+										status: "translated",
+										translation: storedTranslation
+									})).then(_ => finish(true), _ => finish(false));
+									return;
 								}
 								this.applyStoredTranslationToMessage(message, storedTranslation, originalContentData);
 								this.scheduleTranslationRerender(rerenderOptions);
@@ -9151,6 +9320,22 @@ module.exports = (_ => {
 							}
 									else if (meta && meta.skipped && options.auto) {
 										this.persistReceivedSkipDecision(message.id, signature, "ai_skip_signal", allTextsToTranslate);
+										this.commitReceivedDisplayResult(this.createReceivedDisplayCommitResult(message, channelId, {
+											sourceSignature: signature,
+											requestIdentity: liveRequest ? String(liveRequest.id) : null,
+											status: "skipped",
+											reason: "ai_skip_signal"
+										}), {refresh: false}).then(_ => finish(true), _ => finish(true));
+										return;
+									}
+									else if (options.auto && !translation && !(meta && meta.skipped)) {
+										this.commitReceivedDisplayResult(this.createReceivedDisplayCommitResult(message, channelId, {
+											sourceSignature: signature,
+											requestIdentity: liveRequest ? String(liveRequest.id) : null,
+											status: "failed",
+											reason: "provider_failed"
+										}), {refresh: false}).then(_ => finish(false), _ => finish(false));
+										return;
 									}
 									finish(!!translation || !!(meta && meta.skipped));
 								}

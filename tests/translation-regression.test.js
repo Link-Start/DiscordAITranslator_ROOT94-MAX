@@ -1232,9 +1232,9 @@ test("historical loaded messages outside the configured time window are skipped"
 	assert.equal(processCount, 0);
 });
 
-test("live cached queue items apply stored translation without calling translateMessage", () => {
+test("live cached queue items commit to the display store without calling translateMessage", () => {
 	const plugin = createPluginInstance();
-	let appliedTranslation = null;
+	let committedResult = null;
 	let translateCalls = 0;
 	const message = {
 		id: "cached-live-1",
@@ -1243,9 +1243,10 @@ test("live cached queue items apply stored translation without calling translate
 		embeds: [],
 		author: {id: "other-user"}
 	};
-	plugin.applyStoredTranslationToMessage = (_message, translation) => {
-		appliedTranslation = translation;
-		return translation;
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("cached automatic results must not write the legacy display map");};
+	plugin.commitReceivedDisplayResult = async result => {
+		committedResult = result;
+		return {confirmedIds: [String(result.messageId)], missingIds: [], fallbackUsed: false};
 	};
 	plugin.translateMessage = () => {
 		translateCalls++;
@@ -1262,9 +1263,10 @@ test("live cached queue items apply stored translation without calling translate
 	});
 
 	assert.equal(translateCalls, 0);
-	assert.equal(appliedTranslation && appliedTranslation.channelId, "channel-cached-live");
-	assert.equal(appliedTranslation && appliedTranslation.auto, true);
-	assert.equal(appliedTranslation && appliedTranslation.translatedContent, "你好，世界");
+	assert.equal(committedResult && committedResult.channelId, "channel-cached-live");
+	assert.equal(committedResult && committedResult.status, "translated");
+	assert.equal(committedResult && committedResult.translation.auto, true);
+	assert.equal(committedResult && committedResult.translation.translatedContent, "你好，世界");
 });
 
 test("finishing a manual translation resumes live auto-translation queue work", async () => {
@@ -1308,9 +1310,10 @@ test("finishing a manual translation resumes live auto-translation queue work", 
 	assert.equal(liveTranslateCalls, 1);
 });
 
-test("live automatic translations request a typing-safe rerender", async () => {
+test("live cached automatic translations commit to the display store without a legacy rerender", async () => {
 	const plugin = createPluginInstance();
 	let rerenderOptions = null;
+	let committedResult = null;
 	plugin.isReceivedAutoTranslationEnabled = () => true;
 	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
 	plugin.getCachedReceivedTranslation = () => ({
@@ -1319,7 +1322,11 @@ test("live automatic translations request a typing-safe rerender", async () => {
 		originalContent: "live original",
 		embeds: {}
 	});
-	plugin.applyStoredTranslationToMessage = () => ({});
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("live automatic results must not write the legacy display map");};
+	plugin.commitReceivedDisplayResult = async result => {
+		committedResult = result;
+		return {confirmedIds: [String(result.messageId)], missingIds: [], fallbackUsed: false};
+	};
 	plugin.scheduleTranslationRerender = options => {
 		rerenderOptions = options;
 	};
@@ -1337,8 +1344,10 @@ test("live automatic translations request a typing-safe rerender", async () => {
 	});
 
 	assert.equal(result, true);
-	assert.equal(rerenderOptions && rerenderOptions.batched, true);
-	assert.equal(rerenderOptions && rerenderOptions.allowWhileTyping, true);
+	assert.equal(rerenderOptions, null);
+	assert.equal(committedResult && committedResult.messageId, "live-rerender-1");
+	assert.equal(committedResult && committedResult.status, "translated");
+	assert.equal(committedResult && committedResult.translation.translatedContent, "即时译文");
 });
 
 test("live translateMessage forwards the automatic flag to translateText", async () => {
@@ -1502,7 +1511,7 @@ test("editing a live source invalidates the stale result and keeps the replaceme
 		author: {id: "other-user"}
 	};
 	const requestCallbacks = [];
-	const appliedTranslations = [];
+	const committedTranslations = [];
 	plugin.shouldAutoTranslateReceivedMessage = () => true;
 	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
 	plugin.getCachedReceivedTranslation = () => null;
@@ -1511,9 +1520,10 @@ test("editing a live source invalidates the stale result and keeps the replaceme
 	plugin.translateText = (_text, _place, callback) => {
 		requestCallbacks.push(callback);
 	};
-	plugin.applyStoredTranslationToMessage = (message, translation) => {
-		appliedTranslations.push({source: message.content, translated: translation.translatedContent});
-		return {};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("live automatic results must not write the legacy display map");};
+	plugin.commitReceivedDisplayResult = async result => {
+		committedTranslations.push({messageId: result.messageId, translated: result.translation && result.translation.translatedContent});
+		return {confirmedIds: [String(result.messageId)], missingIds: [], fallbackUsed: false};
 	};
 	plugin.persistTranslationCacheEntry = () => {};
 	plugin.scheduleTranslationRerender = () => {};
@@ -1535,13 +1545,13 @@ test("editing a live source invalidates the stale result and keeps the replaceme
 	await new Promise(resolve => setImmediate(resolve));
 
 	assert.equal(requestCallbacks.length, 2);
-	assert.deepEqual(appliedTranslations, []);
+	assert.deepEqual(committedTranslations, []);
 	assert.equal(plugin.isMessageTranslationPending(originalMessage.id, channel.id), true);
 
 	requestCallbacks[1]("新译文", {id: "en"}, {id: "zh-CN"});
 	await new Promise(resolve => setImmediate(resolve));
 
-	assert.deepEqual(appliedTranslations, [{source: "new live source", translated: "新译文"}]);
+	assert.deepEqual(committedTranslations, [{messageId: "100", translated: "新译文"}]);
 });
 
 test("direct live auto translation releases its request when translateText throws", async () => {
@@ -1592,7 +1602,8 @@ test("direct live auto translation releases its request when result handling thr
 	plugin.translateText = (_text, _place, callback) => {
 		callback("处理中的译文", {id: "en"}, {id: "zh-CN"});
 	};
-	plugin.applyStoredTranslationToMessage = () => {
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("live automatic results must not write the legacy display map");};
+	plugin.commitReceivedDisplayResult = async () => {
 		throw new Error("render state failed");
 	};
 
@@ -1844,4 +1855,54 @@ test("manual message translation ignores a late result after plugin stop", async
 
 	assert.equal(result, false);
 	assert.equal(applyCount, 0);
+});
+
+test("one live result performs one ID-scoped display commit", async () => {
+	const plugin = createPluginInstance({callSetLanguages: false});
+	const channel = {id: "channel-live-commit"};
+	const message = {id: "live-1", channel_id: channel.id, content: "live source", embeds: [], attachments: [], author: {id: "other-user"}};
+	const commits = [];
+	plugin.captureReceivedMessageSource({messageId: message.id, channelId: channel.id, generation: 1, sourceSignature: "live-signature", source: {content: message.content, embeds: []}});
+	plugin.shouldSkipReceivedTranslationBeforeRequest = () => false;
+	plugin.getCachedReceivedTranslation = () => ({channelId: channel.id, auto: true, content: "live translated", translatedContent: "live translated", originalContent: message.content, signature: "live-signature", embeds: {}});
+	plugin.commitReceivedDisplayResult = async result => {
+		commits.push(result);
+		return {confirmedIds: [String(result.messageId)], missingIds: [], fallbackUsed: false};
+	};
+	plugin.applyStoredTranslationToMessage = () => {throw new Error("live automatic results must not write the legacy display map");};
+	plugin.scheduleTranslationRerender = () => {throw new Error("live display commits must not use the generic timer");};
+
+	const handled = await plugin.translateMessage(message, channel, {auto: true, silent: true, trackBusy: false});
+
+	assert.equal(handled, true);
+	assert.equal(commits.length, 1);
+	assert.equal(commits[0].messageId, "live-1");
+	assert.equal(commits[0].status, "translated");
+});
+
+test("editing a store-translated automatic message requeues the new source", async () => {
+	const plugin = createPluginInstance({callSetLanguages: false});
+	const channel = {id: "channel-store-edit"};
+	const message = {id: "100", channel_id: channel.id, content: "old source text", embeds: [], attachments: [], author: {id: "other-user"}};
+	const contentData = plugin.extractOriginalContentData(message);
+	const signature = plugin.createReceivedTranslationSignature(message, channel.id, contentData);
+	plugin.captureReceivedMessageSource({messageId: message.id, channelId: channel.id, generation: 1, sourceSignature: signature, source: {content: message.content, embeds: []}});
+	await plugin.commitReceivedDisplayResult({messageId: message.id, channelId: channel.id, generation: 1, sourceSignature: signature, origin: "automatic", status: "translated", translation: {content: "旧译文"}}, {refresh: false});
+	assert.equal(plugin.getReceivedDisplayView("100").translated, true);
+	const queued = [];
+	let clearedCache = 0;
+	plugin.captureSentOriginalMessage = () => {};
+	plugin.queueAutoTranslateMessage = queuedMessage => {queued.push(queuedMessage.id); return true;};
+	plugin.clearCachedTranslation = () => {clearedCache++;};
+	const channelState = plugin.getAutoTranslationChannelState(channel.id);
+	channelState.initialized = true;
+	channelState.boundaryMessageId = "999";
+
+	const editedMessage = Object.assign({}, message, {content: "new edited source"});
+	plugin.checkMessage({content: editedMessage}, editedMessage, channel, {skipAutoQueue: false, historicalLoad: false});
+
+	assert.equal(clearedCache >= 1, true);
+	assert.deepEqual(queued, ["100"]);
+	assert.equal(plugin.getReceivedDisplayView("100").status, "idle");
+	assert.equal(plugin.getReceivedDisplayView("100").content, "new edited source");
 });
