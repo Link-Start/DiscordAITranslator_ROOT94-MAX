@@ -1474,8 +1474,24 @@ module.exports = (_ => {
 				};
 				return Promise.resolve(commit).then(finishRequest, _ => finishRequest(null));
 			},
+			// Returns a burst item to the single-message path, preserving the queue's
+			// newest-first order so a retry is never starved behind later arrivals.
+			requeueBurstItem(plugin, queueItem, settled) {
+				settled.add(queueItem);
+				queueItem.skipLiveBatch = true;
+				// A cancelled channel already emptied its queue; re-injecting the item there
+				// would restart provider traffic the cancellation was meant to stop.
+				if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+					receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+					return;
+				}
+				autoTranslationQueue.unshift(queueItem);
+			},
 			async translateQueuedBurst(plugin, burst) {
 				const {channelId, items} = burst;
+				// Every drained item must reach a terminal state; anything still unsettled when
+				// this returns is released so no message is left with a stuck loading indicator.
+				const settled = new Set();
 				isLiveAutoTranslating = true;
 				try {
 					const engineKey = plugin.getHistoricalAiBatchEngineKey(channelId);
@@ -1483,50 +1499,84 @@ module.exports = (_ => {
 					const output = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {});
 					const prepared = [];
 					for (const queueItem of items) {
-						// A source edit or channel switch between queueing and now invalidates
-						// the item; the request guard is the same one the single path uses.
-						if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-							receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-							continue;
+						try {
+							// A source edit or channel switch between queueing and now invalidates
+							// the item; the request guard is the same one the single path uses.
+							if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+								settled.add(queueItem);
+								receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+								continue;
+							}
+							const preparedItem = plugin.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
+							if (!preparedItem || preparedItem.skipped || preparedItem.cachedTranslation || !preparedItem.protectedText) {
+								// Anything the batch cannot carry goes back to the single path.
+								receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
+								continue;
+							}
+							prepared.push(preparedItem);
 						}
-						const preparedItem = plugin.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
-						if (!preparedItem || preparedItem.skipped || preparedItem.cachedTranslation || !preparedItem.protectedText) {
-							// Anything the batch cannot carry goes back to the single path.
-							queueItem.skipLiveBatch = true;
-							autoTranslationQueue.push(queueItem);
-							continue;
+						catch (error) {
+							receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
 						}
-						prepared.push(preparedItem);
 					}
 					if (!prepared.length) return;
-					await plugin.awaitProviderBackoff();
 					let resultMap = null;
 					try {resultMap = await plugin.requestAiBatchTranslation(engineKey, prepared);}
 					catch (error) {resultMap = null;}
 					const commits = [];
 					for (const preparedItem of prepared) {
 						const queueItem = preparedItem.queueItem;
-						const messageId = String(preparedItem.message.id);
-						const rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null;
-						let validation = {ok: false};
-						try {validation = plugin.validateHistoricalTranslationJobResult(preparedItem, rawTranslation, {channelId}) || {ok: false};}
-						catch (error) {validation = {ok: false};}
-						if (!validation.ok || !plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-							// One unusable item must not cost the whole burst: retry it alone.
-							queueItem.skipLiveBatch = true;
-							autoTranslationQueue.push(queueItem);
-							continue;
+						try {
+							const messageId = String(preparedItem.message.id);
+							const rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null;
+							// An explicit skip verdict is a terminal answer, not a failure: paying
+							// for a second full-price request to reach the same verdict is waste.
+							if (rawTranslation != null && plugin.isSkipTranslationSignal(rawTranslation)) {
+								settled.add(queueItem);
+								plugin.persistReceivedSkipDecision(messageId, preparedItem.signature, "ai_skip_signal", preparedItem.protectedText);
+								commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
+									sourceSignature: preparedItem.signature,
+									status: "skipped",
+									reason: "ai_skip_signal"
+								}));
+								continue;
+							}
+							let validation = {ok: false};
+							try {validation = plugin.validateHistoricalTranslationJobResult(preparedItem, rawTranslation, {channelId}) || {ok: false};}
+							catch (error) {validation = {ok: false};}
+							if (!validation.ok) {
+								// One unusable item must not cost the whole burst: retry it alone.
+								receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
+								continue;
+							}
+							// The result is paid for and valid, so it is cached even when the live
+							// request went stale; a retry then hits the cache instead of the provider.
+							try {plugin.persistTranslationCacheEntry(messageId, preparedItem.signature, validation.translation);}
+							catch (error) {}
+							if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+								settled.add(queueItem);
+								receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+								continue;
+							}
+							settled.add(queueItem);
+							commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
+								sourceSignature: preparedItem.signature,
+								status: "translated",
+								translation: validation.translation
+							}));
 						}
-						plugin.persistTranslationCacheEntry(messageId, preparedItem.signature, validation.translation);
-						commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
-							sourceSignature: preparedItem.signature,
-							status: "translated",
-							translation: validation.translation
-						}));
+						catch (error) {
+							receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
+						}
 					}
 					await Promise.all(commits);
 				}
 				finally {
+					for (const queueItem of items) {
+						if (settled.has(queueItem)) continue;
+						try {receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);}
+						catch (error) {}
+					}
 					isLiveAutoTranslating = false;
 					plugin.processAutoTranslationQueue();
 				}
@@ -1752,7 +1802,11 @@ module.exports = (_ => {
 				}
 				if (receivedTranslationRuntime.handleCachedQueueItem(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
 				if (receivedTranslationRuntime.handleQueueItemGuardFailure(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
-				const burst = receivedTranslationRuntime.collectLiveBatchItems(plugin, nextItem);
+				// beginQueueProcessing already refused to run inside a provider backoff window,
+				// so the burst never holds the live lock across a backoff sleep.
+				let burst = null;
+				try {burst = receivedTranslationRuntime.collectLiveBatchItems(plugin, nextItem);}
+				catch (error) {burst = null;}
 				// The burst runs detached; its own finally resumes the queue, and a failure
 				// there must never surface as an unhandled rejection.
 				if (burst) return receivedTranslationRuntime.translateQueuedBurst(plugin, burst).catch(_ => {});
@@ -8263,7 +8317,14 @@ module.exports = (_ => {
 						text: item.protectedText.replace(/\n/g, " [NEWLINE] ").replace(/\s+/g, " ")
 					}));
 					const systemPrompt = "You are a strict Discord chat batch translator. Return valid JSON only.";
-					const batchPrompt = `Target language is exactly ${output.name || output.id}. Input language is ${input && input.auto ? "auto-detect" : (input.name || input.id || "auto")}. The plugin has already filtered messages that should be skipped; do not make skip decisions.\nRules:\n1. Return ONLY a JSON array. Each item must be {"id":"same id","translation":"translated text"}.\n2. Translate every provided natural-language message into exactly the target language.\n3. Preserve placeholders like ⟦0⟧ and ⟦DTA0⟧ exactly. Preserve URLs, code, emoji, mentions, IDs, and product/model names.\n4. Convert [NEWLINE] markers back to real line breaks in the translation; do not show [NEWLINE] literally.\n5. Do not omit any source content, including short interjections, laughter, particles, repeated words, or standalone short lines; translate or preserve them naturally in the target language.\n6. Do not add explanations. Do not output any language other than the target language except preserved protected content.\n\nMessages JSON:\n${JSON.stringify(payloadItems)}`;
+					// When the channel runs AI decision mode the user's own skip rules must apply
+					// to batched messages too; otherwise batching silently translates what the
+					// single-message path would have left alone.
+					const batchChannelId = preparedItems[0].channelId || null;
+					const decisionRules = this.shouldUseAiAutoTranslateDecision(batchChannelId)
+						? `Apply these skip rules to every message; when a message should not be translated set its "translation" to exactly __SKIP_TRANSLATION__.\n${this.getAiAutoTranslatePrompt({input, output})}`
+						: "The plugin has already filtered messages that should be skipped; do not make skip decisions.";
+					const batchPrompt = `Target language is exactly ${output.name || output.id}. Input language is ${input && input.auto ? "auto-detect" : (input.name || input.id || "auto")}. ${decisionRules}\nRules:\n1. Return ONLY a JSON array. Each item must be {"id":"same id","translation":"translated text"}.\n2. Translate every provided natural-language message into exactly the target language.\n3. Preserve placeholders like ⟦0⟧ and ⟦DTA0⟧ exactly. Preserve URLs, code, emoji, mentions, IDs, and product/model names.\n4. Convert [NEWLINE] markers back to real line breaks in the translation; do not show [NEWLINE] literally.\n5. Do not omit any source content, including short interjections, laughter, particles, repeated words, or standalone short lines; translate or preserve them naturally in the target language.\n6. Do not add explanations. Do not output any language other than the target language except preserved protected content.\n\nMessages JSON:\n${JSON.stringify(payloadItems)}`;
 					const finish = content => resolve(this.parseAiBatchTranslationResponse(content, payloadItems.map(item => item.id)));
 					if (engineKey == "openai") {
 						return this.requestWithTimeout(apiEndpoint, {

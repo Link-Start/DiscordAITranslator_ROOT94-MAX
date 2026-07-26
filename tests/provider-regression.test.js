@@ -321,3 +321,54 @@ test("persisted cache entries store a compact signature and keep existing raw en
 	const legacyMessage = Object.assign({}, message, {id: "cache-legacy-1"});
 	assert.ok(plugin.getCachedReceivedTranslation(legacyMessage, "channel-cache", contentData), "a legacy raw-signature entry must still hit");
 });
+
+test("batch prompts carry the user's AI skip rules when the channel uses AI decision mode", async () => {
+	let capturedBody = null;
+	const plugin = createProviderPlugin({
+		deepseek: {key: "deepseek-key", endpoint: "https://api.deepseek.com/chat/completions", model: "deepseek-v4-flash"}
+	}, (_url, options, callback) => {
+		capturedBody = JSON.parse(options.body);
+		callback(null, {statusCode: 200}, JSON.stringify({choices: [{message: {content: "[]"}}]}));
+	});
+	plugin.settings.engines.translator = "deepseek";
+	plugin.settings.filters.autoTranslateDecisionMode = "ai";
+	plugin.settings.filters.aiAutoTranslatePrompt = "只翻译非目标语言内容。DISTINCT-USER-RULE";
+	const preparedItems = [{
+		message: {id: "100"},
+		channelId: "channel-ai-batch",
+		protectedText: "hello there",
+		input: {id: "en", name: "English"},
+		output: {id: "zh-CN", name: "Chinese"}
+	}];
+
+	await plugin.requestAiBatchTranslation("deepseek", preparedItems);
+	const prompt = capturedBody.messages.map(entry => entry.content).join("\n");
+
+	assert.match(prompt, /DISTINCT-USER-RULE/, "the user's own decision prompt must reach the batch request");
+	assert.match(prompt, /__SKIP_TRANSLATION__/, "the batch must be allowed to answer with a skip verdict");
+	assert.doesNotMatch(prompt, /do not make skip decisions/, "the no-skip instruction must not contradict AI decision mode");
+});
+
+test("batch prompts forbid skip verdicts when AI decision mode is off", async () => {
+	let capturedBody = null;
+	const plugin = createProviderPlugin({
+		deepseek: {key: "deepseek-key", endpoint: "https://api.deepseek.com/chat/completions", model: "deepseek-v4-flash"}
+	}, (_url, options, callback) => {
+		capturedBody = JSON.parse(options.body);
+		callback(null, {statusCode: 200}, JSON.stringify({choices: [{message: {content: "[]"}}]}));
+	});
+	plugin.settings.engines.translator = "deepseek";
+	plugin.settings.filters.autoTranslateDecisionMode = "local";
+	const preparedItems = [{
+		message: {id: "100"},
+		channelId: "channel-local-batch",
+		protectedText: "hello there",
+		input: {id: "en", name: "English"},
+		output: {id: "zh-CN", name: "Chinese"}
+	}];
+
+	await plugin.requestAiBatchTranslation("deepseek", preparedItems);
+	const prompt = capturedBody.messages.map(entry => entry.content).join("\n");
+
+	assert.match(prompt, /do not make skip decisions/);
+});
