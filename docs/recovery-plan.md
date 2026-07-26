@@ -1570,7 +1570,7 @@ git commit -m "refactor: commit received translations by message id"
 - Create: `tests/display/display-transition-journal.test.js`
 - Modify: `tests/build-contract.test.js`
 
-- [ ] **Step 1: Write failing reason and journal tests**
+- [x] **Step 1: Write failing reason and journal tests**
 
 Create `tests/display/display-transition-journal.test.js`:
 
@@ -1621,13 +1621,13 @@ test("the release bundle removes the debug journal implementation", async () => 
 });
 ```
 
-- [ ] **Step 2: Verify the tests fail**
+- [x] **Step 2: Verify the tests fail**
 
 ```powershell
 node --test tests/display/display-transition-journal.test.js tests/build-contract.test.js
 ```
 
-- [ ] **Step 3: Implement the bounded journal**
+- [x] **Step 3: Implement the bounded journal**
 
 The module interface is:
 
@@ -1670,7 +1670,7 @@ restored
 
 Task 8 changes `createMessageStateStore` and `createTranslationDisplayController` to accept an optional `journal` dependency. Store transitions append after the immutable state update; render transitions append immediately before and after `refreshMessages`. Each entry includes `channelId`, `messageId`, `revision`, and `transition`. Provider timing remains a later orchestrator milestone and is not fabricated inside the display layer.
 
-- [ ] **Step 4: Wire the existing debug and release build modes**
+- [x] **Step 4: Wire the existing debug and release build modes**
 
 In `src/display/display-runtime.js`, create the journal only behind the compile-time constant:
 
@@ -1683,7 +1683,7 @@ const controller = createTranslationDisplayController({store, renderAdapter, jou
 
 Normal `npm run build` defines the constant as `false`; `npm run build:debug` defines it as `true`. Release verification compares only the non-debug artifact, and `DiscordAITranslator.debug.plugin.js` remains ignored and uncommitted.
 
-- [ ] **Step 5: Run verification and commit**
+- [x] **Step 5: Run verification and commit**
 
 ```powershell
 npm run build
@@ -1691,6 +1691,8 @@ npm run verify
 git add src scripts package.json DiscordAITranslator.plugin.js tests
 git commit -m "feat: add received display diagnostics"
 ```
+
+**Verification evidence (2026-07-26):** `bd908bd`; red phase reproduced `MODULE_NOT_FOUND` for the journal module; focused journal tests `5/5` (bounded buffer, reason codes, injected store/controller transitions, release-bundle exclusion, debug-bundle inclusion); full `npm run verify` `284/284`. Additions beyond the plan baseline: the store also records `translating` and `released` transitions (the latter for the post-plan `releasePending` operation), and the display runtime exposes `getTransitionJournal()` so the debug build can be inspected from the console.
 
 ## Task 9: Remove The Replaced Received Display Path
 
