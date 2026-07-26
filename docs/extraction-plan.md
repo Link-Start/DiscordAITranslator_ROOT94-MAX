@@ -66,20 +66,22 @@ moved — correct destination shape, fatal migration unit).
 
 | Metric | Baseline | Now |
 | --- | --- | --- |
-| `src/legacy/runtime.js` | 11,974 | 7,636 |
-| Module-level var declarators | 83 | 16 |
-| Modular code | 592 | 6,524 |
-| Tests | 312 | 566 |
+| `src/legacy/runtime.js` | 11,974 | 7,536 |
+| Module-level var declarators | 83 | 2 |
+| Modular code | 592 | 7,449 |
+| Tests | 312 | 680 |
 
 Extracted so far: presentation data (`src/ui`, `src/i18n`), channel titles, viewport and
 scroll intent, the loaded-translation status HUD, the provider client, the translation
 cache, the sent-message pipeline, the live translation queue, historical job bookkeeping,
-and the repaint scheduler.
+the repaint scheduler, displayed-translation ownership including reply previews, and the
+settings and credentials cluster.
 
-Remaining state, all of it in one of three groups: the displayed-translation maps
-(`translatedMessages`, `oldMessages`, `suppressedAutoTranslations`) plus reply-preview
-state, which move together in M7; the settings and credential cluster; and two
-infrastructure bindings (`_this`, `pluginRuntimeActive`) that belong to the plugin shell.
+**The state-ownership axis is finished.** Two module-level bindings remain and neither is
+feature state: `_this`, the plugin self-reference the helper objects close over, and
+`pluginRuntimeActive`, the lifecycle flag. Both belong to the plugin shell and die with
+`runtime.js` itself, not to a store. What is left in `runtime.js` is behaviour, not state:
+the plugin class, the settings panel React tree, and the stateless helper objects.
 
 Bugs the extraction surfaced and fixed along the way, each with its own regression test:
 translations waiting out a 1500 ms delay meant for a full-list repaint; every provider
@@ -104,8 +106,21 @@ daily use. Both metric columns decrease monotonically.
 | M7 | **Displayed-translation ownership** | 11 | ~6,400 | 44 |
 | M8 | Orchestrator, live and historical queues | 15 | ~5,130 | 29 |
 | M9 | Sent-message pipeline and edit interception | 6 | ~4,880 | 23 |
-| M10 | Settings, language config, channel enablement, panel | 8 | ~2,980 | 15 |
+| M10 | Settings, language config, channel enablement | 8 | ~2,980 | 15 |
 | M11 | Policy, protection, heuristics, delegator sweep | 0 | ~1,780 | 15 |
+
+Rows M0 through M10 are done. The `runtime.js after` estimates were drawn up before the
+work and ran low from M5 onward: they assumed each cluster took its call sites with it,
+where in practice a delegating method stays behind until the last reader of the cluster is
+gone. The vars column is the column that mattered, and it landed at 2 against a predicted
+15 - the settings milestone took the language table and credentials with it, which the
+original split had put in M5.
+
+Remaining work is no longer state migration. M11 moves the stateless helper objects
+(`protectionLogic`, the five policy objects, the language and similarity heuristics) out
+by copy-and-import; they already take `plugin` as a parameter, so nothing about their
+shape changes. What remains after that is the plugin class itself and the settings panel
+React tree, which is M12.
 | M12 | Delete `src/legacy/runtime.js`; plugin shell only | remainder | 0 | 0 |
 
 ### Where new work lands during the transition
