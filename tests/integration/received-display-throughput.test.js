@@ -361,3 +361,102 @@ test("a burst never sweeps in another channel's queued messages", async () => {
 	}
 	finally {harness.restore();}
 });
+
+test("a throw inside a burst never strands its other messages", async () => {
+	const {harness, plugin} = createLiveBurstPlugin();
+	try {
+		const channel = {id: "channel-burst-throw"};
+		const messages = createBurstMessages(channel.id, 6);
+		let persistCalls = 0;
+		plugin.persistTranslationCacheEntry = () => {
+			persistCalls++;
+			if (persistCalls === 2) throw new Error("cache write exploded");
+		};
+		for (const message of messages) {
+			plugin.captureReceivedMessageSource({
+				messageId: message.id,
+				channelId: channel.id,
+				generation: plugin.getReceivedDisplayCommitGeneration(channel.id),
+				sourceSignature: plugin.createReceivedTranslationSignature(message, channel.id, {content: message.content, embeds: []}),
+				source: {content: message.content, embeds: []}
+			});
+			plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+		}
+
+		await drainBurst(plugin, messages, 3000);
+		const stuck = messages.filter(message => {
+			const view = plugin.getReceivedDisplayView(message.id);
+			return view && view.showLoading;
+		});
+		assert.deepEqual(stuck.map(message => message.id), [], "no message may be left showing a permanent loading indicator");
+	}
+	finally {harness.restore();}
+});
+
+test("a per-item skip signal in a batch response commits a skip instead of re-translating", async () => {
+	const {harness, plugin, calls} = createLiveBurstPlugin();
+	try {
+		const channel = {id: "channel-burst-skip"};
+		const messages = createBurstMessages(channel.id, 3);
+		const skipTarget = messages[1].id;
+		const persistedSkips = [];
+		plugin.persistReceivedSkipDecision = (messageId, _signature, reason) => {persistedSkips.push({messageId, reason});};
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			calls.batch++;
+			return Promise.resolve(Object.fromEntries(preparedItems.map(item => [
+				String(item.message.id),
+				String(item.message.id) === skipTarget ? "__SKIP_TRANSLATION__" : `译文:${item.message.id}`
+			])));
+		};
+		for (const message of messages) {
+			plugin.captureReceivedMessageSource({
+				messageId: message.id,
+				channelId: channel.id,
+				generation: plugin.getReceivedDisplayCommitGeneration(channel.id),
+				sourceSignature: plugin.createReceivedTranslationSignature(message, channel.id, {content: message.content, embeds: []}),
+				source: {content: message.content, embeds: []}
+			});
+			plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+		}
+
+		await drainBurst(plugin, messages, 3000);
+
+		const skippedView = plugin.getReceivedDisplayView(skipTarget);
+		assert.equal(skippedView.status, "skipped", "an explicit skip verdict must be terminal, not a retry");
+		// The burst's first message always takes the direct path; a skip verdict inside the
+		// batch must not add a second full-price request on top of that.
+		assert.equal(calls.single, 1, "a skip verdict must not cost a second full-price request");
+		assert.equal(persistedSkips.some(entry => entry.messageId === skipTarget), true, "the skip decision must be cached");
+	}
+	finally {harness.restore();}
+});
+
+test("a burst interrupted by a channel clear does not resurrect provider work", async () => {
+	const {harness, plugin, calls} = createLiveBurstPlugin(80);
+	try {
+		const channel = {id: "channel-burst-cancel"};
+		const messages = createBurstMessages(channel.id, 4);
+		for (const message of messages) {
+			plugin.captureReceivedMessageSource({
+				messageId: message.id,
+				channelId: channel.id,
+				generation: plugin.getReceivedDisplayCommitGeneration(channel.id),
+				sourceSignature: plugin.createReceivedTranslationSignature(message, channel.id, {content: message.content, embeds: []}),
+				source: {content: message.content, embeds: []}
+			});
+			plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+		}
+		await new Promise(resolve => setTimeout(resolve, 20));
+		const requestsBeforeClear = calls.single + calls.batch;
+
+		plugin.clearAutoTranslationQueue(channel.id);
+		await new Promise(resolve => setTimeout(resolve, 400));
+
+		assert.equal(calls.single + calls.batch, requestsBeforeClear, "a cleared channel must not issue further provider requests");
+		assert.equal(messages.every(message => {
+			const view = plugin.getReceivedDisplayView(message.id);
+			return !view || !view.showLoading;
+		}), true, "cancelled work must not leave loading indicators behind");
+	}
+	finally {harness.restore();}
+});

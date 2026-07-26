@@ -1757,25 +1757,36 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "finishRequest");
             return Promise.resolve(commit).then(finishRequest, (_2) => finishRequest(null));
           },
+          // Returns a burst item to the single-message path, preserving the queue's
+          // newest-first order so a retry is never starved behind later arrivals.
+          requeueBurstItem(plugin, queueItem, settled) {
+            if (settled.add(queueItem), queueItem.skipLiveBatch = !0, !plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+              receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+              return;
+            }
+            autoTranslationQueue.unshift(queueItem);
+          },
           async translateQueuedBurst(plugin, burst) {
-            let { channelId, items } = burst;
+            let { channelId, items } = burst, settled = /* @__PURE__ */ new Set();
             isLiveAutoTranslating = !0;
             try {
               let engineKey = plugin.getHistoricalAiBatchEngineKey(channelId), input = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {}), output = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {}), prepared = [];
-              for (let queueItem of items) {
-                if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-                  receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-                  continue;
+              for (let queueItem of items)
+                try {
+                  if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+                    settled.add(queueItem), receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+                    continue;
+                  }
+                  let preparedItem = plugin.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
+                  if (!preparedItem || preparedItem.skipped || preparedItem.cachedTranslation || !preparedItem.protectedText) {
+                    receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
+                    continue;
+                  }
+                  prepared.push(preparedItem);
+                } catch {
+                  receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
                 }
-                let preparedItem = plugin.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
-                if (!preparedItem || preparedItem.skipped || preparedItem.cachedTranslation || !preparedItem.protectedText) {
-                  queueItem.skipLiveBatch = !0, autoTranslationQueue.push(queueItem);
-                  continue;
-                }
-                prepared.push(preparedItem);
-              }
               if (!prepared.length) return;
-              await plugin.awaitProviderBackoff();
               let resultMap = null;
               try {
                 resultMap = await plugin.requestAiBatchTranslation(engineKey, prepared);
@@ -1784,24 +1795,52 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               }
               let commits = [];
               for (let preparedItem of prepared) {
-                let queueItem = preparedItem.queueItem, messageId = String(preparedItem.message.id), rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null, validation = { ok: !1 };
+                let queueItem = preparedItem.queueItem;
                 try {
-                  validation = plugin.validateHistoricalTranslationJobResult(preparedItem, rawTranslation, { channelId }) || { ok: !1 };
+                  let messageId = String(preparedItem.message.id), rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null;
+                  if (rawTranslation != null && plugin.isSkipTranslationSignal(rawTranslation)) {
+                    settled.add(queueItem), plugin.persistReceivedSkipDecision(messageId, preparedItem.signature, "ai_skip_signal", preparedItem.protectedText), commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
+                      sourceSignature: preparedItem.signature,
+                      status: "skipped",
+                      reason: "ai_skip_signal"
+                    }));
+                    continue;
+                  }
+                  let validation = { ok: !1 };
+                  try {
+                    validation = plugin.validateHistoricalTranslationJobResult(preparedItem, rawTranslation, { channelId }) || { ok: !1 };
+                  } catch {
+                    validation = { ok: !1 };
+                  }
+                  if (!validation.ok) {
+                    receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
+                    continue;
+                  }
+                  try {
+                    plugin.persistTranslationCacheEntry(messageId, preparedItem.signature, validation.translation);
+                  } catch {
+                  }
+                  if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+                    settled.add(queueItem), receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+                    continue;
+                  }
+                  settled.add(queueItem), commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
+                    sourceSignature: preparedItem.signature,
+                    status: "translated",
+                    translation: validation.translation
+                  }));
                 } catch {
-                  validation = { ok: !1 };
+                  receivedTranslationRuntime.requeueBurstItem(plugin, queueItem, settled);
                 }
-                if (!validation.ok || !plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-                  queueItem.skipLiveBatch = !0, autoTranslationQueue.push(queueItem);
-                  continue;
-                }
-                plugin.persistTranslationCacheEntry(messageId, preparedItem.signature, validation.translation), commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
-                  sourceSignature: preparedItem.signature,
-                  status: "translated",
-                  translation: validation.translation
-                }));
               }
               await Promise.all(commits);
             } finally {
+              for (let queueItem of items)
+                if (!settled.has(queueItem))
+                  try {
+                    receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+                  } catch {
+                  }
               isLiveAutoTranslating = !1, plugin.processAutoTranslationQueue();
             }
           },
@@ -1953,7 +1992,12 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             if (nextItem.historicalLoad)
               return plugin.collectHistoricalTranslationMessage(nextItem), receivedTranslationRuntime.processAutoTranslationQueue(plugin);
             if (receivedTranslationRuntime.handleCachedQueueItem(plugin, nextItem) || receivedTranslationRuntime.handleQueueItemGuardFailure(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
-            let burst = receivedTranslationRuntime.collectLiveBatchItems(plugin, nextItem);
+            let burst = null;
+            try {
+              burst = receivedTranslationRuntime.collectLiveBatchItems(plugin, nextItem);
+            } catch {
+              burst = null;
+            }
             return burst ? receivedTranslationRuntime.translateQueuedBurst(plugin, burst).catch((_2) => {
             }) : receivedTranslationRuntime.translateQueuedItem(plugin, nextItem);
           }
@@ -7009,7 +7053,8 @@ __________________ __________________ __________________
               let auth = authKeys[engineKey] || {}, apiKey = auth.key || "", apiEndpoint = this.normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint), modelId = auth.model || translationEngines[engineKey].model, output = preparedItems[0].output, input = preparedItems[0].input, payloadItems = preparedItems.map((item) => ({
                 id: String(item.message.id),
                 text: item.protectedText.replace(/\n/g, " [NEWLINE] ").replace(/\s+/g, " ")
-              })), systemPrompt = "You are a strict Discord chat batch translator. Return valid JSON only.", batchPrompt = `Target language is exactly ${output.name || output.id}. Input language is ${input && input.auto ? "auto-detect" : input.name || input.id || "auto"}. The plugin has already filtered messages that should be skipped; do not make skip decisions.
+              })), systemPrompt = "You are a strict Discord chat batch translator. Return valid JSON only.", batchChannelId = preparedItems[0].channelId || null, decisionRules = this.shouldUseAiAutoTranslateDecision(batchChannelId) ? `Apply these skip rules to every message; when a message should not be translated set its "translation" to exactly __SKIP_TRANSLATION__.
+${this.getAiAutoTranslatePrompt({ input, output })}` : "The plugin has already filtered messages that should be skipped; do not make skip decisions.", batchPrompt = `Target language is exactly ${output.name || output.id}. Input language is ${input && input.auto ? "auto-detect" : input.name || input.id || "auto"}. ${decisionRules}
 Rules:
 1. Return ONLY a JSON array. Each item must be {"id":"same id","translation":"translated text"}.
 2. Translate every provided natural-language message into exactly the target language.
