@@ -68,6 +68,7 @@ module.exports = (_ => {
 		const {createLoadedTranslationStatusStore} = require("../status/loaded-translation-status-store");
 		const {createTranslationCacheStore} = require("../cache/translation-cache-store");
 		const {createProviderClient, translationEngines, enginePortals} = require("../providers/provider-client");
+		const {createSentTranslationStore} = require("../sent/sent-translation-store");
 		const {getLabelsForUiLanguage} = require("../i18n/labels");
 		const {getCustomTextValue} = require("../i18n/text");
 
@@ -395,11 +396,6 @@ module.exports = (_ => {
 		var liveTranslationRequests = {};
 		var liveTranslationRequestSequence = 0;
 		var liveTranslationRuntimeGeneration = 0;
-		var sentAutomaticTranslationRequests = {};
-		var sentAutomaticTranslationRequestSequence = 0;
-		var sentAutomaticTranslationRuntimeGeneration = 0;
-		var pendingSentOriginalMessages = [];
-		var sentOriginalMessages = {};
 		var suppressedAutoTranslations = {};
 		var isLiveAutoTranslating = false;
 		var translationRerenderTimer = null;
@@ -422,12 +418,9 @@ module.exports = (_ => {
 		const loadedTranslationStatusStore = createLoadedTranslationStatusStore({isChineseUiLanguage: () => _this && _this.isChineseUiLanguage()});
 		var pluginRuntimeActive = true;
 		var deferredSettingsRerenderTimer = null;
-		var manualMessageTranslationRequests = {};
 		const AUTO_TRANSLATION_RERENDER_DELAY = 120;
 		const AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500;
 		const AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900;
-		const SENT_ORIGINAL_MATCH_TTL = 2 * 60 * 1000;
-		const MAX_SENT_ORIGINAL_ENTRIES = 200;
 		// A live burst drains into one AI batch request instead of one request per
 		// message; the cap keeps a single prompt within comfortable output limits.
 		const LIVE_AI_BATCH_ITEM_LIMIT = 10;
@@ -2025,99 +2018,6 @@ module.exports = (_ => {
 			}
 		};
 
-		const sentAutomaticTranslationRuntime = {
-			create(plugin, channelId, originalText, messageId = null) {
-				if (!channelId) return null;
-				const request = {
-					id: ++sentAutomaticTranslationRequestSequence,
-					generation: sentAutomaticTranslationRuntimeGeneration,
-					channelId,
-					messageId: messageId ? String(messageId) : null,
-					originalText: String(originalText || ""),
-					completed: false
-				};
-				sentAutomaticTranslationRequests[request.id] = request;
-				return request;
-			},
-			isCurrent(plugin, request) {
-				return !!(request && !request.completed && pluginRuntimeActive && request.generation == sentAutomaticTranslationRuntimeGeneration && sentAutomaticTranslationRequests[request.id] === request && plugin.isTranslationEnabled(request.channelId));
-			},
-			finish(_plugin, request) {
-				if (!request || request.completed) return false;
-				request.completed = true;
-				if (sentAutomaticTranslationRequests[request.id] === request) delete sentAutomaticTranslationRequests[request.id];
-				return true;
-			},
-			complete(plugin, request, translatedText, submit) {
-				if (!request || request.completed || typeof submit != "function") return Promise.resolve(false);
-				const isCurrent = sentAutomaticTranslationRuntime.isCurrent(plugin, request);
-				const nextText = isCurrent ? translatedText : request.originalText;
-				sentAutomaticTranslationRuntime.finish(plugin, request);
-				return Promise.resolve(submit(nextText)).then(_ => {
-					if (isCurrent) {
-						if (request.messageId) sentAutomaticTranslationRuntime.rememberMessage(plugin, request.messageId, request.channelId, request.originalText, nextText);
-						else sentAutomaticTranslationRuntime.trackPending(plugin, request.channelId, request.originalText, nextText);
-					}
-					return true;
-				});
-			},
-			prune(_plugin) {
-				const cutoff = Date.now() - SENT_ORIGINAL_MATCH_TTL;
-				pendingSentOriginalMessages = pendingSentOriginalMessages.filter(entry => entry && entry.createdAt >= cutoff);
-			},
-			trackPending(plugin, channelId, originalText, submittedText) {
-				originalText = String(originalText || "");
-				submittedText = String(submittedText || "");
-				if (!channelId || !originalText || !submittedText || originalText == submittedText) return false;
-				sentAutomaticTranslationRuntime.prune(plugin);
-				pendingSentOriginalMessages.push({channelId, originalText, submittedText, createdAt: Date.now()});
-				if (pendingSentOriginalMessages.length > MAX_SENT_ORIGINAL_ENTRIES) pendingSentOriginalMessages.splice(0, pendingSentOriginalMessages.length - MAX_SENT_ORIGINAL_ENTRIES);
-				return true;
-			},
-			rememberMessage(plugin, messageId, channelId, originalText, submittedText) {
-				if (!messageId) return false;
-				originalText = String(originalText || "");
-				submittedText = String(submittedText || "");
-				if (!originalText || !submittedText || originalText == submittedText) {
-					delete sentOriginalMessages[messageId];
-					return false;
-				}
-				sentAutomaticTranslationRuntime.prune(plugin);
-				sentOriginalMessages[messageId] = {channelId, originalText, submittedText, capturedAt: Date.now()};
-				const messageIds = Object.keys(sentOriginalMessages);
-				if (messageIds.length > MAX_SENT_ORIGINAL_ENTRIES) messageIds.sort((left, right) => sentOriginalMessages[left].capturedAt - sentOriginalMessages[right].capturedAt).slice(0, messageIds.length - MAX_SENT_ORIGINAL_ENTRIES).forEach(id => delete sentOriginalMessages[id]);
-				return true;
-			},
-			captureEcho(plugin, message, channelId = null) {
-				if (!message || !message.id || !plugin.isOwnMessage(message)) return false;
-				channelId = channelId || message.channel_id || null;
-				const submittedText = String(message.content || "");
-				if (!channelId || !submittedText) return false;
-				sentAutomaticTranslationRuntime.prune(plugin);
-				const pendingIndex = pendingSentOriginalMessages.findIndex(entry => entry.channelId == channelId && entry.submittedText == submittedText);
-				if (pendingIndex < 0) return false;
-				const pending = pendingSentOriginalMessages.splice(pendingIndex, 1)[0];
-				return sentAutomaticTranslationRuntime.rememberMessage(plugin, String(message.id), channelId, pending.originalText, submittedText);
-			},
-			getEditableText(plugin, messageId, currentText) {
-				sentAutomaticTranslationRuntime.prune(plugin);
-				const stored = messageId && sentOriginalMessages[messageId];
-				if (!stored) return currentText;
-				if (String(currentText || "") != stored.submittedText) {
-					delete sentOriginalMessages[messageId];
-					return currentText;
-				}
-				return stored.originalText;
-			},
-			invalidate(_plugin, channelId = null) {
-				if (!channelId) sentAutomaticTranslationRuntimeGeneration++;
-				for (const requestId of Object.keys(sentAutomaticTranslationRequests)) {
-					const request = sentAutomaticTranslationRequests[requestId];
-					if (channelId && request.channelId != channelId) continue;
-					delete sentAutomaticTranslationRequests[requestId];
-				}
-			}
-		};
 
 		const languageDetectionRuntime = {
 			getStrategy(plugin) {
@@ -2604,9 +2504,7 @@ module.exports = (_ => {
 				this.resetReceivedDisplayRuntime();
 				liveTranslationRuntimeGeneration++;
 				liveTranslationRequests = {};
-				sentAutomaticTranslationRuntimeGeneration++;
-				sentAutomaticTranslationRequests = {};
-				pendingSentOriginalMessages = [];
+				this.ensureSentTranslationStore().resetForStart();
 				historicalTranslationRuntimeGeneration++;
 				this.attachAutoTranslationInputActivityWatcher();
 				BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", {before: e => {
@@ -2638,7 +2536,7 @@ module.exports = (_ => {
 				pluginRuntimeActive = false;
 				this.invalidateLiveTranslationRequests();
 				this.invalidateSentAutomaticTranslationRequests();
-				pendingSentOriginalMessages = [];
+				this.ensureSentTranslationStore().clearPendingOriginals();
 				historicalTranslationRuntimeGeneration++;
 				channelTitleStore.invalidateInFlight();
 				this.cancelHistoricalTranslationJobs(null, "plugin-stopped");
@@ -2658,7 +2556,7 @@ module.exports = (_ => {
 				this.restoreAllReceivedDisplay({refresh: false});
 				this.clearDisplayedTranslations();
 				failedHistoricalTranslationSnapshots.clear();
-				manualMessageTranslationRequests = {};
+				this.ensureSentTranslationStore().clearManualRequests();
 				suppressedAutoTranslations = {};
 				queuedAutoTranslations = {};
 				queuedReplyPreviewTranslations = {};
@@ -6570,6 +6468,15 @@ module.exports = (_ => {
 				return this.ensureProviderClient().getModelCatalogState();
 			}
 
+			ensureSentTranslationStore () {
+				if (!this.sentTranslationStoreInstance) this.sentTranslationStoreInstance = createSentTranslationStore({
+					isRuntimeActive: () => pluginRuntimeActive,
+					isTranslationEnabled: channelId => this.isTranslationEnabled(channelId),
+					isOwnMessage: message => this.isOwnMessage(message)
+				});
+				return this.sentTranslationStoreInstance;
+			}
+
 			ensureProviderClient () {
 				if (!this.providerClientInstance) this.providerClientInstance = createProviderClient({
 					request: (url, options, callback) => BDFDB.LibraryRequires.request(url, options, callback),
@@ -7411,31 +7318,31 @@ module.exports = (_ => {
 			}
 
 			createSentAutomaticTranslationRequest (channelId, originalText, messageId = null) {
-				return sentAutomaticTranslationRuntime.create(this, channelId, originalText, messageId);
+				return this.ensureSentTranslationStore().createRequest(channelId, originalText, messageId);
 			}
 
 			isSentAutomaticTranslationRequestCurrent (request) {
-				return sentAutomaticTranslationRuntime.isCurrent(this, request);
+				return this.ensureSentTranslationStore().isRequestCurrent(request);
 			}
 
 			completeSentAutomaticTranslationRequest (request, translatedText, submit) {
-				return sentAutomaticTranslationRuntime.complete(this, request, translatedText, submit);
+				return this.ensureSentTranslationStore().completeRequest(request, translatedText, submit);
 			}
 
 			invalidateSentAutomaticTranslationRequests (channelId = null) {
-				return sentAutomaticTranslationRuntime.invalidate(this, channelId);
+				return this.ensureSentTranslationStore().invalidateRequests(channelId);
 			}
 
 			trackPendingSentOriginal (channelId, originalText, submittedText) {
-				return sentAutomaticTranslationRuntime.trackPending(this, channelId, originalText, submittedText);
+				return this.ensureSentTranslationStore().trackPendingOriginal(channelId, originalText, submittedText);
 			}
 
 			captureSentOriginalMessage (message, channelId = null) {
-				return sentAutomaticTranslationRuntime.captureEcho(this, message, channelId);
+				return this.ensureSentTranslationStore().captureEcho(message, channelId);
 			}
 
 			getEditableSentMessageText (messageId, currentText) {
-				return sentAutomaticTranslationRuntime.getEditableText(this, messageId, currentText);
+				return this.ensureSentTranslationStore().getEditableText(messageId, currentText);
 			}
 
 			translateMessage (message, channel, options = {}) {
@@ -7445,17 +7352,17 @@ module.exports = (_ => {
 					let manualRequest = null;
 					const finish = result => {
 						if (liveRequest) this.finishLiveTranslationRequest(liveRequest);
-						if (manualRequestKey && manualMessageTranslationRequests[manualRequestKey] === manualRequest) delete manualMessageTranslationRequests[manualRequestKey];
+						this.ensureSentTranslationStore().releaseManualRequest(manualRequestKey, manualRequest);
 						callback(result);
 					};
 					if (!message) return finish(null);
 					const channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
 					const isManualTranslation = !!options.manual || !options.auto;
-					if (isManualTranslation) manualRequestKey = `${channelId || "__global"}:${String(message.id)}`;
+					if (isManualTranslation) manualRequestKey = this.ensureSentTranslationStore().createManualRequestKey(channelId, message.id);
 					const activeTranslation = this.getActiveMessageTranslation(message, channelId);
 					const storeDisplayView = !activeTranslation && this.getReceivedDisplayRuntimeView(message.id);
 					const storeTranslated = !!(storeDisplayView && storeDisplayView.translated && storeDisplayView.origin === "automatic");
-					if (isManualTranslation && !activeTranslation && !storeTranslated && manualMessageTranslationRequests[manualRequestKey]) return finish(false);
+					if (isManualTranslation && !activeTranslation && !storeTranslated && this.ensureSentTranslationStore().hasManualRequest(manualRequestKey)) return finish(false);
 					if (isManualTranslation) this.lockManualTranslationScroll(message.id);
 					if (activeTranslation) {
 						if (options.auto) return finish(false);
@@ -7532,15 +7439,12 @@ module.exports = (_ => {
 						const allTextsToTranslate = this.buildTranslationRequestText(originalContentData);
 						message.embeds.forEach(embed => embed.message_id = message.id);
 						let embedIds = message.embeds.map(embed => embed.id);
-						if (isManualTranslation) {
-							manualRequest = {};
-							manualMessageTranslationRequests[manualRequestKey] = manualRequest;
-						}
+						if (isManualTranslation) manualRequest = this.ensureSentTranslationStore().beginManualRequest(manualRequestKey);
 						try {
 							this.translateText(allTextsToTranslate, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
 								try {
 									if (options.auto && !this.isLiveTranslationRequestCurrent(liveRequest, message)) return finish(false);
-									if (isManualTranslation && manualMessageTranslationRequests[manualRequestKey] !== manualRequest) return finish(false);
+									if (isManualTranslation && !this.ensureSentTranslationStore().isManualRequestCurrent(manualRequestKey, manualRequest)) return finish(false);
 									if (translation) {
 								let strings = translation.split(/\n{0,1}__________________ __________________ __________________\n{0,1}/);
 								let oldContent = (originalContentData.content || "").trim();
