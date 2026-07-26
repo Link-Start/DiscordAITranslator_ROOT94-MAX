@@ -1267,7 +1267,7 @@ git commit -m "refactor: route received display through one state owner"
 
 **Verification evidence (2026-07-26):** `640e01b`; red phase observed 6/6 integration failures (`captureReceivedMessageSource is not a function`); focused integration tests `6/6`; full `npm run verify` `262/262`. Adjustments against the plan baseline: the committed state store requires terminal results to carry a matching `sourceSignature`, so the harness result fixtures include it; the injected `captureScrollState`/`restoreScrollState` callbacks guard exceptions because scroll-anchor capture requires DOM APIs a test environment does not provide. Step 5 is intentionally partial: `checkMessage` now captures every received source into the store and both patch paths consume a store view when one is authoritative, but pending-marking and the live/cached/historical commit-target switch stay on the legacy path because Task 7's red-phase tests require observing that path before replacing it. Until Task 7 lands, no runtime path commits translated results into the store, so the store cannot diverge from the legacy display maps.
 
-- [ ] **Step 5 (deferred remainder): moved to Task 7** — route live, cached, and historical automatic received commits through the controller and mark queue items pending in the store.
+- [x] **Step 5 (deferred remainder): moved to Task 7** — route live, cached, and historical automatic received commits through the controller and mark queue items pending in the store. Completed in `179552a` (Task 7).
 
 ## Task 6: Fix Channel Disable And Plugin Stop Restoration
 
@@ -1460,7 +1460,7 @@ git commit -m "fix: restore received originals through display transactions"
 - Modify: `tests/historical-translation-job.test.js`
 - Modify: `tests/translation-regression.test.js`
 
-- [ ] **Step 1: Add failing commit-count tests**
+- [x] **Step 1: Add failing commit-count tests**
 
 Historical test:
 
@@ -1518,14 +1518,14 @@ test("one live result performs one ID-scoped display commit", async () => {
 });
 ```
 
-- [ ] **Step 2: Verify both tests fail at the compatibility rerender path**
+- [x] **Step 2: Verify both tests fail at the compatibility rerender path**
 
 ```powershell
 npm run build
 node --test --test-name-pattern "acknowledged display commit|ID-scoped display commit" tests/historical-translation-job.test.js tests/translation-regression.test.js
 ```
 
-- [ ] **Step 3: Replace generic rerender scheduling for received completions**
+- [x] **Step 3: Replace generic rerender scheduling for received completions**
 
 Historical jobs convert translated, skipped, and failed terminal items to one result array and call only:
 
@@ -1541,7 +1541,7 @@ await this.commitReceivedDisplayResult(result);
 
 Generic `scheduleTranslationRerender` remains temporarily for settings, manual translation, reply, embed, and title compatibility paths. It must no longer repaint automatic received message completions.
 
-- [ ] **Step 4: Run focused, full, and build checks**
+- [x] **Step 4: Run focused, full, and build checks**
 
 ```powershell
 npm run build
@@ -1551,12 +1551,14 @@ npm run verify
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src DiscordAITranslator.plugin.js tests
 git commit -m "refactor: commit received translations by message id"
 ```
+
+**Verification evidence (2026-07-26):** `179552a`; red phase observed 3/3 new contract tests failing on the legacy commit path; full `npm run verify` `279/279`. The flip covers all six automatic legacy-write call sites (live, cached in checkMessage/queue/loaded-content, historical batch); manual translation keeps the legacy path. Extensions beyond the plan baseline, each driven by an adversarial review of the diff before commit: the store gained `releasePending` (a live request that ends without a terminal commit returns its record to idle, so stale request identities cannot poison later commits) and `restoreMessage` (manual untranslate of a store-owned automatic translation); the display view now exposes `generation`, `sourceSignature`, and `requestIdentity` so historical batch results echo each record's active identity instead of rejecting the batch; `commitHistoricalTranslationJob` guards batch-commit rejections and reports `displayed: 0` when the batch did not commit; terminal skip/fail live commits use `{refresh: false}` to preserve legacy repaint semantics and avoid refresh-requeue loops; `resolveLoadedMessageContentTranslation` gates on store-translated/pending views to prevent endless requeues; source edits are detected through same-generation signature changes at capture time (replacing the `oldMessages`-based detection automatic results no longer feed); `processEmbed` and the translated-label checks fall back to store views. Known accepted consequences: the live auto queue serializes behind acknowledged display transactions (it pauses while the window is hidden and rAF is throttled, resuming on focus), and loaded-scope messages rendered outside a captured channel stream (for example search results) queue provider work whose store commit is rejected; both are recorded for the orchestrator milestone.
 
 ## Task 8: Add Per-Message Reasons And A Local Transition Journal
 
