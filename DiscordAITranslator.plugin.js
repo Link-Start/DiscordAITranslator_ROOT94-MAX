@@ -1238,7 +1238,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           }
         };
         var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, translationCache = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationCacheSaveTimer = null, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, lastAutoTranslationUserScrollTime = 0, autoTranslationUserScrollChannelId = null, autoTranslationUserScrollIntentSequence = 0, lastProgrammaticScrollWriteTime = 0, receivedDisplayFlushTimer = null, receivedDisplayFlushQueues = /* @__PURE__ */ new Map(), autoTranslationBackoffUntil = 0, autoTranslationBackoffStep = 0, autoTranslationScrollWatcherAttached = !1, autoTranslationScrollWatcherElement = null, autoTranslationScrollActivityHandler = null, autoTranslationScrollIntentHandler = null, autoTranslationScrollIntentEndHandler = null, autoTranslationScrollEndHandler = null, autoTranslationScrollIntentPending = !1, autoTranslationScrollIntentTimer = null, autoTranslationScrollIdleTimer = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map(), translatedChannelTitles = {}, pendingChannelTitleTranslations = {}, failedChannelTitleTranslations = {}, channelTitleTranslationSequence = 0, pluginRuntimeActive = !0, lastAutoTranslationInputActivityTime = 0, autoTranslationInputActivityHandler = null, loadedAutoTranslationSeenMessages = {}, loadedAutoTranslationStatus = { active: !1, collecting: !1, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" }, loadedAutoTranslationStatusHideTimer = null, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {}, manualTranslationScrollAnchor = null, manualTranslationScrollLockTimer = null;
-        let MAX_TRANSLATION_CACHE_ENTRIES = 500, AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900, AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300, AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE = 150, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD = 80, MANUAL_TRANSLATION_SCROLL_LOCK_MS = 4500, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
+        let MAX_TRANSLATION_CACHE_ENTRIES = 500, AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, LIVE_AI_BATCH_ITEM_LIMIT = 10, AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900, AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300, AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE = 150, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD = 80, MANUAL_TRANSLATION_SCROLL_LOCK_MS = 4500, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
         }, languageTypes = {
@@ -1733,6 +1733,78 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           handleQueueItemGuardFailure(plugin, queueItem) {
             return !queueItem || plugin.shouldAutoTranslateReceivedMessage(queueItem.message, queueItem.channel, queueItem.originalContentData, !0) ? !1 : (receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest), !0);
           },
+          // Drains queued live items that can share one AI batch request with the first
+          // item: same channel, no cached result, and not already batch-rejected.
+          collectLiveBatchItems(plugin, firstItem) {
+            let channelId = firstItem.channel && firstItem.channel.id || plugin.getMessageChannelId(firstItem.message);
+            if (!channelId || firstItem.skipLiveBatch || firstItem.cachedTranslation || !plugin.getHistoricalAiBatchEngineKey(channelId)) return null;
+            let items = [firstItem];
+            for (let index = 0; index < autoTranslationQueue.length && items.length < LIVE_AI_BATCH_ITEM_LIMIT; ) {
+              let candidate = autoTranslationQueue[index], candidateChannelId = candidate && candidate.channel && candidate.channel.id || candidate && plugin.getMessageChannelId(candidate.message);
+              if (!candidate || !candidate.message || candidate.historicalLoad || candidate.cachedTranslation || candidate.skipLiveBatch || candidateChannelId != channelId) {
+                index++;
+                continue;
+              }
+              autoTranslationQueue.splice(index, 1), items.push(candidate);
+            }
+            return items.length > 1 ? { channelId, items } : null;
+          },
+          finishBurstItem(plugin, queueItem, channelId, result) {
+            let commit = plugin.commitReceivedDisplayResult(plugin.createReceivedDisplayCommitResult(queueItem.message, channelId, Object.assign({
+              requestIdentity: queueItem.liveRequest ? String(queueItem.liveRequest.id) : null
+            }, result)), { refresh: !1 }), finishRequest = /* @__PURE__ */ __name((outcome) => {
+              outcome && outcome.deferredIds && outcome.deferredIds.length && plugin.scheduleReceivedDisplayFlush(channelId, queueItem.message.id), receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+            }, "finishRequest");
+            return Promise.resolve(commit).then(finishRequest, (_2) => finishRequest(null));
+          },
+          async translateQueuedBurst(plugin, burst) {
+            let { channelId, items } = burst;
+            isLiveAutoTranslating = !0;
+            try {
+              let engineKey = plugin.getHistoricalAiBatchEngineKey(channelId), input = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {}), output = Object.assign({}, languages[plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {}), prepared = [];
+              for (let queueItem of items) {
+                if (!plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+                  receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+                  continue;
+                }
+                let preparedItem = plugin.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
+                if (!preparedItem || preparedItem.skipped || preparedItem.cachedTranslation || !preparedItem.protectedText) {
+                  queueItem.skipLiveBatch = !0, autoTranslationQueue.push(queueItem);
+                  continue;
+                }
+                prepared.push(preparedItem);
+              }
+              if (!prepared.length) return;
+              await plugin.awaitProviderBackoff();
+              let resultMap = null;
+              try {
+                resultMap = await plugin.requestAiBatchTranslation(engineKey, prepared);
+              } catch {
+                resultMap = null;
+              }
+              let commits = [];
+              for (let preparedItem of prepared) {
+                let queueItem = preparedItem.queueItem, messageId = String(preparedItem.message.id), rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null, validation = { ok: !1 };
+                try {
+                  validation = plugin.validateHistoricalTranslationJobResult(preparedItem, rawTranslation, { channelId }) || { ok: !1 };
+                } catch {
+                  validation = { ok: !1 };
+                }
+                if (!validation.ok || !plugin.isLiveTranslationRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+                  queueItem.skipLiveBatch = !0, autoTranslationQueue.push(queueItem);
+                  continue;
+                }
+                plugin.persistTranslationCacheEntry(messageId, preparedItem.signature, validation.translation), commits.push(receivedTranslationRuntime.finishBurstItem(plugin, queueItem, channelId, {
+                  sourceSignature: preparedItem.signature,
+                  status: "translated",
+                  translation: validation.translation
+                }));
+              }
+              await Promise.all(commits);
+            } finally {
+              isLiveAutoTranslating = !1, plugin.processAutoTranslationQueue();
+            }
+          },
           translateQueuedItem(plugin, queueItem) {
             isLiveAutoTranslating = !0, plugin.translateMessage(queueItem.message, queueItem.channel, {
               auto: !0,
@@ -1877,7 +1949,13 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           processAutoTranslationQueue(plugin) {
             if (!receivedTranslationRuntime.beginQueueProcessing(plugin) || receivedTranslationRuntime.finishQueueIfEmpty(plugin)) return;
             let nextItem = autoTranslationQueue.shift();
-            return !nextItem || !nextItem.message ? receivedTranslationRuntime.processAutoTranslationQueue(plugin) : nextItem.historicalLoad ? (plugin.collectHistoricalTranslationMessage(nextItem), receivedTranslationRuntime.processAutoTranslationQueue(plugin)) : receivedTranslationRuntime.handleCachedQueueItem(plugin, nextItem) || receivedTranslationRuntime.handleQueueItemGuardFailure(plugin, nextItem) ? receivedTranslationRuntime.processAutoTranslationQueue(plugin) : receivedTranslationRuntime.translateQueuedItem(plugin, nextItem);
+            if (!nextItem || !nextItem.message) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+            if (nextItem.historicalLoad)
+              return plugin.collectHistoricalTranslationMessage(nextItem), receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+            if (receivedTranslationRuntime.handleCachedQueueItem(plugin, nextItem) || receivedTranslationRuntime.handleQueueItemGuardFailure(plugin, nextItem)) return receivedTranslationRuntime.processAutoTranslationQueue(plugin);
+            let burst = receivedTranslationRuntime.collectLiveBatchItems(plugin, nextItem);
+            return burst ? receivedTranslationRuntime.translateQueuedBurst(plugin, burst).catch((_2) => {
+            }) : receivedTranslationRuntime.translateQueuedItem(plugin, nextItem);
           }
         }, translationDisplayLogic = {
           buildReceivedDisplayContent(plugin, translatedContent, originalContent, forceInlineOriginal = !1) {
@@ -5460,14 +5538,23 @@ __________________ __________________ __________________
           getCachedReceivedTranslation(message, channelId, originalContentData = null) {
             if (!message || !translationCache[message.id]) return null;
             let sourceData = originalContentData || this.extractOriginalContentData(message), signature = this.createReceivedTranslationSignature(message, channelId, sourceData);
-            if (translationCache[message.id].signature != signature || translationCache[message.id].skipped) return null;
+            if (!this.matchesCachedTranslationSignature(translationCache[message.id], signature) || translationCache[message.id].skipped) return null;
             let cachedTranslation = Object.assign({ signature, channelId }, translationCache[message.id].translation), beforeSerialized = JSON.stringify(cachedTranslation || {});
-            return cachedTranslation = this.normalizeStoredTranslationData(cachedTranslation), !cachedTranslation.originalContent && sourceData && sourceData.content && (cachedTranslation.originalContent = String(sourceData.content)), !cachedTranslation.translatedContent && cachedTranslation.content && (cachedTranslation.translatedContent = this.extractLegacyDisplayedTranslationParts(cachedTranslation.content).translatedContent || cachedTranslation.content), !cachedTranslation.translatedContent || (sourceData && sourceData.content || "").trim() && !String(cachedTranslation.originalContent || "").trim() ? null : (cachedTranslation = this.refreshTranslationDisplay(cachedTranslation), this.isTranslationResultTooSimilar(cachedTranslation) ? (delete translationCache[message.id], this.scheduleTranslationCacheSave(), null) : this.shouldSkipReceivedTranslationBeforeRequest(sourceData, channelId) || !this.shouldKeepAutoTranslatedResult(cachedTranslation, channelId) ? (delete translationCache[message.id], this.scheduleTranslationCacheSave(), null) : (JSON.stringify(cachedTranslation || {}) != beforeSerialized && (translationCache[message.id].translation = Object.assign({}, cachedTranslation), translationCache[message.id].signature = signature, translationCache[message.id].cachedAt = translationCache[message.id].cachedAt || Date.now(), this.scheduleTranslationCacheSave()), cachedTranslation));
+            if (cachedTranslation = this.normalizeStoredTranslationData(cachedTranslation), !cachedTranslation.originalContent && sourceData && sourceData.content && (cachedTranslation.originalContent = String(sourceData.content)), !cachedTranslation.translatedContent && cachedTranslation.content && (cachedTranslation.translatedContent = this.extractLegacyDisplayedTranslationParts(cachedTranslation.content).translatedContent || cachedTranslation.content), !cachedTranslation.translatedContent || (sourceData && sourceData.content || "").trim() && !String(cachedTranslation.originalContent || "").trim()) return null;
+            if (cachedTranslation = this.refreshTranslationDisplay(cachedTranslation), this.isTranslationResultTooSimilar(cachedTranslation))
+              return delete translationCache[message.id], this.scheduleTranslationCacheSave(), null;
+            if (this.shouldSkipReceivedTranslationBeforeRequest(sourceData, channelId) || !this.shouldKeepAutoTranslatedResult(cachedTranslation, channelId))
+              return delete translationCache[message.id], this.scheduleTranslationCacheSave(), null;
+            if (JSON.stringify(cachedTranslation || {}) != beforeSerialized) {
+              let upgradedTranslation = Object.assign({}, cachedTranslation);
+              delete upgradedTranslation.signature, translationCache[message.id].translation = upgradedTranslation, translationCache[message.id].signature = this.hashReceivedTranslationSignature(signature), translationCache[message.id].cachedAt = translationCache[message.id].cachedAt || Date.now(), this.scheduleTranslationCacheSave();
+            }
+            return cachedTranslation;
           }
           getCachedReceivedSkipDecision(message, channelId, originalContentData = null) {
             if (!message || !translationCache[message.id]) return null;
             let sourceData = originalContentData || this.extractOriginalContentData(message), signature = this.createReceivedTranslationSignature(message, channelId, sourceData);
-            if (translationCache[message.id].signature != signature) return null;
+            if (!this.matchesCachedTranslationSignature(translationCache[message.id], signature)) return null;
             let skipped = translationCache[message.id].skipped;
             return !skipped || !skipped.reason ? null : skipped.policyVersion !== 2 ? (delete translationCache[message.id], this.scheduleTranslationCacheSave(), null) : Object.assign({ signature, channelId }, skipped);
           }
@@ -5477,10 +5564,11 @@ __________________ __________________ __________________
             }, 300);
           }
           persistTranslationCacheEntry(messageId, signature, translation) {
-            translationCache[messageId] = {
-              signature,
+            let storedTranslation = Object.assign({}, translation);
+            delete storedTranslation.signature, translationCache[messageId] = {
+              signature: this.hashReceivedTranslationSignature(signature),
               cachedAt: Date.now(),
-              translation: Object.assign({}, translation)
+              translation: storedTranslation
             };
             let cacheKeys = Object.keys(translationCache);
             cacheKeys.length > MAX_TRANSLATION_CACHE_ENTRIES && cacheKeys.sort((keyA, keyB) => (translationCache[keyA].cachedAt || 0) - (translationCache[keyB].cachedAt || 0)).slice(0, cacheKeys.length - MAX_TRANSLATION_CACHE_ENTRIES).forEach((key) => delete translationCache[key]), this.scheduleTranslationCacheSave();
@@ -5490,6 +5578,24 @@ __________________ __________________ __________________
           }
           hasCachedTranslationEntry(messageId) {
             return !!(messageId && translationCache[messageId]);
+          }
+          getPersistedTranslationCacheEntry(messageId) {
+            return messageId && translationCache[messageId] || null;
+          }
+          seedRawTranslationCacheEntryForTest(messageId, signature, translation) {
+            translationCache[messageId] = { signature, cachedAt: Date.now(), translation: Object.assign({}, translation) };
+          }
+          // The raw signature embeds the whole request configuration, so storing it verbatim
+          // made it the majority of the persisted cache file. Every use is an equality check,
+          // so a compact digest carries the same information at a fraction of the size.
+          hashReceivedTranslationSignature(signature) {
+            let text = String(signature ?? ""), hash = 2166136261;
+            for (let index = 0; index < text.length; index++)
+              hash ^= text.charCodeAt(index), hash = Math.imul(hash, 16777619) >>> 0;
+            return `h1:${hash.toString(36)}:${text.length.toString(36)}`;
+          }
+          matchesCachedTranslationSignature(entry, signature) {
+            return !entry || entry.signature == null ? !1 : String(entry.signature).indexOf("h1:") !== 0 ? entry.signature == signature : entry.signature == this.hashReceivedTranslationSignature(signature);
           }
           getLoadedAutoTranslationSeenCount(channelId) {
             let seenMessages = channelId && loadedAutoTranslationSeenMessages[channelId];
@@ -5507,7 +5613,7 @@ __________________ __________________ __________________
           persistReceivedSkipDecision(messageId, signature, reason, preview = "") {
             if (!messageId || !signature || !reason || !this.shouldPersistReceivedSkipDecision(reason)) return;
             translationCache[messageId] = {
-              signature,
+              signature: this.hashReceivedTranslationSignature(signature),
               cachedAt: Date.now(),
               skipped: {
                 policyVersion: 2,

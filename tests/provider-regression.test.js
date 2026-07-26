@@ -282,3 +282,42 @@ test("locally recomputable skip reasons do not occupy paid translation cache slo
 	assert.equal(plugin.hasCachedTranslationEntry("skip-link"), false, "link_only must not persist");
 	assert.equal(plugin.hasCachedTranslationEntry("skip-lang"), true, "same_language genuinely saves a request and stays");
 });
+
+test("persisted cache entries store a compact signature and keep existing raw entries valid", () => {
+	const saved = [];
+	const plugin = createPluginInstance({
+		callSetLanguages: false,
+		bdfdb: {
+			DataUtils: {
+				load: () => ({}),
+				save: (value, _plugin, key) => {saved.push({key, value});}
+			}
+		}
+	});
+	const message = {id: "cache-compact-1", channel_id: "channel-cache", content: "hello world", embeds: [], attachments: [], author: {id: "other-user"}};
+	const contentData = {content: message.content, embeds: []};
+	const signature = plugin.createReceivedTranslationSignature(message, "channel-cache", contentData);
+	const storedTranslation = {
+		signature,
+		channelId: "channel-cache",
+		auto: true,
+		content: "你好世界",
+		translatedContent: "你好世界",
+		originalContent: "hello world",
+		embeds: {}
+	};
+
+	plugin.persistTranslationCacheEntry(message.id, signature, storedTranslation);
+	const persisted = plugin.getPersistedTranslationCacheEntry(message.id);
+
+	assert.ok(persisted, "the entry must persist");
+	assert.ok(persisted.signature.length < signature.length / 4, `persisted signature must be compact, got ${persisted.signature.length} vs raw ${signature.length}`);
+	assert.equal(persisted.translation.signature, undefined, "the duplicated inner signature must not persist");
+	// The compact form still matches the same source.
+	assert.ok(plugin.getCachedReceivedTranslation(message, "channel-cache", contentData), "a compact entry must still hit");
+
+	// A pre-existing raw-signature entry (from an older version) must keep working.
+	plugin.seedRawTranslationCacheEntryForTest("cache-legacy-1", signature, storedTranslation);
+	const legacyMessage = Object.assign({}, message, {id: "cache-legacy-1"});
+	assert.ok(plugin.getCachedReceivedTranslation(legacyMessage, "channel-cache", contentData), "a legacy raw-signature entry must still hit");
+});
