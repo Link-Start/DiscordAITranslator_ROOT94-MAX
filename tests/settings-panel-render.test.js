@@ -2,34 +2,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {createPluginInstance} = require("./helpers/createPluginInstance");
 
-const el = (type, props) => ({type, props});
-const component = name => {
-	const C = function () {};
-	C.displayName = name;
-	return C;
-};
-
-const LibraryComponents = new Proxy({}, {
-	has: () => true,
-	get(target, prop) {
-		if (typeof prop === "symbol") return undefined;
-		if (!target[prop]) {
-			const C = component(String(prop));
-			// Any namespace a component might expose (Colors, Looks, Sizes, Tags, Types,
-			// Align, Direction, Names, ...) answers with the key name as a string.
-			target[prop] = new Proxy(C, {
-				get(fnTarget, key) {
-					if (typeof key === "symbol") return fnTarget[key];
-					if (key in fnTarget) return fnTarget[key];
-					if (!fnTarget["__ns_" + String(key)]) fnTarget["__ns_" + String(key)] = new Proxy({}, {get: (_, k) => typeof k === "symbol" ? undefined : String(k)});
-					return fnTarget["__ns_" + String(key)];
-				}
-			});
-		}
-		return target[prop];
-	}
-});
-
+// LibraryComponents, ReactUtils, DOMUtils, disCN and disCNS come from the shared
+// harness. They must NOT be repeated here: the harness merges this object into its
+// defaults key by key, and a Proxy on both sides is flattened into an empty object by
+// that merge, which silently strips every component the panel asks for.
 const bdfdb = {
 	PluginUtils: {
 		createSettingsPanel: (instance, config) => {
@@ -38,17 +14,6 @@ const bdfdb = {
 		},
 		refreshSettingsPanel: () => {}
 	},
-	LibraryComponents,
-	ReactUtils: {
-		createElement: (type, props) => el(type, props),
-		forceUpdate: () => {},
-		findParent: () => null,
-		getValue: () => null
-	},
-	DOMUtils: {formatClassName: (...args) => args.filter(Boolean).join(" "), addClass: () => {}, removeClass: () => {}},
-	disCN: new Proxy({}, {get: (_, k) => String(k)}),
-	disCNS: new Proxy({}, {get: (_, k) => String(k) + " "}),
-	disCNC: new Proxy({}, {get: (_, k) => String(k)}),
 	LanguageUtils: {
 		getName: () => "English",
 		languages: {en: {id: "en", name: "English"}, "zh-CN": {id: "zh-CN", name: "Chinese"}}

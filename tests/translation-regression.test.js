@@ -1906,3 +1906,123 @@ test("editing a store-translated automatic message requeues the new source", asy
 	assert.equal(plugin.getReceivedDisplayView("100").status, "idle");
 	assert.equal(plugin.getReceivedDisplayView("100").content, "new edited source");
 });
+
+test("an automatic translation carries the colour treatment onto the rendered message", () => {
+	// The visible result of a translation is not just the text: the message picks up
+	// translator-translated-message plus the two custom properties the stylesheet reads
+	// for the accent bar and the text colour. Nothing asserted this, so the styling
+	// could vanish with every text-level test still green.
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+	plugin.settings.general.highlightTranslatedMessages = true;
+	plugin.settings.general.translatedTextColor = "#00ff40";
+
+	const message = {
+		id: "colour-1",
+		channel_id: "channel-colour",
+		content: "Good morning",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	plugin.applyStoredTranslationToMessage(message, {
+		channelId: "channel-colour",
+		auto: true,
+		content: "早上好",
+		translatedContent: "早上好",
+		originalContent: "Good morning",
+		embeds: {}
+	});
+
+	const event = {
+		instance: {props: {message}},
+		returnvalue: {props: {children: []}}
+	};
+	plugin.processMessageContent(event);
+
+	const props = event.returnvalue.props;
+	assert.match(String(props.className || ""), /translator-translated-message/, "the accent class must reach the rendered message");
+	assert.equal(props.style && props.style["--translator-text-color"], "#00ff40");
+	assert.equal(props.style && props.style["--translator-accent-color"], "#00ff40");
+});
+
+test("turning the highlight off removes the colour treatment but keeps the translation", () => {
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+	plugin.settings.general.highlightTranslatedMessages = false;
+
+	const message = {
+		id: "colour-2",
+		channel_id: "channel-colour",
+		content: "Good morning",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	plugin.applyStoredTranslationToMessage(message, {
+		channelId: "channel-colour",
+		auto: true,
+		content: "早上好",
+		translatedContent: "早上好",
+		originalContent: "Good morning",
+		embeds: {}
+	});
+
+	plugin.getActiveMessageTranslation = () => null;
+	plugin.getReceivedDisplayRuntimeView = () => ({
+		messageId: message.id,
+		revision: 1,
+		translated: true,
+		translation: {channelId: "channel-colour", auto: true, content: "早上好", translatedContent: "早上好", originalContent: "Good morning"}
+	});
+
+	const event = {instance: {props: {message}}, returnvalue: {props: {children: []}}};
+	plugin.processMessageContent(event);
+
+	// The switch controls the accent only. The custom properties still travel with the
+	// message so a user who turns the highlight back on gets their colour, not a default.
+	assert.doesNotMatch(String(event.returnvalue.props.className || ""), /translator-translated-message/);
+	assert.equal(event.returnvalue.props["data-translator-revision"], "1", "the translation itself still rendered");
+});
+
+test("a store-backed automatic translation carries the colour treatment too", () => {
+	// Automatic translations are owned by the display store, so processMessageContent
+	// takes applyReceivedDisplayViewToContent rather than the legacy decoration path.
+	// That branch had no styling coverage at all - the legacy one is the branch the
+	// other colour test happens to exercise.
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+	plugin.settings.general.highlightTranslatedMessages = true;
+	plugin.settings.general.translatedTextColor = "#00ff40";
+
+	const message = {
+		id: "colour-store-1",
+		channel_id: "channel-colour",
+		content: "Good morning",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	// Nothing in the legacy path: force the store branch.
+	plugin.getActiveMessageTranslation = () => null;
+	plugin.getReceivedDisplayRuntimeView = () => ({
+		messageId: message.id,
+		revision: 3,
+		translated: true,
+		translation: {
+			channelId: "channel-colour",
+			auto: true,
+			content: "早上好",
+			translatedContent: "早上好",
+			originalContent: "Good morning"
+		}
+	});
+
+	const event = {instance: {props: {message}}, returnvalue: {props: {children: []}}};
+	plugin.processMessageContent(event);
+
+	const props = event.returnvalue.props;
+	assert.equal(props["data-translator-revision"], "3", "the store branch must have run");
+	assert.match(String(props.className || ""), /translator-translated-message/, "the accent class must reach a store-backed translation");
+	assert.equal(props.style && props.style["--translator-text-color"], "#00ff40");
+});
