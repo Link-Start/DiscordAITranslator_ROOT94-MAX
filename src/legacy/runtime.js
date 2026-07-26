@@ -65,6 +65,7 @@ module.exports = (_ => {
 		const {createTranslatorStyles} = require("../ui/styles");
 		const {createChannelTitleStore} = require("../channel-title/channel-title-store");
 		const {createMessageViewportStore} = require("../viewport/message-viewport-store");
+		const {createLoadedTranslationStatusStore} = require("../status/loaded-translation-status-store");
 		const {getLabelsForUiLanguage} = require("../i18n/labels");
 		const {getCustomTextValue} = require("../i18n/text");
 
@@ -623,10 +624,8 @@ module.exports = (_ => {
 		var historicalTranslationRuntimeGeneration = 0;
 		var failedHistoricalTranslationSnapshots = new Map();
 		const channelTitleStore = createChannelTitleStore();
+		const loadedTranslationStatusStore = createLoadedTranslationStatusStore({isChineseUiLanguage: () => _this && _this.isChineseUiLanguage()});
 		var pluginRuntimeActive = true;
-		var loadedAutoTranslationSeenMessages = {};
-		var loadedAutoTranslationStatus = {active: false, collecting: false, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""};
-		var loadedAutoTranslationStatusHideTimer = null;
 		var deferredSettingsRerenderTimer = null;
 		var manualMessageTranslationRequests = {};
 		const MAX_TRANSLATION_CACHE_ENTRIES = 500;
@@ -1191,11 +1190,7 @@ module.exports = (_ => {
 
 		const receivedTranslationRuntime = {
 			resetLoadedMessageTracking(channelId = null) {
-				if (!channelId) {
-					loadedAutoTranslationSeenMessages = {};
-					return;
-				}
-				delete loadedAutoTranslationSeenMessages[channelId];
+				loadedTranslationStatusStore.resetSeen(channelId);
 			},
 			resetQueueTimer() {
 				if (autoTranslationQueueRetryTimer) clearTimeout(autoTranslationQueueRetryTimer);
@@ -1330,7 +1325,7 @@ module.exports = (_ => {
 					clearTimeout(autoTranslationQueueRetryTimer);
 					autoTranslationQueueRetryTimer = null;
 				}
-				if (loadedAutoTranslationStatus.channelId == channelId) plugin.clearLoadedAutoTranslationStatus();
+				if (loadedTranslationStatusStore.isForChannel(channelId)) plugin.clearLoadedAutoTranslationStatus();
 			},
 			scheduleAutoTranslationQueueRetry(plugin) {
 				if (autoTranslationQueueRetryTimer) return;
@@ -1592,7 +1587,7 @@ module.exports = (_ => {
 				if (historicalLoadedPass) {
 					const retainedFailedCount = plugin.getFailedHistoricalTranslationCount(channelId);
 					plugin.attachAutoTranslationScrollWatcher();
-					plugin.updateLoadedAutoTranslationStatus({active: true, collecting: true, done: false, channelId, batch: (loadedAutoTranslationStatus.batch || 0) + 1, total: 0, processed: 0, displayed: 0, skipped: 0, failed: 0, retryable: retainedFailedCount, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""});
+					plugin.updateLoadedAutoTranslationStatus({active: true, collecting: true, done: false, channelId, batch: loadedTranslationStatusStore.getNextBatchNumber(), total: 0, processed: 0, displayed: 0, skipped: 0, failed: 0, retryable: retainedFailedCount, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""});
 				}
 				return {
 					channel,
@@ -1652,7 +1647,7 @@ module.exports = (_ => {
 					if (context.collectedHistoricalMessages && !plugin.isUserActivelyScrollingMessages(context.channelId)) plugin.finishHistoricalTranslationSnapshot(context.channelId);
 					const historicalEntry = plugin.getHistoricalTranslationJobQueue(context.channelId, false);
 					const hasQueuedHistoricalForChannel = !!(historicalEntry && (historicalEntry.runningPromise || historicalEntry.jobs.length));
-					if (!hasQueuedHistoricalForChannel) plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: context.channelId, batch: loadedAutoTranslationStatus.batch || 1, total: 0, processed: 0});
+					if (!hasQueuedHistoricalForChannel) plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: context.channelId, batch: loadedTranslationStatusStore.getCurrentBatchNumber(), total: 0, processed: 0});
 				}
 			},
 			processMessages(plugin, e) {
@@ -4922,16 +4917,11 @@ module.exports = (_ => {
 			}
 
 			getLoadedAutoTranslationSeenCount (channelId) {
-				const seenMessages = channelId && loadedAutoTranslationSeenMessages[channelId];
-				return seenMessages ? Object.keys(seenMessages).length : 0;
+				return loadedTranslationStatusStore.getSeenCount(channelId);
 			}
 
 			markLoadedAutoTranslationMessageSeen (channelId, messageId) {
-				if (!channelId || !messageId) return false;
-				if (!loadedAutoTranslationSeenMessages[channelId]) loadedAutoTranslationSeenMessages[channelId] = {};
-				const wasSeen = !!loadedAutoTranslationSeenMessages[channelId][messageId];
-				loadedAutoTranslationSeenMessages[channelId][messageId] = true;
-				return wasSeen;
+				return loadedTranslationStatusStore.markMessageSeen(channelId, messageId);
 			}
 
 			hasStoredOriginalMessageClone (messageId) {
@@ -5295,22 +5285,7 @@ module.exports = (_ => {
 			}
 
 			getLoadedAutoTranslationStatusText (status) {
-				const total = Math.max(0, status && status.total || 0);
-				const processed = Math.max(0, Math.min(total || 0, status && status.processed || 0));
-				const displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0));
-				const skipped = Math.max(0, Math.min(total || 0, status && status.skipped || 0));
-				const failedValue = status && status.failed != null ? status.failed : status && status.aiDropped;
-				const failed = Math.max(0, failedValue || 0);
-				const retryable = Math.max(0, status && status.retryable || 0);
-				const batch = Math.max(1, status && status.batch || 1);
-				const extraText = `${skipped ? (this.isChineseUiLanguage() ? `\uff0c\u8df3\u8fc7 ${skipped}` : `, skipped ${skipped}`) : ""}${failed ? (this.isChineseUiLanguage() ? `\uff0c\u5931\u8d25 ${failed}` : `, failed ${failed}`) : ""}${retryable && retryable != failed ? (this.isChineseUiLanguage() ? `\uff0c\u5f85\u91cd\u8bd5 ${retryable}` : `, retry pending ${retryable}`) : ""}`;
-				if (status && status.done) {
-					if (!total) return failed || retryable ? (this.isChineseUiLanguage() ? `已加载翻译：失败 ${failed}，待重试 ${retryable}` : `Loaded translation: ${failed} failed, ${retryable} retry pending`) : (this.isChineseUiLanguage() ? "已加载翻译：开启，暂无待翻译" : "Loaded translation: on, no pending messages");
-					return this.isChineseUiLanguage() ? `已加载翻译：第 ${batch} 批完成，显示 ${displayed}/${total}${extraText}` : `Loaded translation: batch ${batch} done, shown ${displayed}/${total}${extraText}`;
-				}
-				if (status && status.collecting) return this.isChineseUiLanguage() ? `收集已加载：第 ${batch} 批 ${processed}/${total}${extraText}` : `Collecting loaded: batch ${batch} ${processed}/${total}${extraText}`;
-				if (!total) return this.isChineseUiLanguage() ? "已加载翻译：开启，等待消息" : "Loaded translation: on, waiting";
-				return this.isChineseUiLanguage() ? `翻译已加载：第 ${batch} 批 ${processed}/${total}，显示 ${displayed}${extraText}` : `Translating loaded: batch ${batch} ${processed}/${total}, shown ${displayed}${extraText}`;
+				return loadedTranslationStatusStore.getStatusText(status);
 			}
 
 			getLoadedAutoTranslationSkipReasonText (reason) {
@@ -5329,9 +5304,7 @@ module.exports = (_ => {
 			}
 
 			getLoadedAutoTranslationPreviewText (text) {
-				text = (text || "").replace(/\s+/g, " ").trim();
-				if (!text) return "";
-				return text.length > 24 ? `${text.slice(0, 24)}...` : text;
+				return loadedTranslationStatusStore.getPreviewText(text);
 			}
 
 			getLoadedAutoTranslationStatusTitleText (status) {
@@ -5352,10 +5325,7 @@ module.exports = (_ => {
 			}
 
 			getLoadedAutoTranslationInlineStatusText (channelId = null) {
-				const selectedChannelId = channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-				const statusChannelId = loadedAutoTranslationStatus && loadedAutoTranslationStatus.channelId;
-				if (loadedAutoTranslationStatus && (loadedAutoTranslationStatus.active || loadedAutoTranslationStatus.done) && (!statusChannelId || statusChannelId == "__global" || statusChannelId == selectedChannelId)) return this.getLoadedAutoTranslationStatusText(loadedAutoTranslationStatus);
-				return this.isChineseUiLanguage() ? "已加载消息自动翻译已开启，等待当前批次…" : "Loaded-message auto-translate is on; waiting for the current batch…";
+				return loadedTranslationStatusStore.getInlineStatusText(channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId());
 			}
 
 			updateInlineLoadedAutoTranslationStatusElements () {
@@ -5531,15 +5501,12 @@ module.exports = (_ => {
 			}
 
 			updateLoadedAutoTranslationStatus (updates = {}) {
-				loadedAutoTranslationStatus = Object.assign({}, loadedAutoTranslationStatus, updates);
-				if (!this.shouldShowLoadedAutoTranslationStatus(loadedAutoTranslationStatus)) {
+				const currentStatus = loadedTranslationStatusStore.update(updates);
+				if (!this.shouldShowLoadedAutoTranslationStatus(currentStatus)) {
 					this.removeLoadedAutoTranslationStatusElement();
 					return;
 				}
-				if (loadedAutoTranslationStatusHideTimer) {
-					clearTimeout(loadedAutoTranslationStatusHideTimer);
-					loadedAutoTranslationStatusHideTimer = null;
-				}
+				loadedTranslationStatusStore.cancelHide();
 				if (typeof document == "undefined" || !document.body) return;
 				this.attachAutoTranslationScrollWatcher();
 				this.ensureLoadedAutoTranslationStatusPositionWatcher();
@@ -5549,15 +5516,15 @@ module.exports = (_ => {
 					element.id = "DiscordAITranslator-loaded-status";
 					document.body.appendChild(element);
 				}
-				const retryableCount = Math.max(0, loadedAutoTranslationStatus.retryable || 0);
-				const showRetry = !loadedAutoTranslationStatus.active && retryableCount > 0;
+				const retryableCount = Math.max(0, currentStatus.retryable || 0);
+				const showRetry = !currentStatus.active && retryableCount > 0;
 				// Always normalize the status DOM. This removes legacy progress-line children left by earlier builds.
 				element.className = `translator-loaded-status-floating${showRetry ? " translator-loaded-status-retryable" : ""}`;
 				if (!element.querySelector(".translator-loaded-status-text") || element.querySelector(".translator-loaded-status-progress")) {
 					element.innerHTML = '<span class="translator-loaded-status-dot"></span><span class="translator-loaded-status-text"></span>';
 				}
 				const textElement = element.querySelector(".translator-loaded-status-text");
-				if (textElement) textElement.textContent = this.getLoadedAutoTranslationStatusText(loadedAutoTranslationStatus);
+				if (textElement) textElement.textContent = this.getLoadedAutoTranslationStatusText(currentStatus);
 				let retryButton = element.querySelector(".translator-loaded-status-retry");
 				if (showRetry) {
 					if (!retryButton) {
@@ -5570,36 +5537,30 @@ module.exports = (_ => {
 					retryButton.title = this.isChineseUiLanguage() ? `重试 ${retryableCount} 条失败消息` : `Retry ${retryableCount} failed messages`;
 					retryButton.onclick = event => {
 						if (event && event.stopPropagation) event.stopPropagation();
-						const retryResult = this.retryFailedHistoricalTranslations(loadedAutoTranslationStatus.channelId);
+						const retryResult = this.retryFailedHistoricalTranslations(currentStatus.channelId);
 						if (retryResult && typeof retryResult.catch == "function") retryResult.catch(_ => {});
 					};
 				}
 				else if (retryButton) retryButton.remove();
-				element.title = this.getLoadedAutoTranslationStatusTitleText(loadedAutoTranslationStatus);
+				element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus);
 				this.updateInlineLoadedAutoTranslationStatusElements();
 				this.positionLoadedAutoTranslationStatusElement(element);
 				requestAnimationFrame(_ => this.positionLoadedAutoTranslationStatusElement(element));
 			}
 
 			hideLoadedAutoTranslationStatus (delay = 1600) {
-				if (loadedAutoTranslationStatusHideTimer) clearTimeout(loadedAutoTranslationStatusHideTimer);
+				loadedTranslationStatusStore.cancelHide();
 				// In loaded-message mode the capsule is a persistent channel status, not a transient toast.
 				// Keep it visible while the feature is enabled; clearLoadedAutoTranslationStatus removes it when disabled.
-				if (this.shouldShowLoadedAutoTranslationStatus(loadedAutoTranslationStatus)) {
-					loadedAutoTranslationStatusHideTimer = null;
+				if (this.shouldShowLoadedAutoTranslationStatus(loadedTranslationStatusStore.getStatus())) {
 					this.updateLoadedAutoTranslationStatus({});
 					return;
 				}
-				loadedAutoTranslationStatusHideTimer = setTimeout(_ => {
-					loadedAutoTranslationStatusHideTimer = null;
-					this.removeLoadedAutoTranslationStatusElement();
-				}, delay);
+				loadedTranslationStatusStore.scheduleHide(() => this.removeLoadedAutoTranslationStatusElement(), delay);
 			}
 
 			clearLoadedAutoTranslationStatus () {
-				if (loadedAutoTranslationStatusHideTimer) clearTimeout(loadedAutoTranslationStatusHideTimer);
-				loadedAutoTranslationStatusHideTimer = null;
-				loadedAutoTranslationStatus = {active: false, collecting: false, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: ""};
+				loadedTranslationStatusStore.clear();
 				const element = typeof document != "undefined" && document.getElementById("DiscordAITranslator-loaded-status");
 				if (element) element.remove();
 				this.detachLoadedAutoTranslationStatusPositionWatcher();
@@ -6290,7 +6251,7 @@ module.exports = (_ => {
 					collecting: true,
 					done: false,
 					channelId,
-					batch: (loadedAutoTranslationStatus.channelId == channelId ? loadedAutoTranslationStatus.batch || 0 : 0) + 1,
+					batch: loadedTranslationStatusStore.getNextBatchNumber(channelId),
 					total: retryItems.length,
 					processed: 0,
 					displayed: 0,
@@ -6455,9 +6416,10 @@ module.exports = (_ => {
 				if (invalidated) {
 					delete queuedAutoTranslations[messageId];
 					this.clearCachedTranslation(messageId);
-					if (loadedAutoTranslationStatus.channelId == channelId && loadedAutoTranslationStatus.done) {
+					const repairStatus = loadedTranslationStatusStore.getStatus();
+					if (repairStatus.channelId == channelId && repairStatus.done) {
 						const failedCount = this.getFailedHistoricalTranslationCount(channelId);
-						const visibleFailedCount = Math.min(loadedAutoTranslationStatus.failed || 0, failedCount);
+						const visibleFailedCount = Math.min(repairStatus.failed || 0, failedCount);
 						this.updateLoadedAutoTranslationStatus({failed: visibleFailedCount, retryable: failedCount, aiDropped: visibleFailedCount});
 					}
 				}
