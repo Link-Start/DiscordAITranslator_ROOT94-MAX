@@ -1342,3 +1342,32 @@ test("one historical job performs one acknowledged display commit", async () => 
 	assert.deepEqual(commits[0].map(result => result.messageId), ["100", "200", "300"]);
 	assert.equal(commits[0].every(result => result.status === "translated" && result.generation === 1), true);
 });
+
+test("the historical repair path honours the provider backoff instead of throwing", async () => {
+	// Both repair entry points opened with this.awaitProviderBackoff(). That delegated to
+	// receivedTranslationRuntime, which never defined it, so the batch repair threw
+	// synchronously and the per-item repair rejected its own promise - the repair pass
+	// for a failed historical batch could never run. The backoff window belongs to the
+	// provider client, which is what opens it on a 429 or 5xx.
+	const plugin = createPluginInstance({callSetLanguages: false});
+	const waits = [];
+	plugin.providerClientInstance = {
+		awaitBackoff: () => {waits.push("awaited"); return Promise.resolve();},
+		scheduleBackoff: ms => {waits.push(ms); return ms;}
+	};
+
+	assert.equal(plugin.scheduleAutoTranslationBackoff(2500), 2500);
+	assert.deepEqual(waits, [2500]);
+
+	const job = {channelId: "channel-repair", generation: 1, items: new Map()};
+	plugin.isHistoricalTranslationJobCurrent = () => true;
+	plugin.getHistoricalAiBatchEngineKey = () => "deepseek";
+	let requested = null;
+	plugin.requestAiBatchTranslation = (engineKey, items) => {requested = {engineKey, items}; return Promise.resolve("batched");};
+
+	const result = await plugin.repairHistoricalTranslationJobBatch([{message: {id: "1"}}], job);
+
+	assert.equal(result, "batched");
+	assert.equal(requested.engineKey, "deepseek");
+	assert.deepEqual(waits, [2500, "awaited"]);
+});
