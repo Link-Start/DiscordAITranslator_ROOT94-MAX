@@ -393,15 +393,11 @@ module.exports = (_ => {
 		var translationEnabledStates = {globalDefault: false, channelOverrides: {}};
 		var translatedMessages = {}, oldMessages = {};
 		var suppressedAutoTranslations = {};
-		var translationRerenderTimer = null;
-		var deferredTextAreaRerenderTimer = null;
 		var replyPreviewTranslations = {};
 		var queuedReplyPreviewTranslations = {};
 		var autoTranslationEligibleReplyPreviewMessages = {};
-		var replyPreviewRenderMessageIds = {};
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
-		var deferredTranslationRerenderPending = false;
 		var historicalTranslationJobQueues = new Map();
 		var historicalTranslationJobSequence = 0;
 		var historicalTranslationRuntimeGeneration = 0;
@@ -409,7 +405,6 @@ module.exports = (_ => {
 		const channelTitleStore = createChannelTitleStore();
 		const loadedTranslationStatusStore = createLoadedTranslationStatusStore({isChineseUiLanguage: () => _this && _this.isChineseUiLanguage()});
 		var pluginRuntimeActive = true;
-		var deferredSettingsRerenderTimer = null;
 		const AUTO_TRANSLATION_RERENDER_DELAY = 120;
 		const AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500;
 		// A live burst drains into one AI batch request instead of one request per
@@ -2138,12 +2133,9 @@ module.exports = (_ => {
 				this.detachAutoTranslationInputActivityWatcher();
 				this.detachAutoTranslationScrollWatcher();
 				this.ensureTranslationCacheStore().cancelPendingSave();
-				if (translationRerenderTimer) clearTimeout(translationRerenderTimer);
-				if (deferredTextAreaRerenderTimer) clearTimeout(deferredTextAreaRerenderTimer);
+				this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers();
 				this.ensureLiveTranslationQueue().cancelQueueRetry();
-				if (deferredSettingsRerenderTimer) clearTimeout(deferredSettingsRerenderTimer);
 				this.ensureMessageViewportStore().clearManualScrollLock();
-				deferredSettingsRerenderTimer = null;
 				// Restore store-owned automatic records synchronously before legacy cleanup so the
 				// final rerender paints originals; onStop must not reload settings via forceUpdateAll.
 				this.clearReceivedDisplayFlushQueue();
@@ -2155,8 +2147,6 @@ module.exports = (_ => {
 				this.ensureLiveTranslationQueue().clearAllQueuedMessages();
 				queuedReplyPreviewTranslations = {};
 				autoTranslationEligibleReplyPreviewMessages = {};
-				replyPreviewRenderMessageIds = {};
-				deferredTranslationRerenderPending = false;
 				this.ensureLiveTranslationQueue().setBusyTranslating(false);
 				this.ensureLiveTranslationQueue().setLiveAutoTranslating(false);
 				this.clearLoadedAutoTranslationStatus();
@@ -3408,7 +3398,7 @@ module.exports = (_ => {
 			}
 		
 			onSettingsClosed () {
-				if (deferredTranslationRerenderPending) this.flushDeferredTranslationRerender();
+				if (this.ensureReceivedDisplayRepaintScheduler().hasDeferredFullRepaint()) this.flushDeferredTranslationRerender();
 				if (this.SettingsUpdated) {
 					delete this.SettingsUpdated;
 					this.forceUpdateAll();
@@ -4327,10 +4317,6 @@ module.exports = (_ => {
 				return !!(channelId && messageId && autoTranslationEligibleReplyPreviewMessages[channelId] && autoTranslationEligibleReplyPreviewMessages[channelId][messageId]);
 			}
 
-			cleanupReplyPreviewRenderMarks () {
-				replyPreviewRenderMessageIds = {};
-			}
-
 			markReplyPreviewRenderMessage (message) {
 				if (message && typeof message == "object") {
 					try {message.__DiscordAITranslatorReplyPreview = true;}
@@ -4750,48 +4736,11 @@ module.exports = (_ => {
 			}
 
 			scheduleTranslationRerender (options = {}) {
-				const config = typeof options == "boolean" ? {batched: options} : Object.assign({batched: false, allowWhileSettings: false, allowWhileTyping: false}, options);
-				// Hard rule: while plugin settings/quick strategy panels are open, loaded-history
-				// translation may continue updating state, but it must not repaint the chat list.
-				if (!config.allowWhileSettings && this.isTranslatorSettingsSurfaceOpen()) {
-					deferredTranslationRerenderPending = true;
-					if (!deferredSettingsRerenderTimer) deferredSettingsRerenderTimer = setTimeout(_ => {
-						deferredSettingsRerenderTimer = null;
-						this.scheduleTranslationRerender({batched: true});
-					}, 1000);
-					return;
-				}
-				if (!config.allowWhileTyping && this.isChannelTextAreaFocused()) {
-					if (deferredTextAreaRerenderTimer) clearTimeout(deferredTextAreaRerenderTimer);
-					deferredTextAreaRerenderTimer = setTimeout(_ => {
-						deferredTextAreaRerenderTimer = null;
-						this.scheduleTranslationRerender(Object.assign({}, config, {batched: true}));
-					}, 450);
-					return;
-				}
-				if (deferredTextAreaRerenderTimer) {
-					clearTimeout(deferredTextAreaRerenderTimer);
-					deferredTextAreaRerenderTimer = null;
-				}
-				deferredTranslationRerenderPending = false;
-				if (!config.batched) {
-					if (translationRerenderTimer) clearTimeout(translationRerenderTimer);
-					translationRerenderTimer = null;
-					this.rerenderMessagesWithScrollPreserved();
-					return;
-				}
-				if (translationRerenderTimer) return;
-				const rerenderDelay = this.isViewingMessageHistory() ? AUTO_TRANSLATION_HISTORY_RERENDER_DELAY : AUTO_TRANSLATION_RERENDER_DELAY;
-				translationRerenderTimer = setTimeout(_ => {
-					translationRerenderTimer = null;
-					this.rerenderMessagesWithScrollPreserved();
-				}, rerenderDelay);
+				this.ensureReceivedDisplayRepaintScheduler().scheduleFullRepaint(options);
 			}
 
 			flushDeferredTranslationRerender () {
-				if (!deferredTranslationRerenderPending) return;
-				deferredTranslationRerenderPending = false;
-				this.scheduleTranslationRerender({batched: true});
+				this.ensureReceivedDisplayRepaintScheduler().flushDeferredFullRepaint();
 			}
 
 			getDisplayedTranslationChannelId (messageId) {
@@ -4837,8 +4786,6 @@ module.exports = (_ => {
 				if (!channelId) {
 					queuedReplyPreviewTranslations = {};
 					autoTranslationEligibleReplyPreviewMessages = {};
-					replyPreviewRenderMessageIds = {};
-					deferredTranslationRerenderPending = false;
 					loadedTranslationStatusStore.resetSeen(null);
 					this.clearLoadedAutoTranslationStatus();
 					return;
@@ -5858,10 +5805,7 @@ module.exports = (_ => {
 				this.clearLoadedAutoTranslationStatus();
 				this.ensureLiveTranslationQueue().setLiveAutoTranslating(false);
 				replyPreviewTranslations = {};
-				if (translationRerenderTimer) clearTimeout(translationRerenderTimer);
-				translationRerenderTimer = null;
-				if (deferredSettingsRerenderTimer) clearTimeout(deferredSettingsRerenderTimer);
-				deferredSettingsRerenderTimer = null;
+				this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers();
 				
 				this.setLanguages();
 				BDFDB.PatchUtils.forceAllUpdates(this);
@@ -6322,7 +6266,10 @@ module.exports = (_ => {
 					renderMessages: messageIds => this.ensureReceivedDisplayRuntime().renderMessages(messageIds),
 					canRepaintNow: () => this.canRepaintReceivedDisplayNow(),
 					isViewingHistory: () => this.isViewingMessageHistory(),
-					lastRenderUsedFallback: () => this.ensureReceivedDisplayRuntime().lastRenderUsedFallback()
+					lastRenderUsedFallback: () => this.ensureReceivedDisplayRuntime().lastRenderUsedFallback(),
+					isSettingsSurfaceOpen: () => this.isTranslatorSettingsSurfaceOpen(),
+					isTextAreaFocused: () => this.isChannelTextAreaFocused(),
+					repaintAll: () => this.rerenderMessagesWithScrollPreserved()
 				});
 				return this.receivedDisplayRepaintSchedulerInstance;
 			}
