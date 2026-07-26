@@ -2699,14 +2699,19 @@ ${sample.text}` }] }]
 ${sample.text}`
                   }],
                   temperature: 0,
-                  max_tokens: 32
+                  // Room for a reasoning model to think and still answer. At 32 the
+                  // whole budget went to reasoning_content, content came back empty,
+                  // and a perfectly good configuration reported validate_failed.
+                  max_tokens: 512
                 })
               }, (error, response, body) => {
                 if (!error && body && response && response && response.statusCode == 200)
                   try {
                     body = JSON.parse(body);
-                    let translation = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
-                    return finish(!!translation, translation ? successMessage(translation.trim()) : failMessage(response && response.statusCode, body), normalized);
+                    let choice = body && body.choices && body.choices[0], message = choice && choice.message, translation = message && message.content;
+                    if (translation && translation.trim()) return finish(!0, successMessage(translation.trim()), normalized);
+                    let answeredWithoutContent = !!(message && message.reasoning_content) || !!(choice && choice.finish_reason == "length");
+                    return finish(answeredWithoutContent, answeredWithoutContent ? successMessage("") : failMessage(response && response.statusCode, body), normalized);
                   } catch {
                   }
                 return finish(!1, failMessage(response && response.statusCode, body), normalized);
