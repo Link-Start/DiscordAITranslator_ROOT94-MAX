@@ -2070,6 +2070,1287 @@ var require_loaded_translation_status_store = __commonJS({
   }
 });
 
+// src/cache/translation-cache-store.js
+var require_translation_cache_store = __commonJS({
+  "src/cache/translation-cache-store.js"(exports2, module2) {
+    var PERSISTED_RECEIVED_SKIP_REASONS = Object.freeze(["same_language", "too_similar", "ai_skip_signal", "source_filter"]), SIGNATURE_DIGEST_PREFIX = "h1:";
+    function createTranslationCacheStore({
+      now = Date.now,
+      setTimeout: setTimeout2,
+      clearTimeout: clearTimeout2,
+      // Persistence. loadCache returns whatever is on disk, including garbage.
+      loadCache = /* @__PURE__ */ __name(() => null, "loadCache"),
+      saveCache = /* @__PURE__ */ __name(() => {
+      }, "saveCache"),
+      // Message shape helpers owned by the received-translation runtime.
+      extractOriginalContentData = /* @__PURE__ */ __name(() => ({}), "extractOriginalContentData"),
+      createSignature = /* @__PURE__ */ __name(() => "", "createSignature"),
+      normalizeStoredTranslation = /* @__PURE__ */ __name((translation) => translation, "normalizeStoredTranslation"),
+      extractLegacyDisplayedParts = /* @__PURE__ */ __name(() => ({}), "extractLegacyDisplayedParts"),
+      // Policy and display seams. A cache lookup has no business deciding any of these,
+      // but the lookup it replaces did, so they are injected rather than reimplemented.
+      refreshTranslationDisplay = /* @__PURE__ */ __name((translation) => translation, "refreshTranslationDisplay"),
+      isTranslationResultTooSimilar = /* @__PURE__ */ __name(() => !1, "isTranslationResultTooSimilar"),
+      shouldSkipBeforeRequest = /* @__PURE__ */ __name(() => !1, "shouldSkipBeforeRequest"),
+      shouldKeepAutoTranslatedResult = /* @__PURE__ */ __name(() => !0, "shouldKeepAutoTranslatedResult"),
+      getSkipPreviewText = /* @__PURE__ */ __name((text) => text == null ? "" : String(text), "getSkipPreviewText")
+    } = {}) {
+      let cache = {}, saveTimer = null;
+      function hashSignature(signature) {
+        let text = String(signature ?? ""), hash = 2166136261;
+        for (let index = 0; index < text.length; index++)
+          hash ^= text.charCodeAt(index), hash = Math.imul(hash, 16777619) >>> 0;
+        return `${SIGNATURE_DIGEST_PREFIX}${hash.toString(36)}:${text.length.toString(36)}`;
+      }
+      __name(hashSignature, "hashSignature");
+      function matchesSignature(entry, signature) {
+        return !entry || entry.signature == null ? !1 : String(entry.signature).indexOf(SIGNATURE_DIGEST_PREFIX) !== 0 ? entry.signature == signature : entry.signature == hashSignature(signature);
+      }
+      __name(matchesSignature, "matchesSignature");
+      function scheduleSave() {
+        saveTimer && clearTimeout2(saveTimer), saveTimer = setTimeout2((_) => {
+          saveCache(cache), saveTimer = null;
+        }, 300);
+      }
+      __name(scheduleSave, "scheduleSave");
+      function cancelPendingSave() {
+        saveTimer && clearTimeout2(saveTimer), saveTimer = null;
+      }
+      __name(cancelPendingSave, "cancelPendingSave");
+      function evictOldestBeyondLimit() {
+        let cacheKeys = Object.keys(cache);
+        cacheKeys.length <= 500 || cacheKeys.sort((keyA, keyB) => (cache[keyA].cachedAt || 0) - (cache[keyB].cachedAt || 0)).slice(0, cacheKeys.length - 500).forEach((key) => delete cache[key]);
+      }
+      __name(evictOldestBeyondLimit, "evictOldestBeyondLimit");
+      function dropEntry(messageId) {
+        delete cache[messageId], scheduleSave();
+      }
+      __name(dropEntry, "dropEntry");
+      function getCachedTranslation(message, channelId, originalContentData = null) {
+        if (!message || !cache[message.id]) return null;
+        let sourceData = originalContentData || extractOriginalContentData(message), signature = createSignature(message, channelId, sourceData);
+        if (!matchesSignature(cache[message.id], signature) || cache[message.id].skipped) return null;
+        let cachedTranslation = Object.assign({ signature, channelId }, cache[message.id].translation), beforeSerialized = JSON.stringify(cachedTranslation || {});
+        if (cachedTranslation = normalizeStoredTranslation(cachedTranslation), !cachedTranslation.originalContent && sourceData && sourceData.content && (cachedTranslation.originalContent = String(sourceData.content)), !cachedTranslation.translatedContent && cachedTranslation.content && (cachedTranslation.translatedContent = extractLegacyDisplayedParts(cachedTranslation.content).translatedContent || cachedTranslation.content), !cachedTranslation.translatedContent || (sourceData && sourceData.content || "").trim() && !String(cachedTranslation.originalContent || "").trim()) return null;
+        if (cachedTranslation = refreshTranslationDisplay(cachedTranslation), isTranslationResultTooSimilar(cachedTranslation) || shouldSkipBeforeRequest(sourceData, channelId) || !shouldKeepAutoTranslatedResult(cachedTranslation, channelId))
+          return dropEntry(message.id), null;
+        if (JSON.stringify(cachedTranslation || {}) != beforeSerialized) {
+          let upgradedTranslation = Object.assign({}, cachedTranslation);
+          delete upgradedTranslation.signature, cache[message.id].translation = upgradedTranslation, cache[message.id].signature = hashSignature(signature), cache[message.id].cachedAt = cache[message.id].cachedAt || now(), scheduleSave();
+        }
+        return cachedTranslation;
+      }
+      __name(getCachedTranslation, "getCachedTranslation");
+      function getCachedSkipDecision(message, channelId, originalContentData = null) {
+        if (!message || !cache[message.id]) return null;
+        let sourceData = originalContentData || extractOriginalContentData(message), signature = createSignature(message, channelId, sourceData);
+        if (!matchesSignature(cache[message.id], signature)) return null;
+        let skipped = cache[message.id].skipped;
+        return !skipped || !skipped.reason ? null : skipped.policyVersion !== 2 ? (dropEntry(message.id), null) : Object.assign({ signature, channelId }, skipped);
+      }
+      __name(getCachedSkipDecision, "getCachedSkipDecision");
+      function shouldPersistSkipDecision(reason) {
+        return PERSISTED_RECEIVED_SKIP_REASONS.includes(reason);
+      }
+      __name(shouldPersistSkipDecision, "shouldPersistSkipDecision");
+      function persistTranslation(messageId, signature, translation) {
+        let storedTranslation = Object.assign({}, translation);
+        delete storedTranslation.signature, cache[messageId] = {
+          signature: hashSignature(signature),
+          cachedAt: now(),
+          translation: storedTranslation
+        }, evictOldestBeyondLimit(), scheduleSave();
+      }
+      __name(persistTranslation, "persistTranslation");
+      function persistSkipDecision(messageId, signature, reason, preview = "") {
+        !messageId || !signature || !reason || !shouldPersistSkipDecision(reason) || (cache[messageId] = {
+          signature: hashSignature(signature),
+          cachedAt: now(),
+          skipped: {
+            policyVersion: 2,
+            reason,
+            preview: getSkipPreviewText(preview)
+          }
+        }, evictOldestBeyondLimit(), scheduleSave());
+      }
+      __name(persistSkipDecision, "persistSkipDecision");
+      function clear(messageId) {
+        !messageId || !cache[messageId] || dropEntry(messageId);
+      }
+      __name(clear, "clear");
+      function loadPersisted() {
+        let loaded = loadCache();
+        return cache = loaded && typeof loaded == "object" && !Array.isArray(loaded) ? loaded : {}, cache;
+      }
+      return __name(loadPersisted, "loadPersisted"), Object.freeze({
+        getCachedTranslation,
+        getCachedSkipDecision,
+        persistTranslation,
+        persistSkipDecision,
+        shouldPersistSkipDecision,
+        clear,
+        hasEntry(messageId) {
+          return !!(messageId && cache[messageId]);
+        },
+        getEntry(messageId) {
+          return messageId && cache[messageId] || null;
+        },
+        scheduleSave,
+        // Used when the plugin stops: the pending save is abandoned, not flushed, which
+        // is what the legacy shutdown did.
+        cancelPendingSave,
+        loadPersisted,
+        hashSignature,
+        matchesSignature,
+        // Writes an entry with a raw, undigested signature, the shape a pre-digest install
+        // has on disk. Only the compatibility tests need it.
+        seedRawEntryForTest(messageId, signature, translation) {
+          cache[messageId] = { signature, cachedAt: now(), translation: Object.assign({}, translation) };
+        }
+      });
+    }
+    __name(createTranslationCacheStore, "createTranslationCacheStore");
+    module2.exports = {
+      MAX_TRANSLATION_CACHE_ENTRIES: 500,
+      RECEIVED_SKIP_CACHE_POLICY_VERSION: 2,
+      TRANSLATION_CACHE_SAVE_DEBOUNCE_MS: 300,
+      PERSISTED_RECEIVED_SKIP_REASONS,
+      SIGNATURE_DIGEST_PREFIX,
+      createTranslationCacheStore
+    };
+  }
+});
+
+// src/providers/provider-client.js
+var require_provider_client = __commonJS({
+  "src/providers/provider-client.js"(exports2, module2) {
+    var AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__", googleLanguages = ["af", "am", "ar", "az", "be", "bg", "bn", "bs", "ca", "ceb", "co", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et", "eu", "fa", "fi", "fr", "fy", "ga", "gd", "gl", "gu", "ha", "haw", "hi", "hmn", "hr", "ht", "hu", "hy", "id", "ig", "is", "it", "iw", "ja", "jw", "ka", "kk", "km", "kn", "ko", "ku", "ky", "la", "lb", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "no", "ny", "or", "pa", "pl", "ps", "pt", "ro", "ru", "rw", "sd", "si", "sk", "sl", "sm", "sn", "so", "sq", "sr", "st", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "ug", "uk", "ur", "uz", "vi", "xh", "yi", "yo", "zh-CN", "zh-TW", "zu"], translationEngines = {
+      googleapi: {
+        name: "Google",
+        auto: !0,
+        funcName: "googleApiTranslate",
+        languages: googleLanguages
+      },
+      googlecloud: {
+        name: "Google Cloud Translation",
+        auto: !0,
+        funcName: "googleCloudTranslate",
+        languages: googleLanguages,
+        key: "REDACTED_GOOGLE_API_KEY",
+        endpoint: "https://translation.googleapis.com/language/translate/v2",
+        model: "nmt"
+      },
+      microsoft: {
+        name: "Azure Translator",
+        auto: !0,
+        funcName: "microsoftTranslate",
+        languages: ["af", "am", "ar", "az", "ba", "bg", "bn", "bs", "ca", "cs", "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi", "fil", "fr", "fr-CA", "ga", "gl", "gu", "ha", "he", "hi", "hr", "ht", "hu", "hy", "id", "ig", "is", "it", "ja", "ka", "kk", "km", "kn", "ko", "ku", "ky", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mr", "ms", "mt", "my", "ne", "nl", "or", "pa", "pl", "ps", "pt", "pt-PT", "ro", "ru", "rw", "sd", "si", "sk", "sl", "sm", "sn", "so", "sq", "st", "sv", "sw", "ta", "te", "th", "tk", "tr", "tt", "ug", "uk", "ur", "uz", "vi", "xh", "yo", "zh-CN", "zh-TW", "zu"],
+        parser: {
+          "zh-CN": "zh-Hans",
+          "zh-TW": "zh-Hant"
+        },
+        key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        endpoint: "https://api.cognitive.microsofttranslator.com/translate"
+      },
+      deepl: {
+        name: "DeepL",
+        auto: !0,
+        funcName: "deepLTranslate",
+        languages: ["bg", "cs", "da", "de", "en", "el", "es", "et", "fi", "fr", "hu", "id", "it", "ja", "ko", "lt", "lv", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "zh"],
+        premium: !0,
+        key: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
+      },
+      deepseek: {
+        name: "DeepSeek",
+        auto: !0,
+        funcName: "deepSeekTranslate",
+        languages: googleLanguages,
+        key: "REDACTED_OPENAI_API_KEY",
+        endpoint: "https://api.deepseek.com/chat/completions",
+        model: "deepseek-v3"
+      },
+      openai: {
+        name: "OpenAI",
+        auto: !0,
+        funcName: "openAiTranslate",
+        languages: googleLanguages,
+        key: "REDACTED_OPENAI_API_KEY",
+        endpoint: "https://api.openai.com/v1/responses",
+        model: "gpt-5.6-luna"
+      },
+      gemini: {
+        name: "Google Gemini",
+        auto: !0,
+        funcName: "geminiTranslate",
+        languages: googleLanguages,
+        key: "REDACTED_GOOGLE_API_KEY",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta/models",
+        model: "gemini-2.5-flash"
+      },
+      oaicompat: {
+        name: "OpenAI Compatible",
+        auto: !0,
+        funcName: "openAiCompatibleTranslate",
+        languages: googleLanguages,
+        key: "REDACTED_OPENAI_API_KEY",
+        endpoint: "https://your-provider.example/v1/chat/completions",
+        model: "your-model-id"
+      },
+      itranslate: {
+        name: "iTranslate",
+        auto: !0,
+        funcName: "iTranslateTranslate",
+        languages: [...new Set(["af", "ar", "az", "be", "bg", "bn", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et", "eu", "fa", "fi", "fil", "fr", "ga", "gl", "gu", "ha", "he", "hi", "hmn", "hr", "ht", "hu", "hy", "id", "ig", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "no", "ny", "pa", "pl", "pt-BR", "pt-PT", "ro", "ru", "si", "sk", "sl", "so", "sq", "sr", "st", "su", "sv", "sw", "ta", "te", "tg", "th", "tr", "uk", "ur", "uz", "vi", "we", "yi", "yo", "zh-CN", "zh-TW", "zu"].concat(googleLanguages))].sort(),
+        key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      yandex: {
+        name: "Yandex",
+        auto: !0,
+        funcName: "yandexTranslate",
+        languages: ["af", "am", "ar", "az", "ba", "be", "bg", "bn", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et", "eu", "fa", "fi", "fr", "ga", "gd", "gl", "gu", "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jv", "ka", "kk", "km", "kn", "ko", "ky", "la", "lb", "lo", "lt", "lv", "mg", "mhr", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "no", "pa", "pap", "pl", "pt", "ro", "ru", "si", "sk", "sl", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tl", "tr", "tt", "udm", "uk", "ur", "uz", "vi", "xh", "yi", "zh"],
+        key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      papago: {
+        name: "Papago",
+        auto: !0,
+        funcName: "papagoTranslate",
+        languages: ["en", "es", "fr", "id", "ja", "ko", "th", "vi", "zh-CN", "zh-TW"],
+        key: "xxxxxxxxxxxxxxxxxxxx xxxxxxxxxx"
+      },
+      baidu: {
+        name: "Baidu",
+        auto: !0,
+        funcName: "baiduTranslate",
+        languages: ["ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hu", "it", "ja", "ko", "nl", "pl", "pt", "ro", "ru", "sl", "sv", "th", "vi", "zh", "zh-CN", "zh-TW"],
+        parser: {
+          ar: "ara",
+          bg: "bul",
+          da: "dan",
+          es: "spa",
+          et: "est",
+          fi: "fin",
+          fr: "fra",
+          ja: "jp",
+          ko: "kor",
+          ro: "rom",
+          sl: "slo",
+          sv: "swe",
+          vi: "vie",
+          zh: "wyw",
+          "zh-CN": "zh",
+          "zh-TW": "cht"
+        },
+        key: "xxxxxxxxxx xxxxxxxxxxxxxxxxxxxx"
+      }
+    }, enginePortals = {
+      googleapi: {
+        primaryUrl: "https://translate.google.com/",
+        primaryLabelZh: "打开 Google 翻译",
+        primaryLabelEn: "Open Google Translate",
+        hintZh: "Google 默认模式无需单独购买 API，可直接使用。",
+        hintEn: "Google default mode does not require a separate paid API."
+      },
+      googlecloud: {
+        primaryUrl: "https://cloud.google.com/free?hl=zh-cn",
+        primaryLabelZh: "注册 / 开通 Google Cloud",
+        primaryLabelEn: "Sign up for Google Cloud",
+        secondaryUrl: "https://cloud.google.com/translate?hl=zh-cn",
+        secondaryLabelZh: "查看文档 / 定价",
+        secondaryLabelEn: "Docs / Pricing"
+      },
+      microsoft: {
+        primaryUrl: "https://azure.microsoft.com/zh-cn/free/",
+        primaryLabelZh: "注册 / 开通 Azure",
+        primaryLabelEn: "Sign up for Azure",
+        secondaryUrl: "https://azure.microsoft.com/zh-cn/products/ai-foundry/tools/translator",
+        secondaryLabelZh: "查看文档 / 产品页",
+        secondaryLabelEn: "Docs / Product"
+      },
+      deepl: {
+        primaryUrl: "https://www.deepl.com/pro-api",
+        primaryLabelZh: "注册 / 购买 DeepL API",
+        primaryLabelEn: "Get DeepL API",
+        secondaryUrl: "https://www.deepl.com/pro-api",
+        secondaryLabelZh: "查看定价 / 文档",
+        secondaryLabelEn: "Pricing / Docs"
+      },
+      deepseek: {
+        primaryUrl: "https://platform.deepseek.com/api_keys",
+        primaryLabelZh: "注册 / 获取 DeepSeek API Key",
+        primaryLabelEn: "Get DeepSeek API Key",
+        secondaryUrl: "https://api-docs.deepseek.com/zh-cn/",
+        secondaryLabelZh: "查看文档 / 模型价格",
+        secondaryLabelEn: "Docs / Pricing"
+      },
+      openai: {
+        primaryUrl: "https://platform.openai.com/api-keys",
+        primaryLabelZh: "获取 OpenAI API Key",
+        primaryLabelEn: "Get OpenAI API Key",
+        secondaryUrl: "https://developers.openai.com/api/docs/guides/migrate-to-responses",
+        secondaryLabelZh: "查看 Responses API 文档",
+        secondaryLabelEn: "Responses API Docs"
+      },
+      gemini: {
+        primaryUrl: "https://aistudio.google.com/app/apikey",
+        primaryLabelZh: "获取 Gemini API Key",
+        primaryLabelEn: "Get Gemini API Key",
+        secondaryUrl: "https://ai.google.dev/gemini-api/docs",
+        secondaryLabelZh: "查看 Gemini API 文档",
+        secondaryLabelEn: "Gemini API Docs"
+      },
+      oaicompat: {
+        hintZh: "填写你自建或第三方 OpenAI 兼容服务的 API Key、接口地址和模型名。",
+        hintEn: "Enter the API key, endpoint, and model for your self-hosted or third-party OpenAI-compatible service."
+      },
+      itranslate: {
+        primaryUrl: "https://developer.itranslate.com/",
+        primaryLabelZh: "打开 iTranslate 开发者入口",
+        primaryLabelEn: "Open iTranslate Developer Portal"
+      },
+      yandex: {
+        primaryUrl: "https://aistudio.yandex.ru/en/model-gallery#services",
+        primaryLabelZh: "打开 Yandex 官方入口",
+        primaryLabelEn: "Open Yandex Portal"
+      },
+      papago: {
+        primaryUrl: "https://developers.naver.com/main/",
+        primaryLabelZh: "打开 Naver Developers",
+        primaryLabelEn: "Open Naver Developers"
+      },
+      baidu: {
+        primaryUrl: "https://fanyi-api.baidu.com/",
+        primaryLabelZh: "打开百度翻译开放平台",
+        primaryLabelEn: "Open Baidu Translate Open Platform"
+      }
+    }, CREDENTIAL_REQUIRED_ENGINES = ["microsoft", "googlecloud", "deepl", "deepseek", "openai", "gemini", "oaicompat"], VALIDATABLE_ENGINES = ["googlecloud", "microsoft", "deepl", "deepseek", "openai", "gemini", "oaicompat"], AI_MODEL_ENGINES = ["deepseek", "openai", "gemini", "oaicompat"];
+    function MD5(e) {
+      function h(a2, b2) {
+        var e2 = a2 & 2147483648, f2 = b2 & 2147483648, c2 = a2 & 1073741824, d2 = b2 & 1073741824, g = (a2 & 1073741823) + (b2 & 1073741823);
+        return c2 & d2 ? g ^ 2147483648 ^ e2 ^ f2 : c2 | d2 ? g & 1073741824 ? g ^ 3221225472 ^ e2 ^ f2 : g ^ 1073741824 ^ e2 ^ f2 : g ^ e2 ^ f2;
+      }
+      __name(h, "h");
+      function k(a2, b2, c2, d2, e2, f2, g) {
+        return a2 = h(a2, h(h(b2 & c2 | ~b2 & d2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
+      }
+      __name(k, "k");
+      function l(a2, b2, c2, d2, e2, f2, g) {
+        return a2 = h(a2, h(h(b2 & d2 | c2 & ~d2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
+      }
+      __name(l, "l");
+      function m(a2, b2, d2, c2, e2, f2, g) {
+        return a2 = h(a2, h(h(b2 ^ d2 ^ c2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
+      }
+      __name(m, "m");
+      function n(a2, b2, d2, c2, e2, f2, g) {
+        return a2 = h(a2, h(h(d2 ^ (b2 | ~c2), e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
+      }
+      __name(n, "n");
+      function p(a2) {
+        var b2 = "", d2 = "", c2;
+        for (c2 = 0; 3 >= c2; c2++) d2 = a2 >>> 8 * c2 & 255, d2 = "0" + d2.toString(16), b2 += d2.substr(d2.length - 2, 2);
+        return b2;
+      }
+      __name(p, "p");
+      var f = [], q, r, s, t, a, b, c, d;
+      for (e = (function(a2) {
+        a2 = a2.replace(/\r\n/g, `
+`);
+        for (var b2 = "", d2 = 0; d2 < a2.length; d2++) {
+          var c2 = a2.charCodeAt(d2);
+          128 > c2 ? b2 += String.fromCharCode(c2) : (127 < c2 && 2048 > c2 ? b2 += String.fromCharCode(c2 >> 6 | 192) : (b2 += String.fromCharCode(c2 >> 12 | 224), b2 += String.fromCharCode(c2 >> 6 & 63 | 128)), b2 += String.fromCharCode(c2 & 63 | 128));
+        }
+        return b2;
+      })(e), f = (function(b2) {
+        var a2, c2 = b2.length;
+        a2 = c2 + 8;
+        for (var d2 = 16 * ((a2 - a2 % 64) / 64 + 1), e2 = Array(d2 - 1), f2 = 0, g = 0; g < c2; ) a2 = (g - g % 4) / 4, f2 = g % 4 * 8, e2[a2] |= b2.charCodeAt(g) << f2, g++;
+        return a2 = (g - g % 4) / 4, e2[a2] |= 128 << g % 4 * 8, e2[d2 - 2] = c2 << 3, e2[d2 - 1] = c2 >>> 29, e2;
+      })(e), a = 1732584193, b = 4023233417, c = 2562383102, d = 271733878, e = 0; e < f.length; e += 16) q = a, r = b, s = c, t = d, a = k(a, b, c, d, f[e + 0], 7, 3614090360), d = k(d, a, b, c, f[e + 1], 12, 3905402710), c = k(c, d, a, b, f[e + 2], 17, 606105819), b = k(b, c, d, a, f[e + 3], 22, 3250441966), a = k(a, b, c, d, f[e + 4], 7, 4118548399), d = k(d, a, b, c, f[e + 5], 12, 1200080426), c = k(c, d, a, b, f[e + 6], 17, 2821735955), b = k(b, c, d, a, f[e + 7], 22, 4249261313), a = k(a, b, c, d, f[e + 8], 7, 1770035416), d = k(d, a, b, c, f[e + 9], 12, 2336552879), c = k(c, d, a, b, f[e + 10], 17, 4294925233), b = k(b, c, d, a, f[e + 11], 22, 2304563134), a = k(a, b, c, d, f[e + 12], 7, 1804603682), d = k(d, a, b, c, f[e + 13], 12, 4254626195), c = k(c, d, a, b, f[e + 14], 17, 2792965006), b = k(b, c, d, a, f[e + 15], 22, 1236535329), a = l(a, b, c, d, f[e + 1], 5, 4129170786), d = l(d, a, b, c, f[e + 6], 9, 3225465664), c = l(c, d, a, b, f[e + 11], 14, 643717713), b = l(b, c, d, a, f[e + 0], 20, 3921069994), a = l(a, b, c, d, f[e + 5], 5, 3593408605), d = l(d, a, b, c, f[e + 10], 9, 38016083), c = l(c, d, a, b, f[e + 15], 14, 3634488961), b = l(b, c, d, a, f[e + 4], 20, 3889429448), a = l(a, b, c, d, f[e + 9], 5, 568446438), d = l(d, a, b, c, f[e + 14], 9, 3275163606), c = l(c, d, a, b, f[e + 3], 14, 4107603335), b = l(b, c, d, a, f[e + 8], 20, 1163531501), a = l(a, b, c, d, f[e + 13], 5, 2850285829), d = l(d, a, b, c, f[e + 2], 9, 4243563512), c = l(c, d, a, b, f[e + 7], 14, 1735328473), b = l(b, c, d, a, f[e + 12], 20, 2368359562), a = m(a, b, c, d, f[e + 5], 4, 4294588738), d = m(d, a, b, c, f[e + 8], 11, 2272392833), c = m(c, d, a, b, f[e + 11], 16, 1839030562), b = m(b, c, d, a, f[e + 14], 23, 4259657740), a = m(a, b, c, d, f[e + 1], 4, 2763975236), d = m(d, a, b, c, f[e + 4], 11, 1272893353), c = m(c, d, a, b, f[e + 7], 16, 4139469664), b = m(b, c, d, a, f[e + 10], 23, 3200236656), a = m(a, b, c, d, f[e + 13], 4, 681279174), d = m(d, a, b, c, f[e + 0], 11, 3936430074), c = m(c, d, a, b, f[e + 3], 16, 3572445317), b = m(b, c, d, a, f[e + 6], 23, 76029189), a = m(a, b, c, d, f[e + 9], 4, 3654602809), d = m(d, a, b, c, f[e + 12], 11, 3873151461), c = m(c, d, a, b, f[e + 15], 16, 530742520), b = m(b, c, d, a, f[e + 2], 23, 3299628645), a = n(a, b, c, d, f[e + 0], 6, 4096336452), d = n(d, a, b, c, f[e + 7], 10, 1126891415), c = n(c, d, a, b, f[e + 14], 15, 2878612391), b = n(b, c, d, a, f[e + 5], 21, 4237533241), a = n(a, b, c, d, f[e + 12], 6, 1700485571), d = n(d, a, b, c, f[e + 3], 10, 2399980690), c = n(c, d, a, b, f[e + 10], 15, 4293915773), b = n(b, c, d, a, f[e + 1], 21, 2240044497), a = n(a, b, c, d, f[e + 8], 6, 1873313359), d = n(d, a, b, c, f[e + 15], 10, 4264355552), c = n(c, d, a, b, f[e + 6], 15, 2734768916), b = n(b, c, d, a, f[e + 13], 21, 1309151649), a = n(a, b, c, d, f[e + 4], 6, 4149444226), d = n(d, a, b, c, f[e + 11], 10, 3174756917), c = n(c, d, a, b, f[e + 2], 15, 718787259), b = n(b, c, d, a, f[e + 9], 21, 3951481745), a = h(a, q), b = h(b, r), c = h(c, s), d = h(d, t);
+      return (p(a) + p(b) + p(c) + p(d)).toLowerCase();
+    }
+    __name(MD5, "MD5");
+    function isValidatableEngine(engineKey) {
+      return VALIDATABLE_ENGINES.includes(engineKey);
+    }
+    __name(isValidatableEngine, "isValidatableEngine");
+    function supportsModelCatalog(engineKey) {
+      return AI_MODEL_ENGINES.includes(engineKey);
+    }
+    __name(supportsModelCatalog, "supportsModelCatalog");
+    function normalizeApiEndpoint(engineKey, endpoint) {
+      let normalized = (endpoint || "").trim() || translationEngines[engineKey] && translationEngines[engineKey].endpoint || "";
+      return normalized ? (normalized = normalized.replace(/\s+/g, "").replace(/\/+$/, ""), engineKey == "deepseek" ? (/\/v1$/i.test(normalized) && (normalized = normalized.slice(0, -3)), /\/v1\/chat\/completions$/i.test(normalized) ? normalized.replace(/\/v1\/chat\/completions$/i, "/chat/completions") : /\/chat\/completions$/i.test(normalized) ? normalized : `${normalized}/chat/completions`) : engineKey == "oaicompat" ? /\/chat\/completions$/i.test(normalized) ? normalized : /\/v1$/i.test(normalized) ? `${normalized}/chat/completions` : /^https?:\/\/[^/]+$/i.test(normalized) ? `${normalized}/v1/chat/completions` : normalized : engineKey == "openai" ? /\/responses$/i.test(normalized) ? normalized : /\/v1$/i.test(normalized) ? `${normalized}/responses` : /^https?:\/\/[^/]+$/i.test(normalized) ? `${normalized}/v1/responses` : normalized : engineKey == "gemini" ? normalized.replace(/\/[^/]+:generateContent$/i, "").replace(/\/models\/[^/]+$/i, "/models") : engineKey == "microsoft" ? (normalized = normalized.replace(/\?.*$/, ""), /\/translate$/i.test(normalized) ? normalized : `${normalized}/translate`) : normalized) : "";
+    }
+    __name(normalizeApiEndpoint, "normalizeApiEndpoint");
+    function getModelCatalogEndpoint(engineKey, endpoint) {
+      let normalized = normalizeApiEndpoint(engineKey, endpoint);
+      return normalized ? engineKey == "openai" && /\/responses$/i.test(normalized) ? normalized.replace(/\/responses$/i, "/models") : engineKey == "gemini" ? normalized : /\/chat\/completions$/i.test(normalized) ? normalized.replace(/\/chat\/completions$/i, "/models") : `${normalized.replace(/\/+$/, "")}/models` : "";
+    }
+    __name(getModelCatalogEndpoint, "getModelCatalogEndpoint");
+    function mapLanguageCodeForEngine(engineKey, languageId) {
+      return languageId && (engineKey == "deepl" ? languageId == "zh-CN" || languageId == "zh" ? "ZH" : languageId == "zh-TW" ? "ZH-HANT" : languageId.toUpperCase() : translationEngines[engineKey] && translationEngines[engineKey].parser && translationEngines[engineKey].parser[languageId] || languageId);
+    }
+    __name(mapLanguageCodeForEngine, "mapLanguageCodeForEngine");
+    function getValidationRequestForEngine(_engineKey) {
+      return {
+        source: "en",
+        target: "de",
+        text: "Good morning"
+      };
+    }
+    __name(getValidationRequestForEngine, "getValidationRequestForEngine");
+    function getValidationErrorDetails(body) {
+      if (!body) return "";
+      try {
+        body = typeof body == "string" ? JSON.parse(body) : body;
+      } catch {
+        return typeof body == "string" ? body.slice(0, 160) : "";
+      }
+      return body && body.error && (body.error.message || body.error.code) || body.message || body.error_msg || body.msg || "";
+    }
+    __name(getValidationErrorDetails, "getValidationErrorDetails");
+    function buildAiProviderTranslationPrompt(data) {
+      let decisionInstruction = data.autoDecision ? `
+				Auto-translate decision rules:
+				${data.decisionPrompt || ""}
+				If the message should not be translated, return exactly ${AI_SKIP_TRANSLATION_TOKEN}.
+				` : "", targetLanguageName = data.output.name || data.output.id, translationModeInstruction = data.autoDecision ? `
+				Auto-translate mode: translate only natural-language content that is not already in ${targetLanguageName}; already-target-language content may stay unchanged according to the decision rules.
+				` : `
+				Manual translation mode: translate the entire natural-language message into ${targetLanguageName}. Do not keep non-target natural-language text as-is. Preserve only URLs, code, mentions, emoji, IDs, and protected placeholders.
+				`;
+      return {
+        system: data.autoDecision ? "You are a senior bilingual localization specialist and Discord chat translation decision assistant" : "You are a senior bilingual localization specialist",
+        prompt: `
+				You are a professional localization expert. The target language is exactly ${targetLanguageName}. Do not infer the target language from the source text or from existing bilingual/spoiler content.
+				${translationModeInstruction}
+				Rules:
+				1. Return ONLY the translation without any explanations
+				2. Output language must be exactly ${targetLanguageName}; do not output any other language except preserved protected content
+				3. Use natural, fluent language
+				4. Maintain consistent terminology for technical/game terms
+				5. Keep proper nouns/product/game/model names as-is by default; use official/common names in ${targetLanguageName} when clearly established
+				6. Preserve the original tone and style
+				7. Do not omit any source content, including short interjections, laughter, particles, repeated words, or standalone short lines; translate or preserve them naturally in the target language.
+				8. Use concise sentence structures
+				9. Convert [NEWLINE] markers to actual line breaks (don't show them literally)
+				10. Preserve placeholders like ⟦0⟧, ⟦1⟧ exactly; they are protected mentions/links/emoji/code.
+				${decisionInstruction}
+				Text to translate:
+				${data.text.replace(/\n/g, " [NEWLINE] ").replace(/\s+/g, " ")}
+				`
+      };
+    }
+    __name(buildAiProviderTranslationPrompt, "buildAiProviderTranslationPrompt");
+    function parseOpenAiResponseText(body) {
+      try {
+        body = typeof body == "string" ? JSON.parse(body) : body;
+      } catch {
+        return "";
+      }
+      if (body && typeof body.output_text == "string") return body.output_text.trim();
+      let outputParts = [];
+      for (let item of body && body.output || []) for (let content of item && item.content || []) content && typeof content.text == "string" && outputParts.push(content.text);
+      return outputParts.length ? outputParts.join("").trim() : body && body.choices && body.choices[0] && body.choices[0].message && typeof body.choices[0].message.content == "string" ? body.choices[0].message.content.trim() : "";
+    }
+    __name(parseOpenAiResponseText, "parseOpenAiResponseText");
+    function parseGeminiResponseText(body) {
+      try {
+        body = typeof body == "string" ? JSON.parse(body) : body;
+      } catch {
+        return "";
+      }
+      return (body && body.candidates && body.candidates[0] && body.candidates[0].content && body.candidates[0].content.parts || []).map((part) => part && typeof part.text == "string" ? part.text : "").join("").trim();
+    }
+    __name(parseGeminiResponseText, "parseGeminiResponseText");
+    function parseAiBatchTranslationResponse(content, expectedIds = null) {
+      if (content = (content || "").trim(), !content) return null;
+      content = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+      let firstArray = content.indexOf("["), lastArray = content.lastIndexOf("]");
+      firstArray > -1 && lastArray > firstArray && (content = content.slice(firstArray, lastArray + 1));
+      try {
+        let parsed = JSON.parse(content);
+        if (parsed && Array.isArray(parsed.translations) && (parsed = parsed.translations), !Array.isArray(parsed)) return null;
+        let expectedIdSet = expectedIds ? new Set(Array.from(expectedIds, (id) => String(id))) : null, duplicateIds = /* @__PURE__ */ new Set();
+        return parsed.reduce((dict, item) => {
+          if (!item || item.id == null) return dict;
+          let id = String(item.id);
+          if (expectedIdSet && !expectedIdSet.has(id)) return dict;
+          if (duplicateIds.has(id) || Object.prototype.hasOwnProperty.call(dict, id))
+            return duplicateIds.add(id), delete dict[id], dict;
+          let value = item.translation != null ? item.translation : item.text;
+          return dict[id] = value == null ? "" : String(value), dict;
+        }, {});
+      } catch {
+        return null;
+      }
+    }
+    __name(parseAiBatchTranslationResponse, "parseAiBatchTranslationResponse");
+    function createProviderClient({
+      // The HTTP function, shaped like BDFDB.LibraryRequires.request:
+      // (url, options, (error, response, body) => void).
+      request = /* @__PURE__ */ __name((_url, _options, callback) => callback(new Error("no request function"), null, ""), "request"),
+      // Plugin-scoped timers (BDFDB.TimeUtils.timeout/clear) so a plugin stop cancels an
+      // in-flight request window.
+      setTimeout: setTimeout2 = /* @__PURE__ */ __name((callback, delay) => globalThis.setTimeout(callback, delay), "setTimeout"),
+      clearTimeout: clearTimeout2 = /* @__PURE__ */ __name((timer) => globalThis.clearTimeout(timer), "clearTimeout"),
+      // Deliberately NOT the plugin-scoped timer: a backoff wait that a plugin stop
+      // cancelled would leave its awaiting promise pending forever.
+      sleep = /* @__PURE__ */ __name((ms) => new Promise((resolve) => globalThis.setTimeout(resolve, ms)), "sleep"),
+      now = Date.now,
+      getAuthKeys = /* @__PURE__ */ __name(() => ({}), "getAuthKeys"),
+      saveAuthKeys = /* @__PURE__ */ __name(() => {
+      }, "saveAuthKeys"),
+      // The plugin's language table, used to name the source language a provider detected.
+      getLanguages = /* @__PURE__ */ __name(() => ({}), "getLanguages"),
+      notify = /* @__PURE__ */ __name(() => null, "notify"),
+      getLabels = /* @__PURE__ */ __name(() => ({}), "getLabels"),
+      getCustomText = /* @__PURE__ */ __name(() => "", "getCustomText"),
+      getEngineLabel = /* @__PURE__ */ __name((engineKey) => translationEngines[engineKey] && translationEngines[engineKey].name || engineKey, "getEngineLabel"),
+      shouldUseAiAutoTranslateDecision = /* @__PURE__ */ __name(() => !1, "shouldUseAiAutoTranslateDecision"),
+      getAiAutoTranslatePrompt = /* @__PURE__ */ __name(() => "", "getAiAutoTranslatePrompt"),
+      // BDFDB.DOMUtils.create: Yandex answers XML, not JSON.
+      createElementFromHtml = /* @__PURE__ */ __name(() => null, "createElementFromHtml"),
+      generateId = /* @__PURE__ */ __name(() => String(Date.now()), "generateId"),
+      // The settings panel must know an endpoint was rewritten under it.
+      onEndpointNormalized = /* @__PURE__ */ __name(() => {
+      }, "onEndpointNormalized"),
+      // Opening a backoff window is also the queue's cue to re-arm its retry.
+      onBackoffScheduled = /* @__PURE__ */ __name(() => {
+      }, "onBackoffScheduled")
+    } = {}) {
+      let backoffUntil = 0, backoffStep = 0, modelCatalogState = {};
+      function toast(message, options) {
+        return notify(message, options);
+      }
+      __name(toast, "toast");
+      function dangerToast(message) {
+        return toast(message, { type: "danger", position: "center" });
+      }
+      __name(dangerToast, "dangerToast");
+      function scheduleBackoff(ms) {
+        if (!ms) return;
+        let timestamp = now();
+        backoffUntil > timestamp ? backoffStep = Math.min(backoffStep + 1, 4) : backoffStep = 0;
+        let scaledMs = Math.min(ms * Math.pow(2, backoffStep), 6e4);
+        backoffUntil = Math.max(backoffUntil || 0, timestamp + scaledMs), onBackoffScheduled();
+      }
+      __name(scheduleBackoff, "scheduleBackoff");
+      function awaitBackoff() {
+        let waitMs = (backoffUntil || 0) - now();
+        return waitMs <= 0 ? Promise.resolve() : sleep(waitMs);
+      }
+      __name(awaitBackoff, "awaitBackoff");
+      function requestWithTimeout(url, options, callback, timeoutMs = 3e4) {
+        let done = !1, timer = null, finish = /* @__PURE__ */ __name((error, response, body) => {
+          if (done) return;
+          done = !0, timer && clearTimeout2(timer);
+          let statusCode = response && response.statusCode;
+          statusCode == 429 ? scheduleBackoff(5e3) : statusCode && statusCode >= 500 && scheduleBackoff(2e3), callback(error, response, body);
+        }, "finish");
+        timer = setTimeout2((_) => finish(null, { statusCode: 504 }, ""), timeoutMs);
+        try {
+          request(url, options, finish);
+        } catch (err) {
+          finish(err, null, "");
+        }
+        return timer;
+      }
+      __name(requestWithTimeout, "requestWithTimeout");
+      function getAuth(engineKey) {
+        return (getAuthKeys() || {})[engineKey] || {};
+      }
+      __name(getAuth, "getAuth");
+      function storeAuth(engineKey, auth) {
+        let authKeys = getAuthKeys() || {};
+        authKeys[engineKey] = auth, saveAuthKeys(authKeys);
+      }
+      __name(storeAuth, "storeAuth");
+      function isEngineConfiguredForRuntime(engineKey) {
+        if (!translationEngines[engineKey]) return !1;
+        if (!CREDENTIAL_REQUIRED_ENGINES.includes(engineKey)) return !0;
+        let auth = getAuth(engineKey);
+        if (!(auth.key || "").trim()) return !1;
+        if (engineKey != "oaicompat") return !0;
+        let endpoint = (auth.endpoint || "").trim(), model = (auth.model || "").trim();
+        return !!endpoint && !!model && endpoint != translationEngines.oaicompat.endpoint && model != translationEngines.oaicompat.model;
+      }
+      __name(isEngineConfiguredForRuntime, "isEngineConfiguredForRuntime");
+      function fetchModelCatalog(engineKey, onUpdate = null) {
+        return new Promise((resolve) => {
+          if (!supportsModelCatalog(engineKey)) return resolve({ ok: !1, items: [] });
+          let updateState = /* @__PURE__ */ __name((patch) => {
+            modelCatalogState[engineKey] = Object.assign({}, modelCatalogState[engineKey], patch), typeof onUpdate == "function" && onUpdate();
+          }, "updateState"), engineLabel = getEngineLabel(engineKey), auth = getAuth(engineKey), apiKey = (auth.key || "").trim();
+          if (!apiKey)
+            return dangerToast(`${engineLabel}: ${getCustomText("validate_missing_key")}`), resolve({ ok: !1, items: [] });
+          if (engineKey == "oaicompat" && (!(auth.endpoint || "").trim() || (auth.endpoint || "").trim() == translationEngines.oaicompat.endpoint))
+            return dangerToast(`${engineLabel}: ${getCustomText("validate_missing_endpoint")}`), resolve({ ok: !1, items: [] });
+          let normalizedEndpoint = normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey] && translationEngines[engineKey].endpoint || "");
+          if (!normalizedEndpoint)
+            return dangerToast(`${engineLabel}: ${getCustomText("validate_missing_endpoint")}`), resolve({ ok: !1, items: [] });
+          auth.endpoint && normalizedEndpoint != auth.endpoint && (auth.endpoint = normalizedEndpoint, storeAuth(engineKey, auth), onEndpointNormalized());
+          let modelCatalogEndpoint = getModelCatalogEndpoint(engineKey, normalizedEndpoint), requestUrl = engineKey == "gemini" ? `${modelCatalogEndpoint}?key=${encodeURIComponent(apiKey)}` : modelCatalogEndpoint;
+          updateState({ loading: !0, items: [], endpoint: requestUrl });
+          let requestHeaders = { "Content-Type": "application/json" };
+          engineKey != "gemini" && (requestHeaders.Authorization = `Bearer ${apiKey}`), request(requestUrl, {
+            method: "get",
+            headers: requestHeaders
+          }, (error, response, body) => {
+            if (!error && body && response && response.statusCode == 200)
+              try {
+                body = JSON.parse(body);
+                let items = (engineKey == "gemini" ? (body && body.models || []).filter((item) => !item || !Array.isArray(item.supportedGenerationMethods) || item.supportedGenerationMethods.includes("generateContent")) : body && body.data || []).map((item) => typeof item == "string" ? item : engineKey == "gemini" ? item && item.name && item.name.replace(/^models\//, "") : item && item.id).filter((item) => typeof item == "string" && item.trim()).sort((modelA, modelB) => modelA.localeCompare(modelB));
+                return updateState({
+                  loading: !1,
+                  items,
+                  endpoint: requestUrl,
+                  fetchedAt: now()
+                }), toast(
+                  items.length ? `${engineLabel}: ${getCustomText("model_catalog_loaded").replace("{count}", items.length)}` : `${engineLabel}: ${getCustomText("model_catalog_empty")}`,
+                  {
+                    type: items.length ? "success" : "warning",
+                    position: "center"
+                  }
+                ), resolve({ ok: !0, items });
+              } catch {
+              }
+            updateState({ loading: !1, items: [] });
+            let details = getValidationErrorDetails(body);
+            return dangerToast(`${engineLabel}: ${getCustomText("validate_failed")}${response && response.statusCode ? ` (${response.statusCode})` : ""}${details ? ` - ${details}` : ""}`), resolve({ ok: !1, items: [] });
+          });
+        });
+      }
+      __name(fetchModelCatalog, "fetchModelCatalog");
+      function validateEngineConfig(engineKey) {
+        return new Promise((resolve) => {
+          if (!isValidatableEngine(engineKey)) return resolve({ ok: !1, normalized: !1 });
+          let engineLabel = getEngineLabel(engineKey), runningToast = null, finish = /* @__PURE__ */ __name((ok, message, normalized2 = !1) => {
+            runningToast && runningToast.close(), toast(message, {
+              type: ok ? "success" : "danger",
+              position: "center"
+            }), resolve({ ok, normalized: normalized2 });
+          }, "finish"), auth = getAuth(engineKey), apiKey = (auth.key || "").trim();
+          if (!apiKey) return finish(!1, `${engineLabel}: ${getCustomText("validate_missing_key")}`);
+          if (engineKey == "oaicompat" && (!(auth.endpoint || "").trim() || (auth.endpoint || "").trim() == translationEngines.oaicompat.endpoint)) return finish(!1, `${engineLabel}: ${getCustomText("validate_missing_endpoint")}`);
+          if (engineKey == "oaicompat" && (!(auth.model || "").trim() || (auth.model || "").trim() == translationEngines.oaicompat.model)) return finish(!1, `${engineLabel}: ${getCustomText("validate_missing_model")}`);
+          let normalized = !1, apiEndpoint = "";
+          if (translationEngines[engineKey] && translationEngines[engineKey].endpoint && (apiEndpoint = normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint), auth.endpoint && apiEndpoint != auth.endpoint && (auth.endpoint = apiEndpoint, storeAuth(engineKey, auth), onEndpointNormalized(), normalized = !0), !apiEndpoint))
+            return finish(!1, `${engineLabel}: ${getCustomText("validate_missing_endpoint")}`, normalized);
+          let modelId = (auth.model || translationEngines[engineKey] && translationEngines[engineKey].model || "").trim();
+          if (AI_MODEL_ENGINES.includes(engineKey) && !modelId) return finish(!1, `${engineLabel}: ${getCustomText("validate_missing_model")}`, normalized);
+          let sample = getValidationRequestForEngine(engineKey);
+          runningToast = toast(`${getCustomText("validate_running")} ${engineLabel}...`, {
+            timeout: 0,
+            ellipsis: !0,
+            position: "center"
+          });
+          let successMessage = /* @__PURE__ */ __name((translatedText) => {
+            let suffix = normalized ? ` ${getCustomText("validate_saved_endpoint")}` : "", preview = translatedText ? ` (${translatedText.slice(0, 48)})` : "";
+            return `${engineLabel}: ${getCustomText("validate_success")}.${suffix}${preview}`;
+          }, "successMessage"), failMessage = /* @__PURE__ */ __name((statusCode, body) => {
+            let details = getValidationErrorDetails(body);
+            return `${engineLabel}: ${getCustomText("validate_failed")}${statusCode ? ` (${statusCode})` : ""}${details ? ` - ${details}` : ""}`;
+          }, "failMessage");
+          switch (engineKey) {
+            case "googlecloud": {
+              let model = (auth.model || "").trim(), form = {
+                key: apiKey,
+                q: sample.text,
+                source: sample.source,
+                target: sample.target,
+                format: "text"
+              };
+              return model && (form.model = model), request(apiEndpoint, {
+                method: "post",
+                form
+              }, (error, response, body) => {
+                if (!error && body && response && response.statusCode == 200)
+                  try {
+                    body = JSON.parse(body);
+                    let translation = body && body.data && body.data.translations && body.data.translations[0] && body.data.translations[0].translatedText;
+                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+                  } catch {
+                  }
+                return finish(!1, failMessage(response && response.statusCode, body), normalized);
+              });
+            }
+            case "microsoft": {
+              let headers = {
+                "Content-Type": "application/json",
+                "Ocp-Apim-Subscription-Key": apiKey
+              }, region = (auth.region || "").trim();
+              return region && region != "global" && (headers["Ocp-Apim-Subscription-Region"] = region), request(apiEndpoint, {
+                method: "post",
+                headers,
+                body: JSON.stringify([{ Text: sample.text }]),
+                form: {
+                  "api-version": "3.0",
+                  from: mapLanguageCodeForEngine("microsoft", sample.source),
+                  to: mapLanguageCodeForEngine("microsoft", sample.target)
+                }
+              }, (error, response, body) => {
+                if (!error && body && response && response.statusCode == 200)
+                  try {
+                    body = JSON.parse(body);
+                    let translation = body && body[0] && body[0].translations && body[0].translations[0] && body[0].translations[0].text;
+                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+                  } catch {
+                  }
+                return finish(!1, failMessage(response && response.statusCode, body), normalized);
+              });
+            }
+            case "deepl": {
+              let translateEndpoint = auth.paid ? "https://api.deepl.com/v2/translate" : "https://api-free.deepl.com/v2/translate";
+              return request(translateEndpoint, {
+                method: "post",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `DeepL-Auth-Key ${apiKey}`
+                },
+                body: JSON.stringify({
+                  text: [sample.text],
+                  source_lang: mapLanguageCodeForEngine("deepl", sample.source),
+                  target_lang: mapLanguageCodeForEngine("deepl", sample.target)
+                })
+              }, (error, response, body) => {
+                if (!error && body && response && response.statusCode == 200)
+                  try {
+                    body = JSON.parse(body);
+                    let translation = body && body.translations && body.translations[0] && body.translations[0].text;
+                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+                  } catch {
+                  }
+                return finish(!1, failMessage(response && response.statusCode, body), normalized);
+              });
+            }
+            case "openai":
+              return request(apiEndpoint, {
+                method: "post",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+                body: JSON.stringify({
+                  model: modelId,
+                  instructions: "You are a translation validator. Return only the translation.",
+                  input: `Translate the following text from English to German.
+
+${sample.text}`,
+                  store: !1
+                })
+              }, (error, response, body) => {
+                let translation = !error && response && response.statusCode == 200 ? parseOpenAiResponseText(body) : "";
+                return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
+              });
+            case "gemini": {
+              let geminiModelId = modelId.replace(/^models\//, ""), requestUrl = `${apiEndpoint}/${encodeURIComponent(geminiModelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+              return request(requestUrl, {
+                method: "post",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  system_instruction: { parts: [{ text: "You are a translation validator. Return only the translation." }] },
+                  contents: [{ role: "user", parts: [{ text: `Translate the following text from English to German.
+
+${sample.text}` }] }]
+                })
+              }, (error, response, body) => {
+                let translation = !error && response && response.statusCode == 200 ? parseGeminiResponseText(body) : "";
+                return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
+              });
+            }
+            case "deepseek":
+            case "oaicompat":
+              return request(apiEndpoint, {
+                method: "post",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                  model: modelId,
+                  messages: [{
+                    role: "system",
+                    content: "You are a translation validator."
+                  }, {
+                    role: "user",
+                    content: `Translate the following text from English to German. Return only the translation.
+
+${sample.text}`
+                  }],
+                  temperature: 0,
+                  max_tokens: 32
+                })
+              }, (error, response, body) => {
+                if (!error && body && response && response.statusCode == 200)
+                  try {
+                    body = JSON.parse(body);
+                    let translation = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
+                    return finish(!!translation, translation ? successMessage(translation.trim()) : failMessage(response.statusCode, body), normalized);
+                  } catch {
+                  }
+                return finish(!1, failMessage(response && response.statusCode, body), normalized);
+              });
+          }
+          return finish(!1, `${engineLabel}: ${getCustomText("validate_failed")}`, normalized);
+        });
+      }
+      __name(validateEngineConfig, "validateEngineConfig");
+      function googleApiTranslate(data, callback) {
+        request("https://translate.googleapis.com/translate_a/single", {
+          form: {
+            client: "gtx",
+            dt: "t",
+            dj: "1",
+            source: "input",
+            sl: data.input.id,
+            tl: data.output.id,
+            q: encodeURIComponent(data.text)
+          }
+        }, (error, response, body) => {
+          let labels = getLabels(), languages = getLanguages();
+          if (!error && body && response.statusCode == 200)
+            try {
+              body = JSON.parse(body), !data.specialCase && body.src && body.src && languages[body.src] && (data.input.id = body.src, data.input.name = languages[body.src].name, data.input.ownlang = languages[body.src].ownlang), callback(body.sentences.map((n) => n && n.trans).filter((n) => n).join(""));
+            } catch {
+              callback("");
+            }
+          else
+            response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+        });
+      }
+      __name(googleApiTranslate, "googleApiTranslate");
+      function googleCloudTranslate(data, callback) {
+        let auth = getAuth("googlecloud"), apiKey = auth.key || "", apiEndpoint = auth.endpoint || translationEngines.googlecloud.endpoint, modelId = auth.model || translationEngines.googlecloud.model;
+        request(apiEndpoint, {
+          method: "post",
+          form: Object.assign({
+            key: apiKey,
+            q: data.text,
+            target: data.output.id,
+            format: "text",
+            model: modelId
+          }, data.input.auto ? {} : { source: data.input.id })
+        }, (error, response, body) => {
+          let labels = getLabels(), languages = getLanguages();
+          if (!error && body && response.statusCode == 200)
+            try {
+              body = JSON.parse(body);
+              let translations = body && body.data && body.data.translations || [];
+              !data.specialCase && translations[0] && translations[0].detectedSourceLanguage && languages[translations[0].detectedSourceLanguage] && (data.input.id = translations[0].detectedSourceLanguage, data.input.name = languages[translations[0].detectedSourceLanguage].name, data.input.ownlang = languages[translations[0].detectedSourceLanguage].ownlang), callback(translations.map((n) => n && n.translatedText).filter((n) => n).join(""));
+            } catch {
+              callback("");
+            }
+          else
+            response && (response.statusCode == 401 || response.statusCode == 403) ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : response && response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+        });
+      }
+      __name(googleCloudTranslate, "googleCloudTranslate");
+      function microsoftTranslate(data, callback) {
+        let auth = getAuth("microsoft"), apiEndpoint = normalizeApiEndpoint("microsoft", auth.endpoint || translationEngines.microsoft.endpoint), apiKey = auth.key || "", region = auth.region || "", headers = {
+          "Content-Type": "application/json",
+          "Ocp-Apim-Subscription-Key": apiKey
+        };
+        region && region != "global" && (headers["Ocp-Apim-Subscription-Region"] = region), request(apiEndpoint, {
+          method: "post",
+          headers,
+          body: JSON.stringify([{ Text: data.text }]),
+          form: Object.assign({
+            "api-version": "3.0",
+            to: mapLanguageCodeForEngine("microsoft", data.output.id)
+          }, data.input.auto ? {} : { from: mapLanguageCodeForEngine("microsoft", data.input.id) })
+        }, (error, response, body) => {
+          let labels = getLabels(), languages = getLanguages();
+          if (!error && body && response.statusCode == 200)
+            try {
+              body = JSON.parse(body)[0], !data.specialCase && body.detectedLanguage && body.detectedLanguage.language && languages[body.detectedLanguage.language.toLowerCase()] && (data.input.name = languages[body.detectedLanguage.language.toLowerCase()].name, data.input.ownlang = languages[body.detectedLanguage.language.toLowerCase()].ownlang), callback(body.translations.map((n) => n && n.text).filter((n) => n).join(""));
+            } catch {
+              callback("");
+            }
+          else
+            response.statusCode == 403 || response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response.statusCode == 401 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+        });
+      }
+      __name(microsoftTranslate, "microsoftTranslate");
+      function deepLTranslate(data, callback) {
+        let auth = getAuth("deepl");
+        request(auth.paid ? "https://api.deepl.com/v2/translate" : "https://api-free.deepl.com/v2/translate", {
+          method: "post",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `DeepL-Auth-Key ${auth.key || ""}`
+          },
+          body: JSON.stringify(Object.assign({
+            text: [data.text],
+            target_lang: mapLanguageCodeForEngine("deepl", data.output.id)
+          }, data.input.auto ? {} : { source_lang: mapLanguageCodeForEngine("deepl", data.input.id) }))
+        }, (error, response, body) => {
+          let labels = getLabels(), languages = getLanguages();
+          if (!error && body && response.statusCode == 200)
+            try {
+              body = JSON.parse(body), !data.specialCase && body.translations[0] && body.translations[0].detected_source_language && languages[body.translations[0].detected_source_language.toLowerCase()] && (data.input.name = languages[body.translations[0].detected_source_language.toLowerCase()].name, data.input.ownlang = languages[body.translations[0].detected_source_language.toLowerCase()].ownlang), callback(body.translations.map((n) => n && n.text).filter((n) => n).join(""));
+            } catch {
+              callback("");
+            }
+          else
+            response.statusCode == 429 || response.statusCode == 456 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response.statusCode == 403 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+        });
+      }
+      __name(deepLTranslate, "deepLTranslate");
+      function requestAiProviderTranslation(engineKey, url, options, parseResponse, callback) {
+        requestWithTimeout(url, options, (error, response, body) => {
+          if (!error && body && response && response.statusCode == 200) {
+            let translatedText = parseResponse(body);
+            if (translatedText) return callback(translatedText);
+          }
+          let engineName = translationEngines[engineKey] && translationEngines[engineKey].name || engineKey, details = getValidationErrorDetails(body);
+          dangerToast(`${getLabels().toast_translating_failed} (${engineName})${details ? ` - ${details}` : ""}`), callback("");
+        });
+      }
+      __name(requestAiProviderTranslation, "requestAiProviderTranslation");
+      function openAiTranslate(data, callback) {
+        let auth = getAuth("openai"), apiKey = auth.key || "", apiEndpoint = normalizeApiEndpoint("openai", auth.endpoint || translationEngines.openai.endpoint), modelId = auth.model || translationEngines.openai.model, prompt = buildAiProviderTranslationPrompt(data);
+        requestAiProviderTranslation("openai", apiEndpoint, {
+          method: "post",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelId,
+            instructions: prompt.system,
+            input: prompt.prompt,
+            store: !1
+          })
+        }, (body) => parseOpenAiResponseText(body), callback);
+      }
+      __name(openAiTranslate, "openAiTranslate");
+      function geminiTranslate(data, callback) {
+        let auth = getAuth("gemini"), apiKey = auth.key || "", apiEndpoint = normalizeApiEndpoint("gemini", auth.endpoint || translationEngines.gemini.endpoint), modelId = (auth.model || translationEngines.gemini.model).replace(/^models\//, ""), prompt = buildAiProviderTranslationPrompt(data), requestUrl = `${apiEndpoint}/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        requestAiProviderTranslation("gemini", requestUrl, {
+          method: "post",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: prompt.system }] },
+            contents: [{ role: "user", parts: [{ text: prompt.prompt }] }],
+            generationConfig: { temperature: 0.2, topP: 0.8 }
+          })
+        }, (body) => parseGeminiResponseText(body), callback);
+      }
+      __name(geminiTranslate, "geminiTranslate");
+      function chatCompletionsTranslate(engineKey, data, callback) {
+        if (!isEngineConfiguredForRuntime(engineKey)) return callback("");
+        let auth = getAuth(engineKey), apiKey = auth.key || "", apiEndpoint = normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint), modelId = auth.model || translationEngines[engineKey].model, prompt = buildAiProviderTranslationPrompt(data);
+        requestAiProviderTranslation(engineKey, apiEndpoint, {
+          method: "post",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelId,
+            messages: [
+              { role: "system", content: prompt.system },
+              { role: "user", content: prompt.prompt }
+            ],
+            temperature: 0.2,
+            top_p: 0.8
+          })
+        }, (body) => parseOpenAiResponseText(body).replace(/\[NEWLINE\]/g, `
+`), callback);
+      }
+      __name(chatCompletionsTranslate, "chatCompletionsTranslate");
+      function deepSeekTranslate(data, callback) {
+        return chatCompletionsTranslate("deepseek", data, callback);
+      }
+      __name(deepSeekTranslate, "deepSeekTranslate");
+      function openAiCompatibleTranslate(data, callback) {
+        return chatCompletionsTranslate("oaicompat", data, callback);
+      }
+      __name(openAiCompatibleTranslate, "openAiCompatibleTranslate");
+      function iTranslateTranslate(data, callback) {
+        let translate2 = /* @__PURE__ */ __name((_) => {
+          request("https://web-api.itranslateapp.com/v3/texts/translate", {
+            method: "post",
+            headers: {
+              "API-KEY": getAuth("itranslate").key || data.engine.APIkey
+            },
+            body: JSON.stringify({
+              source: {
+                dialect: data.input.id,
+                text: data.text
+              },
+              target: {
+                dialect: data.output.id
+              }
+            })
+          }, (error, response, body) => {
+            let labels = getLabels(), languages = getLanguages();
+            if (!error && response && response.statusCode == 200)
+              try {
+                body = JSON.parse(body), !data.specialCase && body.source && body.source.dialect && languages[body.source.dialect] && (data.input.id = body.source.dialect, data.input.name = languages[body.source.dialect].name, data.input.ownlang = languages[body.source.dialect].ownlang), callback(body.target.text);
+              } catch {
+                callback("");
+              }
+            else
+              response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response.statusCode == 403 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+          });
+        }, "translate");
+        getAuth("itranslate").key || data.engine.APIkey ? translate2() : request("https://www.itranslate.com/js/webapp/main.js", { gzip: !0 }, (error, response, body) => {
+          if (!error && body) {
+            let APIkey = /var API_KEY = "(.+)"/.exec(body);
+            APIkey ? (data.engine.APIkey = APIkey[1], translate2()) : callback("");
+          } else callback("");
+        });
+      }
+      __name(iTranslateTranslate, "iTranslateTranslate");
+      function yandexTranslate(data, callback) {
+        request("https://translate.yandex.net/api/v1.5/tr/translate", {
+          form: {
+            key: getAuth("yandex").key || "",
+            text: encodeURIComponent(data.text),
+            lang: data.specialCase || data.input.auto ? data.output.id : data.input.id + "-" + data.output.id,
+            options: "1"
+          }
+        }, (error, response, body) => {
+          let labels = getLabels(), languages = getLanguages();
+          if (!error && body && response.statusCode == 200)
+            try {
+              let parsed = createElementFromHtml(body), translation = parsed && parsed.querySelector("text"), detected = parsed && parsed.querySelector("detected");
+              if (translation && detected) {
+                let detectedLang = detected.getAttribute("lang");
+                !data.specialCase && detectedLang && languages[detectedLang] && (data.input.name = languages[detectedLang].name, data.input.ownlang = languages[detectedLang].ownlang), callback(translation.innerText);
+              } else callback("");
+            } catch {
+              callback("");
+            }
+          else body && body.indexOf('code="408"') > -1 ? (dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_monthlylimit}`), callback("")) : (dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}/${labels.error_keyoutdated}`), callback(""));
+        });
+      }
+      __name(yandexTranslate, "yandexTranslate");
+      function papagoTranslate(data, callback) {
+        let credentials = (getAuth("papago").key || "").split(" "), doTranslate = /* @__PURE__ */ __name((langCode) => {
+          request("https://openapi.naver.com/v1/papago/n2mt", {
+            method: "post",
+            headers: {
+              "X-Naver-Client-Id": credentials[0],
+              "X-Naver-Client-Secret": credentials[1],
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            form: {
+              source: langCode,
+              target: data.output.id,
+              text: data.text
+            }
+          }, (error, response, body) => {
+            let labels = getLabels();
+            if (!error && body && response.statusCode == 200)
+              try {
+                let message = (JSON.parse(body) || {}).message, result = message && (message.body || message.result);
+                result && result.translatedText ? callback(result.translatedText) : callback("");
+              } catch {
+                callback("");
+              }
+            else
+              response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}/${labels.error_keyoutdated}`), callback("");
+          });
+        }, "doTranslate");
+        data.input.auto ? request("https://openapi.naver.com/v1/papago/detectLangs", {
+          method: "post",
+          headers: {
+            "X-Naver-Client-Id": credentials[0],
+            "X-Naver-Client-Secret": credentials[1],
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          form: {
+            query: data.text
+          }
+        }, (error, response, body) => {
+          let languages = getLanguages(), langCode = "en";
+          if (!error && body && response.statusCode == 200)
+            try {
+              langCode = JSON.parse(body).langCode;
+            } catch {
+              langCode = "en";
+            }
+          data.input.name = languages[langCode].name, data.input.ownlang = languages[langCode].ownlang, doTranslate(langCode);
+        }) : doTranslate(data.input.id);
+      }
+      __name(papagoTranslate, "papagoTranslate");
+      function baiduTranslate(data, callback) {
+        let credentials = (getAuth("baidu").key || "").split(" "), salt = generateId();
+        request("https://fanyi-api.baidu.com/api/trans/vip/translate", {
+          bdVersion: !0,
+          method: "post",
+          form: {
+            from: translationEngines.baidu.parser[data.input.id] || data.input.id,
+            to: translationEngines.baidu.parser[data.output.id] || data.output.id,
+            q: encodeURIComponent(data.text),
+            appid: credentials[0],
+            salt,
+            sign: MD5(credentials[0] + data.text + salt + (credentials[2] || credentials[1]))
+          }
+        }, (error, response, result) => {
+          let labels = getLabels();
+          if (!error && result && response.statusCode == 200)
+            try {
+              if (result = JSON.parse(result) || {}, result.error_code)
+                result.error_code == 54004 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_monthlylimit}.`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${result.error_code} : ${result.error_msg}.`), callback("");
+              else {
+                let messages = result.trans_result;
+                messages && messages.length > 0 && result.from != result.to ? callback(messages.map((message) => decodeURIComponent(message.dst)).join(`
+`)) : callback("");
+              }
+            } catch {
+              callback("");
+            }
+          else
+            dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+        });
+      }
+      __name(baiduTranslate, "baiduTranslate");
+      let engineAdapters = {
+        googleApiTranslate,
+        googleCloudTranslate,
+        microsoftTranslate,
+        deepLTranslate,
+        deepSeekTranslate,
+        openAiTranslate,
+        geminiTranslate,
+        openAiCompatibleTranslate,
+        iTranslateTranslate,
+        yandexTranslate,
+        papagoTranslate,
+        baiduTranslate
+      };
+      function getEngineAdapter(engineKey) {
+        let engine = translationEngines[engineKey];
+        return engine && engineAdapters[engine.funcName] || null;
+      }
+      __name(getEngineAdapter, "getEngineAdapter");
+      function translate(engineKey, data, callback) {
+        let adapter = getEngineAdapter(engineKey);
+        return adapter ? adapter(data, callback) : callback("");
+      }
+      __name(translate, "translate");
+      function requestAiBatchTranslation(engineKey, preparedItems) {
+        return new Promise((resolve) => {
+          if (!engineKey || !preparedItems || !preparedItems.length || !isEngineConfiguredForRuntime(engineKey)) return resolve(null);
+          let auth = getAuth(engineKey), apiKey = auth.key || "", apiEndpoint = normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint), modelId = auth.model || translationEngines[engineKey].model, output = preparedItems[0].output, input = preparedItems[0].input, payloadItems = preparedItems.map((item) => ({
+            id: String(item.message.id),
+            text: item.protectedText.replace(/\n/g, " [NEWLINE] ").replace(/\s+/g, " ")
+          })), systemPrompt = "You are a strict Discord chat batch translator. Return valid JSON only.", batchChannelId = preparedItems[0].channelId || null, decisionRules = shouldUseAiAutoTranslateDecision(batchChannelId) ? `Apply these skip rules to every message; when a message should not be translated set its "translation" to exactly ${AI_SKIP_TRANSLATION_TOKEN}.
+${getAiAutoTranslatePrompt({ input, output })}` : "The plugin has already filtered messages that should be skipped; do not make skip decisions.", batchPrompt = `Target language is exactly ${output.name || output.id}. Input language is ${input && input.auto ? "auto-detect" : input.name || input.id || "auto"}. ${decisionRules}
+Rules:
+1. Return ONLY a JSON array. Each item must be {"id":"same id","translation":"translated text"}.
+2. Translate every provided natural-language message into exactly the target language.
+3. Preserve placeholders like ⟦0⟧ and ⟦DTA0⟧ exactly. Preserve URLs, code, emoji, mentions, IDs, and product/model names.
+4. Convert [NEWLINE] markers back to real line breaks in the translation; do not show [NEWLINE] literally.
+5. Do not omit any source content, including short interjections, laughter, particles, repeated words, or standalone short lines; translate or preserve them naturally in the target language.
+6. Do not add explanations. Do not output any language other than the target language except preserved protected content.
+
+Messages JSON:
+${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => resolve(parseAiBatchTranslationResponse(content, payloadItems.map((item) => item.id))), "finish");
+          if (engineKey == "openai")
+            return requestWithTimeout(apiEndpoint, {
+              method: "post",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+              body: JSON.stringify({ model: modelId, instructions: systemPrompt, input: batchPrompt, store: !1 })
+            }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+          if (engineKey == "gemini") {
+            let geminiModelId = String(modelId || "").replace(/^models\//, ""), requestUrl = `${apiEndpoint}/${encodeURIComponent(geminiModelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+            return requestWithTimeout(requestUrl, {
+              method: "post",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ system_instruction: { parts: [{ text: systemPrompt }] }, contents: [{ role: "user", parts: [{ text: batchPrompt }] }], generationConfig: { temperature: 0.1, topP: 0.8 } })
+            }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseGeminiResponseText(body)) : resolve(null));
+          }
+          requestWithTimeout(apiEndpoint, {
+            method: "post",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ model: modelId, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: batchPrompt }], temperature: 0.1, top_p: 0.8 })
+          }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+        });
+      }
+      return __name(requestAiBatchTranslation, "requestAiBatchTranslation"), Object.freeze({
+        translationEngines,
+        enginePortals,
+        MD5,
+        translate,
+        getEngineAdapter,
+        googleApiTranslate,
+        googleCloudTranslate,
+        microsoftTranslate,
+        deepLTranslate,
+        deepSeekTranslate,
+        openAiTranslate,
+        geminiTranslate,
+        openAiCompatibleTranslate,
+        iTranslateTranslate,
+        yandexTranslate,
+        papagoTranslate,
+        baiduTranslate,
+        chatCompletionsTranslate,
+        requestAiProviderTranslation,
+        requestAiBatchTranslation,
+        normalizeApiEndpoint,
+        getModelCatalogEndpoint,
+        mapLanguageCodeForEngine,
+        getValidationRequestForEngine,
+        getValidationErrorDetails,
+        isValidatableEngine,
+        supportsModelCatalog,
+        buildAiProviderTranslationPrompt,
+        parseOpenAiResponseText,
+        parseGeminiResponseText,
+        parseAiBatchTranslationResponse,
+        isEngineConfiguredForRuntime,
+        requestWithTimeout,
+        scheduleBackoff,
+        awaitBackoff,
+        getBackoffUntil: /* @__PURE__ */ __name(() => backoffUntil || 0, "getBackoffUntil"),
+        getBackoffStep: /* @__PURE__ */ __name(() => backoffStep, "getBackoffStep"),
+        isBackoffActive: /* @__PURE__ */ __name(() => now() < (backoffUntil || 0), "isBackoffActive"),
+        // Nothing clears the window today; a client is per plugin instance, so a restart
+        // is the only reset the runtime has ever had.
+        resetBackoff() {
+          backoffUntil = 0, backoffStep = 0;
+        },
+        getModelCatalogState: /* @__PURE__ */ __name(() => modelCatalogState, "getModelCatalogState"),
+        clearModelCatalogState() {
+          modelCatalogState = {};
+        },
+        fetchModelCatalog,
+        validateEngineConfig
+      });
+    }
+    __name(createProviderClient, "createProviderClient");
+    module2.exports = {
+      AI_SKIP_TRANSLATION_TOKEN,
+      PROVIDER_REQUEST_TIMEOUT_MS: 3e4,
+      PROVIDER_RATE_LIMIT_BACKOFF_MS: 5e3,
+      PROVIDER_SERVER_ERROR_BACKOFF_MS: 2e3,
+      PROVIDER_BACKOFF_MAX_STEP: 4,
+      PROVIDER_BACKOFF_MAX_MS: 6e4,
+      CREDENTIAL_REQUIRED_ENGINES,
+      VALIDATABLE_ENGINES,
+      AI_MODEL_ENGINES,
+      translationEngines,
+      enginePortals,
+      MD5,
+      normalizeApiEndpoint,
+      getModelCatalogEndpoint,
+      mapLanguageCodeForEngine,
+      getValidationRequestForEngine,
+      getValidationErrorDetails,
+      isValidatableEngine,
+      supportsModelCatalog,
+      buildAiProviderTranslationPrompt,
+      parseOpenAiResponseText,
+      parseGeminiResponseText,
+      parseAiBatchTranslationResponse,
+      createProviderClient
+    };
+  }
+});
+
 // src/i18n/labels.js
 var require_labels = __commonJS({
   "src/i18n/labels.js"(exports2, module2) {
@@ -3628,9 +4909,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a, _b, _c;
-        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
+        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
         var _this;
-        let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", RECEIVED_SKIP_CACHE_POLICY_VERSION = 2, translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
+        let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
           render() {
             let enabled = _this.isTranslationEnabled(this.props.channelId);
             return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.ChannelTextAreaButton, {
@@ -4107,209 +5388,11 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           "−−−−·": "9",
           "−−−−−": "0",
           _: "··−−·−"
-        }, googleLanguages = ["af", "am", "ar", "az", "be", "bg", "bn", "bs", "ca", "ceb", "co", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et", "eu", "fa", "fi", "fr", "fy", "ga", "gd", "gl", "gu", "ha", "haw", "hi", "hmn", "hr", "ht", "hu", "hy", "id", "ig", "is", "it", "iw", "ja", "jw", "ka", "kk", "km", "kn", "ko", "ku", "ky", "la", "lb", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "no", "ny", "or", "pa", "pl", "ps", "pt", "ro", "ru", "rw", "sd", "si", "sk", "sl", "sm", "sn", "so", "sq", "sr", "st", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "ug", "uk", "ur", "uz", "vi", "xh", "yi", "yo", "zh-CN", "zh-TW", "zu"], translationEngines = {
-          googleapi: {
-            name: "Google",
-            auto: !0,
-            funcName: "googleApiTranslate",
-            languages: googleLanguages
-          },
-          googlecloud: {
-            name: "Google Cloud Translation",
-            auto: !0,
-            funcName: "googleCloudTranslate",
-            languages: googleLanguages,
-            key: "REDACTED_GOOGLE_API_KEY",
-            endpoint: "https://translation.googleapis.com/language/translate/v2",
-            model: "nmt"
-          },
-          microsoft: {
-            name: "Azure Translator",
-            auto: !0,
-            funcName: "microsoftTranslate",
-            languages: ["af", "am", "ar", "az", "ba", "bg", "bn", "bs", "ca", "cs", "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi", "fil", "fr", "fr-CA", "ga", "gl", "gu", "ha", "he", "hi", "hr", "ht", "hu", "hy", "id", "ig", "is", "it", "ja", "ka", "kk", "km", "kn", "ko", "ku", "ky", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mr", "ms", "mt", "my", "ne", "nl", "or", "pa", "pl", "ps", "pt", "pt-PT", "ro", "ru", "rw", "sd", "si", "sk", "sl", "sm", "sn", "so", "sq", "st", "sv", "sw", "ta", "te", "th", "tk", "tr", "tt", "ug", "uk", "ur", "uz", "vi", "xh", "yo", "zh-CN", "zh-TW", "zu"],
-            parser: {
-              "zh-CN": "zh-Hans",
-              "zh-TW": "zh-Hant"
-            },
-            key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-            endpoint: "https://api.cognitive.microsofttranslator.com/translate"
-          },
-          deepl: {
-            name: "DeepL",
-            auto: !0,
-            funcName: "deepLTranslate",
-            languages: ["bg", "cs", "da", "de", "en", "el", "es", "et", "fi", "fr", "hu", "id", "it", "ja", "ko", "lt", "lv", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "zh"],
-            premium: !0,
-            key: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
-          },
-          deepseek: {
-            name: "DeepSeek",
-            auto: !0,
-            funcName: "deepSeekTranslate",
-            languages: googleLanguages,
-            key: "REDACTED_OPENAI_API_KEY",
-            endpoint: "https://api.deepseek.com/chat/completions",
-            model: "deepseek-v3"
-          },
-          openai: {
-            name: "OpenAI",
-            auto: !0,
-            funcName: "openAiTranslate",
-            languages: googleLanguages,
-            key: "REDACTED_OPENAI_API_KEY",
-            endpoint: "https://api.openai.com/v1/responses",
-            model: "gpt-5.6-luna"
-          },
-          gemini: {
-            name: "Google Gemini",
-            auto: !0,
-            funcName: "geminiTranslate",
-            languages: googleLanguages,
-            key: "REDACTED_GOOGLE_API_KEY",
-            endpoint: "https://generativelanguage.googleapis.com/v1beta/models",
-            model: "gemini-2.5-flash"
-          },
-          oaicompat: {
-            name: "OpenAI Compatible",
-            auto: !0,
-            funcName: "openAiCompatibleTranslate",
-            languages: googleLanguages,
-            key: "REDACTED_OPENAI_API_KEY",
-            endpoint: "https://your-provider.example/v1/chat/completions",
-            model: "your-model-id"
-          },
-          itranslate: {
-            name: "iTranslate",
-            auto: !0,
-            funcName: "iTranslateTranslate",
-            languages: [...new Set(["af", "ar", "az", "be", "bg", "bn", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et", "eu", "fa", "fi", "fil", "fr", "ga", "gl", "gu", "ha", "he", "hi", "hmn", "hr", "ht", "hu", "hy", "id", "ig", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "no", "ny", "pa", "pl", "pt-BR", "pt-PT", "ro", "ru", "si", "sk", "sl", "so", "sq", "sr", "st", "su", "sv", "sw", "ta", "te", "tg", "th", "tr", "uk", "ur", "uz", "vi", "we", "yi", "yo", "zh-CN", "zh-TW", "zu"].concat(googleLanguages))].sort(),
-            key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-          },
-          yandex: {
-            name: "Yandex",
-            auto: !0,
-            funcName: "yandexTranslate",
-            languages: ["af", "am", "ar", "az", "ba", "be", "bg", "bn", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en", "eo", "es", "et", "eu", "fa", "fi", "fr", "ga", "gd", "gl", "gu", "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jv", "ka", "kk", "km", "kn", "ko", "ky", "la", "lb", "lo", "lt", "lv", "mg", "mhr", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "no", "pa", "pap", "pl", "pt", "ro", "ru", "si", "sk", "sl", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tl", "tr", "tt", "udm", "uk", "ur", "uz", "vi", "xh", "yi", "zh"],
-            key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-          },
-          papago: {
-            name: "Papago",
-            auto: !0,
-            funcName: "papagoTranslate",
-            languages: ["en", "es", "fr", "id", "ja", "ko", "th", "vi", "zh-CN", "zh-TW"],
-            key: "xxxxxxxxxxxxxxxxxxxx xxxxxxxxxx"
-          },
-          baidu: {
-            name: "Baidu",
-            auto: !0,
-            funcName: "baiduTranslate",
-            languages: ["ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hu", "it", "ja", "ko", "nl", "pl", "pt", "ro", "ru", "sl", "sv", "th", "vi", "zh", "zh-CN", "zh-TW"],
-            parser: {
-              ar: "ara",
-              bg: "bul",
-              da: "dan",
-              es: "spa",
-              et: "est",
-              fi: "fin",
-              fr: "fra",
-              ja: "jp",
-              ko: "kor",
-              ro: "rom",
-              sl: "slo",
-              sv: "swe",
-              vi: "vie",
-              zh: "wyw",
-              "zh-CN": "zh",
-              "zh-TW": "cht"
-            },
-            key: "xxxxxxxxxx xxxxxxxxxxxxxxxxxxxx"
-          }
-        }, enginePortals = {
-          googleapi: {
-            primaryUrl: "https://translate.google.com/",
-            primaryLabelZh: "打开 Google 翻译",
-            primaryLabelEn: "Open Google Translate",
-            hintZh: "Google 默认模式无需单独购买 API，可直接使用。",
-            hintEn: "Google default mode does not require a separate paid API."
-          },
-          googlecloud: {
-            primaryUrl: "https://cloud.google.com/free?hl=zh-cn",
-            primaryLabelZh: "注册 / 开通 Google Cloud",
-            primaryLabelEn: "Sign up for Google Cloud",
-            secondaryUrl: "https://cloud.google.com/translate?hl=zh-cn",
-            secondaryLabelZh: "查看文档 / 定价",
-            secondaryLabelEn: "Docs / Pricing"
-          },
-          microsoft: {
-            primaryUrl: "https://azure.microsoft.com/zh-cn/free/",
-            primaryLabelZh: "注册 / 开通 Azure",
-            primaryLabelEn: "Sign up for Azure",
-            secondaryUrl: "https://azure.microsoft.com/zh-cn/products/ai-foundry/tools/translator",
-            secondaryLabelZh: "查看文档 / 产品页",
-            secondaryLabelEn: "Docs / Product"
-          },
-          deepl: {
-            primaryUrl: "https://www.deepl.com/pro-api",
-            primaryLabelZh: "注册 / 购买 DeepL API",
-            primaryLabelEn: "Get DeepL API",
-            secondaryUrl: "https://www.deepl.com/pro-api",
-            secondaryLabelZh: "查看定价 / 文档",
-            secondaryLabelEn: "Pricing / Docs"
-          },
-          deepseek: {
-            primaryUrl: "https://platform.deepseek.com/api_keys",
-            primaryLabelZh: "注册 / 获取 DeepSeek API Key",
-            primaryLabelEn: "Get DeepSeek API Key",
-            secondaryUrl: "https://api-docs.deepseek.com/zh-cn/",
-            secondaryLabelZh: "查看文档 / 模型价格",
-            secondaryLabelEn: "Docs / Pricing"
-          },
-          openai: {
-            primaryUrl: "https://platform.openai.com/api-keys",
-            primaryLabelZh: "获取 OpenAI API Key",
-            primaryLabelEn: "Get OpenAI API Key",
-            secondaryUrl: "https://developers.openai.com/api/docs/guides/migrate-to-responses",
-            secondaryLabelZh: "查看 Responses API 文档",
-            secondaryLabelEn: "Responses API Docs"
-          },
-          gemini: {
-            primaryUrl: "https://aistudio.google.com/app/apikey",
-            primaryLabelZh: "获取 Gemini API Key",
-            primaryLabelEn: "Get Gemini API Key",
-            secondaryUrl: "https://ai.google.dev/gemini-api/docs",
-            secondaryLabelZh: "查看 Gemini API 文档",
-            secondaryLabelEn: "Gemini API Docs"
-          },
-          oaicompat: {
-            hintZh: "填写你自建或第三方 OpenAI 兼容服务的 API Key、接口地址和模型名。",
-            hintEn: "Enter the API key, endpoint, and model for your self-hosted or third-party OpenAI-compatible service."
-          },
-          itranslate: {
-            primaryUrl: "https://developer.itranslate.com/",
-            primaryLabelZh: "打开 iTranslate 开发者入口",
-            primaryLabelEn: "Open iTranslate Developer Portal"
-          },
-          yandex: {
-            primaryUrl: "https://aistudio.yandex.ru/en/model-gallery#services",
-            primaryLabelZh: "打开 Yandex 官方入口",
-            primaryLabelEn: "Open Yandex Portal"
-          },
-          papago: {
-            primaryUrl: "https://developers.naver.com/main/",
-            primaryLabelZh: "打开 Naver Developers",
-            primaryLabelEn: "Open Naver Developers"
-          },
-          baidu: {
-            primaryUrl: "https://fanyi-api.baidu.com/",
-            primaryLabelZh: "打开百度翻译开放平台",
-            primaryLabelEn: "Open Baidu Translate Open Platform"
-          }
         };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, translationCache = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationCacheSaveTimer = null, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, autoTranslationBackoffUntil = 0, autoTranslationBackoffStep = 0, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map();
+        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map();
         let channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
         var pluginRuntimeActive = !0, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {};
-        let MAX_TRANSLATION_CACHE_ENTRIES = 500, AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, LIVE_AI_BATCH_ITEM_LIMIT = 10, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
+        let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, LIVE_AI_BATCH_ITEM_LIMIT = 10, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
         }, languageTypes = {
@@ -4736,15 +5819,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, AUTO_TRANSLATION_QUEUE_RETRY_DELAY));
           },
           scheduleAutoTranslationBackoff(plugin, ms) {
-            if (!ms) return;
-            let now = Date.now();
-            autoTranslationBackoffUntil > now ? autoTranslationBackoffStep = Math.min(autoTranslationBackoffStep + 1, 4) : autoTranslationBackoffStep = 0;
-            let scaledMs = Math.min(ms * Math.pow(2, autoTranslationBackoffStep), 6e4);
-            autoTranslationBackoffUntil = Math.max(autoTranslationBackoffUntil || 0, now + scaledMs), receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
+            plugin.ensureProviderClient().scheduleBackoff(ms), receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
           },
           awaitProviderBackoff(_plugin) {
-            let waitMs = (autoTranslationBackoffUntil || 0) - Date.now();
-            return waitMs <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, waitMs));
+            return _plugin.ensureProviderClient().awaitBackoff();
           },
           createQueueItem(plugin, message, channel, originalContentData = null, queueOptions = {}) {
             let normalizedOriginalContentData = originalContentData || plugin.extractOriginalContentData(message);
@@ -4780,7 +5858,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }), receivedTranslationRuntime.enqueueLiveItem(plugin, queueItem);
           },
           beginQueueProcessing(plugin) {
-            return isTranslating || isLiveAutoTranslating ? !1 : Date.now() < (autoTranslationBackoffUntil || 0) ? (receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin), !1) : !0;
+            return isTranslating || isLiveAutoTranslating ? !1 : plugin.ensureProviderClient().isBackoffActive() ? (receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin), !1) : !0;
           },
           finishQueueIfEmpty() {
             return !autoTranslationQueue.length;
@@ -5843,7 +6921,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "after") }), this.forceUpdateAll();
           }
           onStop() {
-            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), this.ensureMessageViewportStore().clearManualScrollLock(), deferredSettingsRerenderTimer = null, this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
+            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), this.ensureMessageViewportStore().clearManualScrollLock(), deferredSettingsRerenderTimer = null, this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
             let settingsPanel;
@@ -7307,66 +8385,37 @@ __________________ __________________ __________________
             }));
           }
           getCachedReceivedTranslation(message, channelId, originalContentData = null) {
-            if (!message || !translationCache[message.id]) return null;
-            let sourceData = originalContentData || this.extractOriginalContentData(message), signature = this.createReceivedTranslationSignature(message, channelId, sourceData);
-            if (!this.matchesCachedTranslationSignature(translationCache[message.id], signature) || translationCache[message.id].skipped) return null;
-            let cachedTranslation = Object.assign({ signature, channelId }, translationCache[message.id].translation), beforeSerialized = JSON.stringify(cachedTranslation || {});
-            if (cachedTranslation = this.normalizeStoredTranslationData(cachedTranslation), !cachedTranslation.originalContent && sourceData && sourceData.content && (cachedTranslation.originalContent = String(sourceData.content)), !cachedTranslation.translatedContent && cachedTranslation.content && (cachedTranslation.translatedContent = this.extractLegacyDisplayedTranslationParts(cachedTranslation.content).translatedContent || cachedTranslation.content), !cachedTranslation.translatedContent || (sourceData && sourceData.content || "").trim() && !String(cachedTranslation.originalContent || "").trim()) return null;
-            if (cachedTranslation = this.refreshTranslationDisplay(cachedTranslation), this.isTranslationResultTooSimilar(cachedTranslation))
-              return delete translationCache[message.id], this.scheduleTranslationCacheSave(), null;
-            if (this.shouldSkipReceivedTranslationBeforeRequest(sourceData, channelId) || !this.shouldKeepAutoTranslatedResult(cachedTranslation, channelId))
-              return delete translationCache[message.id], this.scheduleTranslationCacheSave(), null;
-            if (JSON.stringify(cachedTranslation || {}) != beforeSerialized) {
-              let upgradedTranslation = Object.assign({}, cachedTranslation);
-              delete upgradedTranslation.signature, translationCache[message.id].translation = upgradedTranslation, translationCache[message.id].signature = this.hashReceivedTranslationSignature(signature), translationCache[message.id].cachedAt = translationCache[message.id].cachedAt || Date.now(), this.scheduleTranslationCacheSave();
-            }
-            return cachedTranslation;
+            return this.ensureTranslationCacheStore().getCachedTranslation(message, channelId, originalContentData);
           }
           getCachedReceivedSkipDecision(message, channelId, originalContentData = null) {
-            if (!message || !translationCache[message.id]) return null;
-            let sourceData = originalContentData || this.extractOriginalContentData(message), signature = this.createReceivedTranslationSignature(message, channelId, sourceData);
-            if (!this.matchesCachedTranslationSignature(translationCache[message.id], signature)) return null;
-            let skipped = translationCache[message.id].skipped;
-            return !skipped || !skipped.reason ? null : skipped.policyVersion !== RECEIVED_SKIP_CACHE_POLICY_VERSION ? (delete translationCache[message.id], this.scheduleTranslationCacheSave(), null) : Object.assign({ signature, channelId }, skipped);
+            return this.ensureTranslationCacheStore().getCachedSkipDecision(message, channelId, originalContentData);
           }
           scheduleTranslationCacheSave() {
-            translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationCacheSaveTimer = setTimeout((_2) => {
-              BDFDB.DataUtils.save(translationCache, this, "translationCache"), translationCacheSaveTimer = null;
-            }, 300);
+            return this.ensureTranslationCacheStore().scheduleSave();
           }
           persistTranslationCacheEntry(messageId, signature, translation) {
-            let storedTranslation = Object.assign({}, translation);
-            delete storedTranslation.signature, translationCache[messageId] = {
-              signature: this.hashReceivedTranslationSignature(signature),
-              cachedAt: Date.now(),
-              translation: storedTranslation
-            };
-            let cacheKeys = Object.keys(translationCache);
-            cacheKeys.length > MAX_TRANSLATION_CACHE_ENTRIES && cacheKeys.sort((keyA, keyB) => (translationCache[keyA].cachedAt || 0) - (translationCache[keyB].cachedAt || 0)).slice(0, cacheKeys.length - MAX_TRANSLATION_CACHE_ENTRIES).forEach((key) => delete translationCache[key]), this.scheduleTranslationCacheSave();
+            return this.ensureTranslationCacheStore().persistTranslation(messageId, signature, translation);
           }
           shouldPersistReceivedSkipDecision(reason) {
-            return ["same_language", "too_similar", "ai_skip_signal", "source_filter"].includes(reason);
+            return this.ensureTranslationCacheStore().shouldPersistSkipDecision(reason);
           }
           hasCachedTranslationEntry(messageId) {
-            return !!(messageId && translationCache[messageId]);
+            return this.ensureTranslationCacheStore().hasEntry(messageId);
           }
           getPersistedTranslationCacheEntry(messageId) {
-            return messageId && translationCache[messageId] || null;
+            return this.ensureTranslationCacheStore().getEntry(messageId);
           }
           seedRawTranslationCacheEntryForTest(messageId, signature, translation) {
-            translationCache[messageId] = { signature, cachedAt: Date.now(), translation: Object.assign({}, translation) };
+            return this.ensureTranslationCacheStore().seedRawEntryForTest(messageId, signature, translation);
           }
           // The raw signature embeds the whole request configuration, so storing it verbatim
           // made it the majority of the persisted cache file. Every use is an equality check,
           // so a compact digest carries the same information at a fraction of the size.
           hashReceivedTranslationSignature(signature) {
-            let text = String(signature ?? ""), hash = 2166136261;
-            for (let index = 0; index < text.length; index++)
-              hash ^= text.charCodeAt(index), hash = Math.imul(hash, 16777619) >>> 0;
-            return `h1:${hash.toString(36)}:${text.length.toString(36)}`;
+            return this.ensureTranslationCacheStore().hashSignature(signature);
           }
           matchesCachedTranslationSignature(entry, signature) {
-            return !entry || entry.signature == null ? !1 : String(entry.signature).indexOf("h1:") !== 0 ? entry.signature == signature : entry.signature == this.hashReceivedTranslationSignature(signature);
+            return this.ensureTranslationCacheStore().matchesSignature(entry, signature);
           }
           getLoadedAutoTranslationSeenCount(channelId) {
             return loadedTranslationStatusStore.getSeenCount(channelId);
@@ -7378,21 +8427,10 @@ __________________ __________________ __________________
             return !!(messageId && oldMessages[messageId]);
           }
           persistReceivedSkipDecision(messageId, signature, reason, preview = "") {
-            if (!messageId || !signature || !reason || !this.shouldPersistReceivedSkipDecision(reason)) return;
-            translationCache[messageId] = {
-              signature: this.hashReceivedTranslationSignature(signature),
-              cachedAt: Date.now(),
-              skipped: {
-                policyVersion: RECEIVED_SKIP_CACHE_POLICY_VERSION,
-                reason,
-                preview: this.getLoadedAutoTranslationPreviewText(preview)
-              }
-            };
-            let cacheKeys = Object.keys(translationCache);
-            cacheKeys.length > MAX_TRANSLATION_CACHE_ENTRIES && cacheKeys.sort((keyA, keyB) => (translationCache[keyA].cachedAt || 0) - (translationCache[keyB].cachedAt || 0)).slice(0, cacheKeys.length - MAX_TRANSLATION_CACHE_ENTRIES).forEach((key) => delete translationCache[key]), this.scheduleTranslationCacheSave();
+            return this.ensureTranslationCacheStore().persistSkipDecision(messageId, signature, reason, preview);
           }
           clearCachedTranslation(messageId) {
-            !messageId || !translationCache[messageId] || (delete translationCache[messageId], this.scheduleTranslationCacheSave());
+            return this.ensureTranslationCacheStore().clear(messageId);
           }
           createReplyPreviewSignature(message, channelId, originalContent = null) {
             return JSON.stringify(Object.assign({}, this.getReceivedTranslationConfigurationData(channelId), {
@@ -8037,19 +9075,7 @@ __________________ __________________ __________________
             return receivedTranslationRuntime.awaitProviderBackoff(this);
           }
           requestWithTimeout(url, options, callback, timeoutMs = 3e4) {
-            let done = !1, timer = null, finish = /* @__PURE__ */ __name((error, response, body) => {
-              if (done) return;
-              done = !0, timer && BDFDB.TimeUtils.clear(timer);
-              let statusCode = response && response.statusCode;
-              statusCode == 429 ? this.scheduleAutoTranslationBackoff(5e3) : statusCode && statusCode >= 500 && this.scheduleAutoTranslationBackoff(2e3), callback(error, response, body);
-            }, "finish");
-            timer = BDFDB.TimeUtils.timeout((_2) => finish(null, { statusCode: 504 }, ""), timeoutMs);
-            try {
-              BDFDB.LibraryRequires.request(url, options, finish);
-            } catch (err) {
-              finish(err, null, "");
-            }
-            return timer;
+            return this.ensureProviderClient().requestWithTimeout(url, options, callback, timeoutMs);
           }
           getReceivedAutoTranslateSourceLanguages() {
             return receivedSettingsPolicy.getReceivedAutoTranslateSourceLanguages(this);
@@ -8607,71 +9633,16 @@ __________________ __________________ __________________
             };
           }
           parseAiBatchTranslationResponse(content, expectedIds = null) {
-            if (content = (content || "").trim(), !content) return null;
-            content = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-            let firstArray = content.indexOf("["), lastArray = content.lastIndexOf("]");
-            firstArray > -1 && lastArray > firstArray && (content = content.slice(firstArray, lastArray + 1));
-            try {
-              let parsed = JSON.parse(content);
-              if (parsed && Array.isArray(parsed.translations) && (parsed = parsed.translations), !Array.isArray(parsed)) return null;
-              let expectedIdSet = expectedIds ? new Set(Array.from(expectedIds, (id) => String(id))) : null, duplicateIds = /* @__PURE__ */ new Set();
-              return parsed.reduce((dict, item) => {
-                if (!item || item.id == null) return dict;
-                let id = String(item.id);
-                if (expectedIdSet && !expectedIdSet.has(id)) return dict;
-                if (duplicateIds.has(id) || Object.prototype.hasOwnProperty.call(dict, id))
-                  return duplicateIds.add(id), delete dict[id], dict;
-                let value = item.translation != null ? item.translation : item.text;
-                return dict[id] = value == null ? "" : String(value), dict;
-              }, {});
-            } catch {
-              return null;
-            }
+            return this.ensureProviderClient().parseAiBatchTranslationResponse(content, expectedIds);
           }
           requestAiBatchTranslation(engineKey, preparedItems) {
-            return new Promise((resolve) => {
-              if (!engineKey || !preparedItems || !preparedItems.length || !this.isEngineConfiguredForRuntime(engineKey)) return resolve(null);
-              let auth = authKeys[engineKey] || {}, apiKey = auth.key || "", apiEndpoint = this.normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint), modelId = auth.model || translationEngines[engineKey].model, output = preparedItems[0].output, input = preparedItems[0].input, payloadItems = preparedItems.map((item) => ({
-                id: String(item.message.id),
-                text: item.protectedText.replace(/\n/g, " [NEWLINE] ").replace(/\s+/g, " ")
-              })), systemPrompt = "You are a strict Discord chat batch translator. Return valid JSON only.", batchChannelId = preparedItems[0].channelId || null, decisionRules = this.shouldUseAiAutoTranslateDecision(batchChannelId) ? `Apply these skip rules to every message; when a message should not be translated set its "translation" to exactly __SKIP_TRANSLATION__.
-${this.getAiAutoTranslatePrompt({ input, output })}` : "The plugin has already filtered messages that should be skipped; do not make skip decisions.", batchPrompt = `Target language is exactly ${output.name || output.id}. Input language is ${input && input.auto ? "auto-detect" : input.name || input.id || "auto"}. ${decisionRules}
-Rules:
-1. Return ONLY a JSON array. Each item must be {"id":"same id","translation":"translated text"}.
-2. Translate every provided natural-language message into exactly the target language.
-3. Preserve placeholders like ⟦0⟧ and ⟦DTA0⟧ exactly. Preserve URLs, code, emoji, mentions, IDs, and product/model names.
-4. Convert [NEWLINE] markers back to real line breaks in the translation; do not show [NEWLINE] literally.
-5. Do not omit any source content, including short interjections, laughter, particles, repeated words, or standalone short lines; translate or preserve them naturally in the target language.
-6. Do not add explanations. Do not output any language other than the target language except preserved protected content.
-
-Messages JSON:
-${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => resolve(this.parseAiBatchTranslationResponse(content, payloadItems.map((item) => item.id))), "finish");
-              if (engineKey == "openai")
-                return this.requestWithTimeout(apiEndpoint, {
-                  method: "post",
-                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-                  body: JSON.stringify({ model: modelId, instructions: systemPrompt, input: batchPrompt, store: !1 })
-                }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(this.parseOpenAiResponseText(body)) : resolve(null));
-              if (engineKey == "gemini") {
-                let geminiModelId = String(modelId || "").replace(/^models\//, ""), requestUrl = `${apiEndpoint}/${encodeURIComponent(geminiModelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-                return this.requestWithTimeout(requestUrl, {
-                  method: "post",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ system_instruction: { parts: [{ text: systemPrompt }] }, contents: [{ role: "user", parts: [{ text: batchPrompt }] }], generationConfig: { temperature: 0.1, topP: 0.8 } })
-                }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(this.parseGeminiResponseText(body)) : resolve(null));
-              }
-              this.requestWithTimeout(apiEndpoint, {
-                method: "post",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-                body: JSON.stringify({ model: modelId, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: batchPrompt }], temperature: 0.1, top_p: 0.8 })
-              }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(this.parseOpenAiResponseText(body)) : resolve(null));
-            });
+            return this.ensureProviderClient().requestAiBatchTranslation(engineKey, preparedItems);
           }
           processAutoTranslationQueue() {
             return receivedTranslationRuntime.processAutoTranslationQueue(this);
           }
           forceUpdateAll() {
-            favorites = BDFDB.DataUtils.load(this, "favorites"), favorites = BDFDB.ArrayUtils.is(favorites) ? favorites : [], authKeys = BDFDB.DataUtils.load(this, "authKeys"), channelLanguages = BDFDB.DataUtils.load(this, "channelLanguages"), guildLanguages = BDFDB.DataUtils.load(this, "guildLanguages"), channelPrimaryEngineOverrides = this.normalizeStoredChannelPrimaryEngineOverrides(BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides")), translationCache = BDFDB.DataUtils.load(this, "translationCache"), translationCache = translationCache && typeof translationCache == "object" && !Array.isArray(translationCache) ? translationCache : {};
+            favorites = BDFDB.DataUtils.load(this, "favorites"), favorites = BDFDB.ArrayUtils.is(favorites) ? favorites : [], authKeys = BDFDB.DataUtils.load(this, "authKeys"), channelLanguages = BDFDB.DataUtils.load(this, "channelLanguages"), guildLanguages = BDFDB.DataUtils.load(this, "guildLanguages"), channelPrimaryEngineOverrides = this.normalizeStoredChannelPrimaryEngineOverrides(BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides")), this.ensureTranslationCacheStore().loadPersisted();
             let storedTranslationEnabledStates = BDFDB.DataUtils.load(this, "translationEnabledStates"), storedReceivedAutoTranslationEnabledStates = BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates"), normalizedStoredTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedTranslationEnabledStates), normalizedStoredReceivedAutoTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedReceivedAutoTranslationEnabledStates);
             translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates), (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) && this.saveChannelEnablementState(translationEnabledStates), suppressedAutoTranslations = {}, this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), isLiveAutoTranslating = !1, replyPreviewTranslations = {}, translationRerenderTimer && clearTimeout(translationRerenderTimer), translationRerenderTimer = null, deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), deferredSettingsRerenderTimer = null, this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
           }
@@ -8812,6 +9783,49 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
               guildId: e.instance.props.channel.guild_id ? e.instance.props.channel.guild_id : "@me",
               channelId: e.instance.props.channel.id
             })), e.returnvalue.props.children = children;
+          }
+          get modelCatalogState() {
+            return this.ensureProviderClient().getModelCatalogState();
+          }
+          ensureProviderClient() {
+            return this.providerClientInstance || (this.providerClientInstance = createProviderClient({
+              request: /* @__PURE__ */ __name((url, options, callback) => BDFDB.LibraryRequires.request(url, options, callback), "request"),
+              setTimeout: /* @__PURE__ */ __name((callback, delay) => BDFDB.TimeUtils.timeout(callback, delay), "setTimeout"),
+              clearTimeout: /* @__PURE__ */ __name((timer) => BDFDB.TimeUtils.clear(timer), "clearTimeout"),
+              // A raw global timer on purpose: routing the backoff sleep through BDFDB would
+              // leave the awaiting promise pending forever once the plugin stops.
+              sleep: /* @__PURE__ */ __name((ms) => new Promise((resolve) => setTimeout(resolve, ms)), "sleep"),
+              now: /* @__PURE__ */ __name(() => Date.now(), "now"),
+              getAuthKeys: /* @__PURE__ */ __name(() => authKeys, "getAuthKeys"),
+              saveAuthKeys: /* @__PURE__ */ __name((value) => BDFDB.DataUtils.save(value, this, "authKeys"), "saveAuthKeys"),
+              getLanguages: /* @__PURE__ */ __name(() => languages, "getLanguages"),
+              notify: /* @__PURE__ */ __name((message, options) => BDFDB.NotificationUtils.toast(message, options), "notify"),
+              getLabels: /* @__PURE__ */ __name(() => this.labels, "getLabels"),
+              getCustomText: /* @__PURE__ */ __name((key) => this.getCustomText(key), "getCustomText"),
+              getEngineLabel: /* @__PURE__ */ __name((engineKey) => this.getEngineLabel(engineKey), "getEngineLabel"),
+              shouldUseAiAutoTranslateDecision: /* @__PURE__ */ __name((channelId) => this.shouldUseAiAutoTranslateDecision(channelId), "shouldUseAiAutoTranslateDecision"),
+              getAiAutoTranslatePrompt: /* @__PURE__ */ __name((translationData) => this.getAiAutoTranslatePrompt(translationData), "getAiAutoTranslatePrompt")
+            })), this.providerClientInstance;
+          }
+          ensureTranslationCacheStore() {
+            return this.translationCacheStoreInstance || (this.translationCacheStoreInstance = createTranslationCacheStore({
+              now: /* @__PURE__ */ __name(() => Date.now(), "now"),
+              setTimeout: /* @__PURE__ */ __name((callback, delay) => setTimeout(callback, delay), "setTimeout"),
+              clearTimeout: /* @__PURE__ */ __name((timer) => clearTimeout(timer), "clearTimeout"),
+              loadCache: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "translationCache"), "loadCache"),
+              saveCache: /* @__PURE__ */ __name((cache) => BDFDB.DataUtils.save(cache, this, "translationCache"), "saveCache"),
+              extractOriginalContentData: /* @__PURE__ */ __name((message) => this.extractOriginalContentData(message), "extractOriginalContentData"),
+              createSignature: /* @__PURE__ */ __name((message, channelId, sourceData) => this.createReceivedTranslationSignature(message, channelId, sourceData), "createSignature"),
+              normalizeStoredTranslation: /* @__PURE__ */ __name((translation) => this.normalizeStoredTranslationData(translation), "normalizeStoredTranslation"),
+              extractLegacyDisplayedParts: /* @__PURE__ */ __name((content) => this.extractLegacyDisplayedTranslationParts(content), "extractLegacyDisplayedParts"),
+              // Policy and display stay in the received-translation runtime; a cache lookup
+              // asks whether an old entry still passes today's guards, it does not decide.
+              refreshTranslationDisplay: /* @__PURE__ */ __name((translation) => this.refreshTranslationDisplay(translation), "refreshTranslationDisplay"),
+              isTranslationResultTooSimilar: /* @__PURE__ */ __name((translation) => this.isTranslationResultTooSimilar(translation), "isTranslationResultTooSimilar"),
+              shouldSkipBeforeRequest: /* @__PURE__ */ __name((sourceData, channelId) => this.shouldSkipReceivedTranslationBeforeRequest(sourceData, channelId), "shouldSkipBeforeRequest"),
+              shouldKeepAutoTranslatedResult: /* @__PURE__ */ __name((translation, channelId) => this.shouldKeepAutoTranslatedResult(translation, channelId), "shouldKeepAutoTranslatedResult"),
+              getSkipPreviewText: /* @__PURE__ */ __name((text) => this.getLoadedAutoTranslationPreviewText(text), "getSkipPreviewText")
+            })), this.translationCacheStoreInstance;
           }
           ensureMessageViewportStore() {
             return this.messageViewportStoreInstance || (this.messageViewportStoreInstance = createMessageViewportStore({
@@ -9143,13 +10157,7 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
             return Object.keys(translationEngines).filter((engineKey) => translationEngines[engineKey].key && !activeEngineKeys.has(engineKey));
           }
           isEngineConfiguredForRuntime(engineKey) {
-            if (!translationEngines[engineKey]) return !1;
-            if (!["microsoft", "googlecloud", "deepl", "deepseek", "openai", "gemini", "oaicompat"].includes(engineKey)) return !0;
-            let auth = authKeys[engineKey] || {};
-            if (!(auth.key || "").trim()) return !1;
-            if (engineKey != "oaicompat") return !0;
-            let endpoint = (auth.endpoint || "").trim(), model = (auth.model || "").trim();
-            return !!endpoint && !!model && endpoint != translationEngines.oaicompat.endpoint && model != translationEngines.oaicompat.model;
+            return this.ensureProviderClient().isEngineConfiguredForRuntime(engineKey);
           }
           engineSupportsLanguage(engineKey, language) {
             let engine = translationEngines[engineKey];
@@ -9698,712 +10706,85 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
             return !engine || typeof this[engine.funcName] != "function" || !this.isEngineConfiguredForRuntime(key) ? !1 : specialCase || this.engineSupportsLanguagePair(key, input, output);
           }
           isValidatableEngine(engineKey) {
-            return ["googlecloud", "microsoft", "deepl", "deepseek", "openai", "gemini", "oaicompat"].includes(engineKey);
+            return this.ensureProviderClient().isValidatableEngine(engineKey);
           }
           normalizeApiEndpoint(engineKey, endpoint) {
-            let normalized = (endpoint || "").trim() || translationEngines[engineKey] && translationEngines[engineKey].endpoint || "";
-            return normalized ? (normalized = normalized.replace(/\s+/g, "").replace(/\/+$/, ""), engineKey == "deepseek" ? (/\/v1$/i.test(normalized) && (normalized = normalized.slice(0, -3)), /\/v1\/chat\/completions$/i.test(normalized) ? normalized.replace(/\/v1\/chat\/completions$/i, "/chat/completions") : /\/chat\/completions$/i.test(normalized) ? normalized : `${normalized}/chat/completions`) : engineKey == "oaicompat" ? /\/chat\/completions$/i.test(normalized) ? normalized : /\/v1$/i.test(normalized) ? `${normalized}/chat/completions` : /^https?:\/\/[^/]+$/i.test(normalized) ? `${normalized}/v1/chat/completions` : normalized : engineKey == "openai" ? /\/responses$/i.test(normalized) ? normalized : /\/v1$/i.test(normalized) ? `${normalized}/responses` : /^https?:\/\/[^/]+$/i.test(normalized) ? `${normalized}/v1/responses` : normalized : engineKey == "gemini" ? normalized.replace(/\/[^/]+:generateContent$/i, "").replace(/\/models\/[^/]+$/i, "/models") : engineKey == "microsoft" ? (normalized = normalized.replace(/\?.*$/, ""), /\/translate$/i.test(normalized) ? normalized : `${normalized}/translate`) : normalized) : "";
+            return this.ensureProviderClient().normalizeApiEndpoint(engineKey, endpoint);
           }
           supportsModelCatalog(engineKey) {
-            return ["deepseek", "openai", "gemini", "oaicompat"].includes(engineKey);
+            return this.ensureProviderClient().supportsModelCatalog(engineKey);
           }
           getModelCatalogEndpoint(engineKey, endpoint) {
-            let normalized = this.normalizeApiEndpoint(engineKey, endpoint);
-            return normalized ? engineKey == "openai" && /\/responses$/i.test(normalized) ? normalized.replace(/\/responses$/i, "/models") : engineKey == "gemini" ? normalized : /\/chat\/completions$/i.test(normalized) ? normalized.replace(/\/chat\/completions$/i, "/models") : `${normalized.replace(/\/+$/, "")}/models` : "";
+            return this.ensureProviderClient().getModelCatalogEndpoint(engineKey, endpoint);
           }
           fetchModelCatalog(engineKey, onUpdate = null) {
-            return new Promise((resolve) => {
-              if (!this.supportsModelCatalog(engineKey)) return resolve({ ok: !1, items: [] });
-              this.modelCatalogState || (this.modelCatalogState = {});
-              let updateState = /* @__PURE__ */ __name((patch) => {
-                this.modelCatalogState[engineKey] = Object.assign({}, this.modelCatalogState[engineKey], patch), typeof onUpdate == "function" && onUpdate();
-              }, "updateState"), engineLabel = this.getEngineLabel(engineKey), auth = authKeys[engineKey] || {}, apiKey = (auth.key || "").trim();
-              if (!apiKey)
-                return BDFDB.NotificationUtils.toast(`${engineLabel}: ${this.getCustomText("validate_missing_key")}`, { type: "danger", position: "center" }), resolve({ ok: !1, items: [] });
-              if (engineKey == "oaicompat" && (!(auth.endpoint || "").trim() || (auth.endpoint || "").trim() == translationEngines.oaicompat.endpoint))
-                return BDFDB.NotificationUtils.toast(`${engineLabel}: ${this.getCustomText("validate_missing_endpoint")}`, { type: "danger", position: "center" }), resolve({ ok: !1, items: [] });
-              let normalizedEndpoint = this.normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey] && translationEngines[engineKey].endpoint || "");
-              if (!normalizedEndpoint)
-                return BDFDB.NotificationUtils.toast(`${engineLabel}: ${this.getCustomText("validate_missing_endpoint")}`, { type: "danger", position: "center" }), resolve({ ok: !1, items: [] });
-              auth.endpoint && normalizedEndpoint != auth.endpoint && (auth.endpoint = normalizedEndpoint, authKeys[engineKey] = auth, BDFDB.DataUtils.save(authKeys, this, "authKeys"), this.SettingsUpdated = !0);
-              let modelCatalogEndpoint = this.getModelCatalogEndpoint(engineKey, normalizedEndpoint), requestUrl = engineKey == "gemini" ? `${modelCatalogEndpoint}?key=${encodeURIComponent(apiKey)}` : modelCatalogEndpoint;
-              updateState({ loading: !0, items: [], endpoint: requestUrl });
-              let requestHeaders = { "Content-Type": "application/json" };
-              engineKey != "gemini" && (requestHeaders.Authorization = `Bearer ${apiKey}`), BDFDB.LibraryRequires.request(requestUrl, {
-                method: "get",
-                headers: requestHeaders
-              }, (error, response, body) => {
-                if (!error && body && response && response.statusCode == 200)
-                  try {
-                    body = JSON.parse(body);
-                    let items = (engineKey == "gemini" ? (body && body.models || []).filter((item) => !item || !Array.isArray(item.supportedGenerationMethods) || item.supportedGenerationMethods.includes("generateContent")) : body && body.data || []).map((item) => typeof item == "string" ? item : engineKey == "gemini" ? item && item.name && item.name.replace(/^models\//, "") : item && item.id).filter((item) => typeof item == "string" && item.trim()).sort((modelA, modelB) => modelA.localeCompare(modelB));
-                    return updateState({
-                      loading: !1,
-                      items,
-                      endpoint: requestUrl,
-                      fetchedAt: Date.now()
-                    }), BDFDB.NotificationUtils.toast(
-                      items.length ? `${engineLabel}: ${this.getCustomText("model_catalog_loaded").replace("{count}", items.length)}` : `${engineLabel}: ${this.getCustomText("model_catalog_empty")}`,
-                      {
-                        type: items.length ? "success" : "warning",
-                        position: "center"
-                      }
-                    ), resolve({ ok: !0, items });
-                  } catch {
-                  }
-                updateState({ loading: !1, items: [] });
-                let details = this.getValidationErrorDetails(body);
-                return BDFDB.NotificationUtils.toast(
-                  `${engineLabel}: ${this.getCustomText("validate_failed")}${response && response.statusCode ? ` (${response.statusCode})` : ""}${details ? ` - ${details}` : ""}`,
-                  {
-                    type: "danger",
-                    position: "center"
-                  }
-                ), resolve({ ok: !1, items: [] });
-              });
-            });
+            return this.ensureProviderClient().fetchModelCatalog(engineKey, onUpdate);
           }
           mapLanguageCodeForEngine(engineKey, languageId) {
-            return languageId && (engineKey == "deepl" ? languageId == "zh-CN" || languageId == "zh" ? "ZH" : languageId == "zh-TW" ? "ZH-HANT" : languageId.toUpperCase() : translationEngines[engineKey] && translationEngines[engineKey].parser && translationEngines[engineKey].parser[languageId] || languageId);
+            return this.ensureProviderClient().mapLanguageCodeForEngine(engineKey, languageId);
           }
           getValidationRequestForEngine(engineKey) {
-            return {
-              source: "en",
-              target: "de",
-              text: "Good morning"
-            };
+            return this.ensureProviderClient().getValidationRequestForEngine(engineKey);
           }
           getValidationErrorDetails(body) {
-            if (!body) return "";
-            try {
-              body = typeof body == "string" ? JSON.parse(body) : body;
-            } catch {
-              return typeof body == "string" ? body.slice(0, 160) : "";
-            }
-            return body && body.error && (body.error.message || body.error.code) || body.message || body.error_msg || body.msg || "";
+            return this.ensureProviderClient().getValidationErrorDetails(body);
           }
           validateEngineConfig(engineKey) {
-            return new Promise((resolve) => {
-              if (!this.isValidatableEngine(engineKey)) return resolve({ ok: !1, normalized: !1 });
-              let engineLabel = this.getEngineLabel(engineKey), runningToast = null, finish = /* @__PURE__ */ __name((ok, message, normalized2 = !1) => {
-                runningToast && runningToast.close(), BDFDB.NotificationUtils.toast(message, {
-                  type: ok ? "success" : "danger",
-                  position: "center"
-                }), resolve({ ok, normalized: normalized2 });
-              }, "finish"), auth = authKeys[engineKey] || {}, apiKey = (auth.key || "").trim();
-              if (!apiKey) return finish(!1, `${engineLabel}: ${this.getCustomText("validate_missing_key")}`);
-              if (engineKey == "oaicompat" && (!(auth.endpoint || "").trim() || (auth.endpoint || "").trim() == translationEngines.oaicompat.endpoint)) return finish(!1, `${engineLabel}: ${this.getCustomText("validate_missing_endpoint")}`);
-              if (engineKey == "oaicompat" && (!(auth.model || "").trim() || (auth.model || "").trim() == translationEngines.oaicompat.model)) return finish(!1, `${engineLabel}: ${this.getCustomText("validate_missing_model")}`);
-              let normalized = !1, apiEndpoint = "";
-              if (translationEngines[engineKey] && translationEngines[engineKey].endpoint && (apiEndpoint = this.normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint), auth.endpoint && apiEndpoint != auth.endpoint && (auth.endpoint = apiEndpoint, authKeys[engineKey] = auth, BDFDB.DataUtils.save(authKeys, this, "authKeys"), this.SettingsUpdated = !0, normalized = !0), !apiEndpoint))
-                return finish(!1, `${engineLabel}: ${this.getCustomText("validate_missing_endpoint")}`, normalized);
-              let modelId = (auth.model || translationEngines[engineKey] && translationEngines[engineKey].model || "").trim();
-              if (["deepseek", "openai", "gemini", "oaicompat"].includes(engineKey) && !modelId) return finish(!1, `${engineLabel}: ${this.getCustomText("validate_missing_model")}`, normalized);
-              let sample = this.getValidationRequestForEngine(engineKey);
-              runningToast = BDFDB.NotificationUtils.toast(`${this.getCustomText("validate_running")} ${engineLabel}...`, {
-                timeout: 0,
-                ellipsis: !0,
-                position: "center"
-              });
-              let successMessage = /* @__PURE__ */ __name((translatedText) => {
-                let suffix = normalized ? ` ${this.getCustomText("validate_saved_endpoint")}` : "", preview = translatedText ? ` (${translatedText.slice(0, 48)})` : "";
-                return `${engineLabel}: ${this.getCustomText("validate_success")}.${suffix}${preview}`;
-              }, "successMessage"), failMessage = /* @__PURE__ */ __name((statusCode, body) => {
-                let details = this.getValidationErrorDetails(body);
-                return `${engineLabel}: ${this.getCustomText("validate_failed")}${statusCode ? ` (${statusCode})` : ""}${details ? ` - ${details}` : ""}`;
-              }, "failMessage");
-              switch (engineKey) {
-                case "googlecloud": {
-                  let model = (auth.model || "").trim(), form = {
-                    key: apiKey,
-                    q: sample.text,
-                    source: sample.source,
-                    target: sample.target,
-                    format: "text"
-                  };
-                  return model && (form.model = model), BDFDB.LibraryRequires.request(apiEndpoint, {
-                    method: "post",
-                    form
-                  }, (error, response, body) => {
-                    if (!error && body && response && response.statusCode == 200)
-                      try {
-                        body = JSON.parse(body);
-                        let translation = body && body.data && body.data.translations && body.data.translations[0] && body.data.translations[0].translatedText;
-                        return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
-                      } catch {
-                      }
-                    return finish(!1, failMessage(response && response.statusCode, body), normalized);
-                  });
-                }
-                case "microsoft": {
-                  let headers = {
-                    "Content-Type": "application/json",
-                    "Ocp-Apim-Subscription-Key": apiKey
-                  }, region = (auth.region || "").trim();
-                  return region && region != "global" && (headers["Ocp-Apim-Subscription-Region"] = region), BDFDB.LibraryRequires.request(apiEndpoint, {
-                    method: "post",
-                    headers,
-                    body: JSON.stringify([{ Text: sample.text }]),
-                    form: {
-                      "api-version": "3.0",
-                      from: this.mapLanguageCodeForEngine("microsoft", sample.source),
-                      to: this.mapLanguageCodeForEngine("microsoft", sample.target)
-                    }
-                  }, (error, response, body) => {
-                    if (!error && body && response && response.statusCode == 200)
-                      try {
-                        body = JSON.parse(body);
-                        let translation = body && body[0] && body[0].translations && body[0].translations[0] && body[0].translations[0].text;
-                        return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
-                      } catch {
-                      }
-                    return finish(!1, failMessage(response && response.statusCode, body), normalized);
-                  });
-                }
-                case "deepl": {
-                  let translateEndpoint = auth.paid ? "https://api.deepl.com/v2/translate" : "https://api-free.deepl.com/v2/translate";
-                  return BDFDB.LibraryRequires.request(translateEndpoint, {
-                    method: "post",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `DeepL-Auth-Key ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                      text: [sample.text],
-                      source_lang: this.mapLanguageCodeForEngine("deepl", sample.source),
-                      target_lang: this.mapLanguageCodeForEngine("deepl", sample.target)
-                    })
-                  }, (error, response, body) => {
-                    if (!error && body && response && response.statusCode == 200)
-                      try {
-                        body = JSON.parse(body);
-                        let translation = body && body.translations && body.translations[0] && body.translations[0].text;
-                        return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
-                      } catch {
-                      }
-                    return finish(!1, failMessage(response && response.statusCode, body), normalized);
-                  });
-                }
-                case "openai":
-                  return BDFDB.LibraryRequires.request(apiEndpoint, {
-                    method: "post",
-                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-                    body: JSON.stringify({
-                      model: modelId,
-                      instructions: "You are a translation validator. Return only the translation.",
-                      input: `Translate the following text from English to German.
-
-${sample.text}`,
-                      store: !1
-                    })
-                  }, (error, response, body) => {
-                    let translation = !error && response && response.statusCode == 200 ? this.parseOpenAiResponseText(body) : "";
-                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
-                  });
-                case "gemini": {
-                  let geminiModelId = modelId.replace(/^models\//, ""), requestUrl = `${apiEndpoint}/${encodeURIComponent(geminiModelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-                  return BDFDB.LibraryRequires.request(requestUrl, {
-                    method: "post",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      system_instruction: { parts: [{ text: "You are a translation validator. Return only the translation." }] },
-                      contents: [{ role: "user", parts: [{ text: `Translate the following text from English to German.
-
-${sample.text}` }] }]
-                    })
-                  }, (error, response, body) => {
-                    let translation = !error && response && response.statusCode == 200 ? this.parseGeminiResponseText(body) : "";
-                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
-                  });
-                }
-                case "deepseek":
-                case "oaicompat":
-                  return BDFDB.LibraryRequires.request(apiEndpoint, {
-                    method: "post",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                      model: modelId,
-                      messages: [{
-                        role: "system",
-                        content: "You are a translation validator."
-                      }, {
-                        role: "user",
-                        content: `Translate the following text from English to German. Return only the translation.
-
-${sample.text}`
-                      }],
-                      temperature: 0,
-                      max_tokens: 32
-                    })
-                  }, (error, response, body) => {
-                    if (!error && body && response && response.statusCode == 200)
-                      try {
-                        body = JSON.parse(body);
-                        let translation = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
-                        return finish(!!translation, translation ? successMessage(translation.trim()) : failMessage(response.statusCode, body), normalized);
-                      } catch {
-                      }
-                    return finish(!1, failMessage(response && response.statusCode, body), normalized);
-                  });
-              }
-              return finish(!1, `${engineLabel}: ${this.getCustomText("validate_failed")}`, normalized);
-            });
+            return this.ensureProviderClient().validateEngineConfig(engineKey);
           }
           googleApiTranslate(data, callback) {
-            BDFDB.LibraryRequires.request("https://translate.googleapis.com/translate_a/single", {
-              form: {
-                client: "gtx",
-                dt: "t",
-                dj: "1",
-                source: "input",
-                sl: data.input.id,
-                tl: data.output.id,
-                q: encodeURIComponent(data.text)
-              }
-            }, (error, response, body) => {
-              if (!error && body && response.statusCode == 200)
-                try {
-                  body = JSON.parse(body), !data.specialCase && body.src && body.src && languages[body.src] && (data.input.id = body.src, data.input.name = languages[body.src].name, data.input.ownlang = languages[body.src].ownlang), callback(body.sentences.map((n) => n && n.trans).filter((n) => n).join(""));
-                } catch {
-                  callback("");
-                }
-              else
-                response.statusCode == 429 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_hourlylimit}`, {
-                  type: "danger",
-                  position: "center"
-                }) : BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_serverdown}`, {
-                  type: "danger",
-                  position: "center"
-                }), callback("");
-            });
+            return this.ensureProviderClient().googleApiTranslate(data, callback);
           }
           googleCloudTranslate(data, callback) {
-            let apiKey = authKeys.googlecloud && authKeys.googlecloud.key || "", apiEndpoint = authKeys.googlecloud && authKeys.googlecloud.endpoint || translationEngines.googlecloud.endpoint, modelId = authKeys.googlecloud && authKeys.googlecloud.model || translationEngines.googlecloud.model;
-            BDFDB.LibraryRequires.request(apiEndpoint, {
-              method: "post",
-              form: Object.assign({
-                key: apiKey,
-                q: data.text,
-                target: data.output.id,
-                format: "text",
-                model: modelId
-              }, data.input.auto ? {} : { source: data.input.id })
-            }, (error, response, body) => {
-              if (!error && body && response.statusCode == 200)
-                try {
-                  body = JSON.parse(body);
-                  let translations = body && body.data && body.data.translations || [];
-                  !data.specialCase && translations[0] && translations[0].detectedSourceLanguage && languages[translations[0].detectedSourceLanguage] && (data.input.id = translations[0].detectedSourceLanguage, data.input.name = languages[translations[0].detectedSourceLanguage].name, data.input.ownlang = languages[translations[0].detectedSourceLanguage].ownlang), callback(translations.map((n) => n && n.translatedText).filter((n) => n).join(""));
-                } catch {
-                  callback("");
-                }
-              else
-                response && (response.statusCode == 401 || response.statusCode == 403) ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_keyoutdated}`, {
-                  type: "danger",
-                  position: "center"
-                }) : response && response.statusCode == 429 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_hourlylimit}`, {
-                  type: "danger",
-                  position: "center"
-                }) : BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_serverdown}`, {
-                  type: "danger",
-                  position: "center"
-                }), callback("");
-            });
+            return this.ensureProviderClient().googleCloudTranslate(data, callback);
           }
           microsoftTranslate(data, callback) {
-            let apiEndpoint = this.normalizeApiEndpoint("microsoft", authKeys.microsoft && authKeys.microsoft.endpoint || translationEngines.microsoft.endpoint), apiKey = authKeys.microsoft && authKeys.microsoft.key || "", region = authKeys.microsoft && authKeys.microsoft.region || "", headers = {
-              "Content-Type": "application/json",
-              "Ocp-Apim-Subscription-Key": apiKey
-            };
-            region && region != "global" && (headers["Ocp-Apim-Subscription-Region"] = region), BDFDB.LibraryRequires.request(apiEndpoint, {
-              method: "post",
-              headers,
-              body: JSON.stringify([{ Text: data.text }]),
-              form: Object.assign({
-                "api-version": "3.0",
-                to: this.mapLanguageCodeForEngine("microsoft", data.output.id)
-              }, data.input.auto ? {} : { from: this.mapLanguageCodeForEngine("microsoft", data.input.id) })
-            }, (error, response, body) => {
-              if (!error && body && response.statusCode == 200)
-                try {
-                  body = JSON.parse(body)[0], !data.specialCase && body.detectedLanguage && body.detectedLanguage.language && languages[body.detectedLanguage.language.toLowerCase()] && (data.input.name = languages[body.detectedLanguage.language.toLowerCase()].name, data.input.ownlang = languages[body.detectedLanguage.language.toLowerCase()].ownlang), callback(body.translations.map((n) => n && n.text).filter((n) => n).join(""));
-                } catch {
-                  callback("");
-                }
-              else
-                response.statusCode == 403 || response.statusCode == 429 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_dailylimit}`, {
-                  type: "danger",
-                  position: "center"
-                }) : response.statusCode == 401 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_keyoutdated}`, {
-                  type: "danger",
-                  position: "center"
-                }) : BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_serverdown}`, {
-                  type: "danger",
-                  position: "center"
-                }), callback("");
-            });
+            return this.ensureProviderClient().microsoftTranslate(data, callback);
           }
           deepLTranslate(data, callback) {
-            BDFDB.LibraryRequires.request(authKeys.deepl && authKeys.deepl.paid ? "https://api.deepl.com/v2/translate" : "https://api-free.deepl.com/v2/translate", {
-              method: "post",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `DeepL-Auth-Key ${authKeys.deepl && authKeys.deepl.key || ""}`
-              },
-              body: JSON.stringify(Object.assign({
-                text: [data.text],
-                target_lang: this.mapLanguageCodeForEngine("deepl", data.output.id)
-              }, data.input.auto ? {} : { source_lang: this.mapLanguageCodeForEngine("deepl", data.input.id) }))
-            }, (error, response, body) => {
-              if (!error && body && response.statusCode == 200)
-                try {
-                  body = JSON.parse(body), !data.specialCase && body.translations[0] && body.translations[0].detected_source_language && languages[body.translations[0].detected_source_language.toLowerCase()] && (data.input.name = languages[body.translations[0].detected_source_language.toLowerCase()].name, data.input.ownlang = languages[body.translations[0].detected_source_language.toLowerCase()].ownlang), callback(body.translations.map((n) => n && n.text).filter((n) => n).join(""));
-                } catch {
-                  callback("");
-                }
-              else
-                response.statusCode == 429 || response.statusCode == 456 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_dailylimit}`, {
-                  type: "danger",
-                  position: "center"
-                }) : response.statusCode == 403 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_keyoutdated}`, {
-                  type: "danger",
-                  position: "center"
-                }) : BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_serverdown}`, {
-                  type: "danger",
-                  position: "center"
-                }), callback("");
-            });
+            return this.ensureProviderClient().deepLTranslate(data, callback);
           }
           buildAiProviderTranslationPrompt(data) {
-            let decisionInstruction = data.autoDecision ? `
-				Auto-translate decision rules:
-				${data.decisionPrompt || ""}
-				If the message should not be translated, return exactly ${AI_SKIP_TRANSLATION_TOKEN}.
-				` : "", targetLanguageName = data.output.name || data.output.id, translationModeInstruction = data.autoDecision ? `
-				Auto-translate mode: translate only natural-language content that is not already in ${targetLanguageName}; already-target-language content may stay unchanged according to the decision rules.
-				` : `
-				Manual translation mode: translate the entire natural-language message into ${targetLanguageName}. Do not keep non-target natural-language text as-is. Preserve only URLs, code, mentions, emoji, IDs, and protected placeholders.
-				`;
-            return {
-              system: data.autoDecision ? "You are a senior bilingual localization specialist and Discord chat translation decision assistant" : "You are a senior bilingual localization specialist",
-              prompt: `
-				You are a professional localization expert. The target language is exactly ${targetLanguageName}. Do not infer the target language from the source text or from existing bilingual/spoiler content.
-				${translationModeInstruction}
-				Rules:
-				1. Return ONLY the translation without any explanations
-				2. Output language must be exactly ${targetLanguageName}; do not output any other language except preserved protected content
-				3. Use natural, fluent language
-				4. Maintain consistent terminology for technical/game terms
-				5. Keep proper nouns/product/game/model names as-is by default; use official/common names in ${targetLanguageName} when clearly established
-				6. Preserve the original tone and style
-				7. Do not omit any source content, including short interjections, laughter, particles, repeated words, or standalone short lines; translate or preserve them naturally in the target language.
-				8. Use concise sentence structures
-				9. Convert [NEWLINE] markers to actual line breaks (don't show them literally)
-				10. Preserve placeholders like ⟦0⟧, ⟦1⟧ exactly; they are protected mentions/links/emoji/code.
-				${decisionInstruction}
-				Text to translate:
-				${data.text.replace(/\n/g, " [NEWLINE] ").replace(/\s+/g, " ")}
-				`
-            };
+            return this.ensureProviderClient().buildAiProviderTranslationPrompt(data);
           }
           parseOpenAiResponseText(body) {
-            try {
-              body = typeof body == "string" ? JSON.parse(body) : body;
-            } catch {
-              return "";
-            }
-            if (body && typeof body.output_text == "string") return body.output_text.trim();
-            let outputParts = [];
-            for (let item of body && body.output || []) for (let content of item && item.content || []) content && typeof content.text == "string" && outputParts.push(content.text);
-            return outputParts.length ? outputParts.join("").trim() : body && body.choices && body.choices[0] && body.choices[0].message && typeof body.choices[0].message.content == "string" ? body.choices[0].message.content.trim() : "";
+            return this.ensureProviderClient().parseOpenAiResponseText(body);
           }
           parseGeminiResponseText(body) {
-            try {
-              body = typeof body == "string" ? JSON.parse(body) : body;
-            } catch {
-              return "";
-            }
-            return (body && body.candidates && body.candidates[0] && body.candidates[0].content && body.candidates[0].content.parts || []).map((part) => part && typeof part.text == "string" ? part.text : "").join("").trim();
+            return this.ensureProviderClient().parseGeminiResponseText(body);
           }
           requestAiProviderTranslation(engineKey, url, options, parseResponse, callback) {
-            this.requestWithTimeout(url, options, (error, response, body) => {
-              if (!error && body && response && response.statusCode == 200) {
-                let translatedText = parseResponse(body);
-                if (translatedText) return callback(translatedText);
-              }
-              let engineName = translationEngines[engineKey] && translationEngines[engineKey].name || engineKey, details = this.getValidationErrorDetails(body);
-              BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed} (${engineName})${details ? ` - ${details}` : ""}`, {
-                type: "danger",
-                position: "center"
-              }), callback("");
-            });
+            return this.ensureProviderClient().requestAiProviderTranslation(engineKey, url, options, parseResponse, callback);
           }
           openAiTranslate(data, callback) {
-            let auth = authKeys.openai || {}, apiKey = auth.key || "", apiEndpoint = this.normalizeApiEndpoint("openai", auth.endpoint || translationEngines.openai.endpoint), modelId = auth.model || translationEngines.openai.model, prompt = this.buildAiProviderTranslationPrompt(data);
-            this.requestAiProviderTranslation("openai", apiEndpoint, {
-              method: "post",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${apiKey}`
-              },
-              body: JSON.stringify({
-                model: modelId,
-                instructions: prompt.system,
-                input: prompt.prompt,
-                store: !1
-              })
-            }, (body) => this.parseOpenAiResponseText(body), callback);
+            return this.ensureProviderClient().openAiTranslate(data, callback);
           }
           geminiTranslate(data, callback) {
-            let auth = authKeys.gemini || {}, apiKey = auth.key || "", apiEndpoint = this.normalizeApiEndpoint("gemini", auth.endpoint || translationEngines.gemini.endpoint), modelId = (auth.model || translationEngines.gemini.model).replace(/^models\//, ""), prompt = this.buildAiProviderTranslationPrompt(data), requestUrl = `${apiEndpoint}/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            this.requestAiProviderTranslation("gemini", requestUrl, {
-              method: "post",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                system_instruction: { parts: [{ text: prompt.system }] },
-                contents: [{ role: "user", parts: [{ text: prompt.prompt }] }],
-                generationConfig: { temperature: 0.2, topP: 0.8 }
-              })
-            }, (body) => this.parseGeminiResponseText(body), callback);
+            return this.ensureProviderClient().geminiTranslate(data, callback);
           }
           chatCompletionsTranslate(engineKey, data, callback) {
-            if (!this.isEngineConfiguredForRuntime(engineKey)) return callback("");
-            let auth = authKeys[engineKey] || {}, apiKey = auth.key || "", apiEndpoint = this.normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint), modelId = auth.model || translationEngines[engineKey].model, prompt = this.buildAiProviderTranslationPrompt(data);
-            this.requestAiProviderTranslation(engineKey, apiEndpoint, {
-              method: "post",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${apiKey}`
-              },
-              body: JSON.stringify({
-                model: modelId,
-                messages: [
-                  { role: "system", content: prompt.system },
-                  { role: "user", content: prompt.prompt }
-                ],
-                temperature: 0.2,
-                top_p: 0.8
-              })
-            }, (body) => this.parseOpenAiResponseText(body).replace(/\[NEWLINE\]/g, `
-`), callback);
+            return this.ensureProviderClient().chatCompletionsTranslate(engineKey, data, callback);
           }
           deepSeekTranslate(data, callback) {
-            return this.chatCompletionsTranslate("deepseek", data, callback);
+            return this.ensureProviderClient().deepSeekTranslate(data, callback);
           }
           openAiCompatibleTranslate(data, callback) {
-            return this.chatCompletionsTranslate("oaicompat", data, callback);
+            return this.ensureProviderClient().openAiCompatibleTranslate(data, callback);
           }
           iTranslateTranslate(data, callback) {
-            let translate = /* @__PURE__ */ __name((_2) => {
-              BDFDB.LibraryRequires.request("https://web-api.itranslateapp.com/v3/texts/translate", {
-                method: "post",
-                headers: {
-                  "API-KEY": authKeys.itranslate && authKeys.itranslate.key || data.engine.APIkey
-                },
-                body: JSON.stringify({
-                  source: {
-                    dialect: data.input.id,
-                    text: data.text
-                  },
-                  target: {
-                    dialect: data.output.id
-                  }
-                })
-              }, (error, response, body) => {
-                if (!error && response && response.statusCode == 200)
-                  try {
-                    body = JSON.parse(body), !data.specialCase && body.source && body.source.dialect && languages[body.source.dialect] && (data.input.id = body.source.dialect, data.input.name = languages[body.source.dialect].name, data.input.ownlang = languages[body.source.dialect].ownlang), callback(body.target.text);
-                  } catch {
-                    callback("");
-                  }
-                else
-                  response.statusCode == 429 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_dailylimit}`, {
-                    type: "danger",
-                    position: "center"
-                  }) : response.statusCode == 403 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_keyoutdated}`, {
-                    type: "danger",
-                    position: "center"
-                  }) : BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_serverdown}`, {
-                    type: "danger",
-                    position: "center"
-                  }), callback("");
-              });
-            }, "translate");
-            authKeys.itranslate && authKeys.itranslate.key || data.engine.APIkey ? translate() : BDFDB.LibraryRequires.request("https://www.itranslate.com/js/webapp/main.js", { gzip: !0 }, (error, response, body) => {
-              if (!error && body) {
-                let APIkey = /var API_KEY = "(.+)"/.exec(body);
-                APIkey ? (data.engine.APIkey = APIkey[1], translate()) : callback("");
-              } else callback("");
-            });
+            return this.ensureProviderClient().iTranslateTranslate(data, callback);
           }
           yandexTranslate(data, callback) {
-            BDFDB.LibraryRequires.request("https://translate.yandex.net/api/v1.5/tr/translate", {
-              form: {
-                key: authKeys.yandex && authKeys.yandex.key || "",
-                text: encodeURIComponent(data.text),
-                lang: data.specialCase || data.input.auto ? data.output.id : data.input.id + "-" + data.output.id,
-                options: "1"
-              }
-            }, (error, response, body) => {
-              if (!error && body && response.statusCode == 200)
-                try {
-                  body = BDFDB.DOMUtils.create(body);
-                  let translation = body.querySelector("text"), detected = body.querySelector("detected");
-                  if (translation && detected) {
-                    let detectedLang = detected.getAttribute("lang");
-                    !data.specialCase && detectedLang && languages[detectedLang] && (data.input.name = languages[detectedLang].name, data.input.ownlang = languages[detectedLang].ownlang), callback(translation.innerText);
-                  } else callback("");
-                } catch {
-                  callback("");
-                }
-              else body && body.indexOf('code="408"') > -1 ? (BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_monthlylimit}`, {
-                type: "danger",
-                position: "center"
-              }), callback("")) : (BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_serverdown}/${this.labels.error_keyoutdated}`, {
-                type: "danger",
-                position: "center"
-              }), callback(""));
-            });
+            return this.ensureProviderClient().yandexTranslate(data, callback);
           }
           papagoTranslate(data, callback) {
-            let credentials = (authKeys.papago && authKeys.papago.key || "").split(" "), doTranslate = /* @__PURE__ */ __name((langCode) => {
-              BDFDB.LibraryRequires.request("https://openapi.naver.com/v1/papago/n2mt", {
-                method: "post",
-                headers: {
-                  "X-Naver-Client-Id": credentials[0],
-                  "X-Naver-Client-Secret": credentials[1],
-                  "Content-Type": "application/x-www-form-urlencoded"
-                },
-                form: {
-                  source: langCode,
-                  target: data.output.id,
-                  text: data.text
-                }
-              }, (error, response, body) => {
-                if (!error && body && response.statusCode == 200)
-                  try {
-                    let message = (JSON.parse(body) || {}).message, result = message && (message.body || message.result);
-                    result && result.translatedText ? callback(result.translatedText) : callback("");
-                  } catch {
-                    callback("");
-                  }
-                else
-                  response.statusCode == 429 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_hourlylimit}`, {
-                    type: "danger",
-                    position: "center"
-                  }) : BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_serverdown}/${this.labels.error_keyoutdated}`, {
-                    type: "danger",
-                    position: "center"
-                  }), callback("");
-              });
-            }, "doTranslate");
-            data.input.auto ? BDFDB.LibraryRequires.request("https://openapi.naver.com/v1/papago/detectLangs", {
-              method: "post",
-              headers: {
-                "X-Naver-Client-Id": credentials[0],
-                "X-Naver-Client-Secret": credentials[1],
-                "Content-Type": "application/x-www-form-urlencoded"
-              },
-              form: {
-                query: data.text
-              }
-            }, (error, response, body) => {
-              let langCode = "en";
-              if (!error && body && response.statusCode == 200)
-                try {
-                  langCode = JSON.parse(body).langCode;
-                } catch {
-                  langCode = "en";
-                }
-              data.input.name = languages[langCode].name, data.input.ownlang = languages[langCode].ownlang, doTranslate(langCode);
-            }) : doTranslate(data.input.id);
+            return this.ensureProviderClient().papagoTranslate(data, callback);
           }
           baiduTranslate(data, callback) {
-            let credentials = (authKeys.baidu && authKeys.baidu.key || "").split(" "), salt = BDFDB.NumberUtils.generateId();
-            BDFDB.LibraryRequires.request("https://fanyi-api.baidu.com/api/trans/vip/translate", {
-              bdVersion: !0,
-              method: "post",
-              form: {
-                from: translationEngines.baidu.parser[data.input.id] || data.input.id,
-                to: translationEngines.baidu.parser[data.output.id] || data.output.id,
-                q: encodeURIComponent(data.text),
-                appid: credentials[0],
-                salt,
-                sign: this.MD5(credentials[0] + data.text + salt + (credentials[2] || credentials[1]))
-              }
-            }, (error, response, result) => {
-              if (!error && result && response.statusCode == 200)
-                try {
-                  if (result = JSON.parse(result) || {}, result.error_code)
-                    result.error_code == 54004 ? BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_monthlylimit}.`, {
-                      type: "danger",
-                      position: "center"
-                    }) : BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${result.error_code} : ${result.error_msg}.`, {
-                      type: "danger",
-                      position: "center"
-                    }), callback("");
-                  else {
-                    let messages = result.trans_result;
-                    messages && messages.length > 0 && result.from != result.to ? callback(messages.map((message) => decodeURIComponent(message.dst)).join(`
-`)) : callback("");
-                  }
-                } catch {
-                  callback("");
-                }
-              else
-                BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed}. ${this.labels.toast_translating_tryanother}. ${this.labels.error_serverdown}`, {
-                  type: "danger",
-                  position: "center"
-                }), callback("");
-            });
+            return this.ensureProviderClient().baiduTranslate(data, callback);
           }
           MD5(e) {
-            function h(a2, b2) {
-              var e2 = a2 & 2147483648, f2 = b2 & 2147483648, c2 = a2 & 1073741824, d2 = b2 & 1073741824, g = (a2 & 1073741823) + (b2 & 1073741823);
-              return c2 & d2 ? g ^ 2147483648 ^ e2 ^ f2 : c2 | d2 ? g & 1073741824 ? g ^ 3221225472 ^ e2 ^ f2 : g ^ 1073741824 ^ e2 ^ f2 : g ^ e2 ^ f2;
-            }
-            __name(h, "h");
-            function k(a2, b2, c2, d2, e2, f2, g) {
-              return a2 = h(a2, h(h(b2 & c2 | ~b2 & d2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
-            }
-            __name(k, "k");
-            function l(a2, b2, c2, d2, e2, f2, g) {
-              return a2 = h(a2, h(h(b2 & d2 | c2 & ~d2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
-            }
-            __name(l, "l");
-            function m(a2, b2, d2, c2, e2, f2, g) {
-              return a2 = h(a2, h(h(b2 ^ d2 ^ c2, e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
-            }
-            __name(m, "m");
-            function n(a2, b2, d2, c2, e2, f2, g) {
-              return a2 = h(a2, h(h(d2 ^ (b2 | ~c2), e2), g)), h(a2 << f2 | a2 >>> 32 - f2, b2);
-            }
-            __name(n, "n");
-            function p(a2) {
-              var b2 = "", d2 = "", c2;
-              for (c2 = 0; 3 >= c2; c2++) d2 = a2 >>> 8 * c2 & 255, d2 = "0" + d2.toString(16), b2 += d2.substr(d2.length - 2, 2);
-              return b2;
-            }
-            __name(p, "p");
-            var f = [], q, r, s, t, a, b, c, d;
-            for (e = (function(a2) {
-              a2 = a2.replace(/\r\n/g, `
-`);
-              for (var b2 = "", d2 = 0; d2 < a2.length; d2++) {
-                var c2 = a2.charCodeAt(d2);
-                128 > c2 ? b2 += String.fromCharCode(c2) : (127 < c2 && 2048 > c2 ? b2 += String.fromCharCode(c2 >> 6 | 192) : (b2 += String.fromCharCode(c2 >> 12 | 224), b2 += String.fromCharCode(c2 >> 6 & 63 | 128)), b2 += String.fromCharCode(c2 & 63 | 128));
-              }
-              return b2;
-            })(e), f = (function(b2) {
-              var a2, c2 = b2.length;
-              a2 = c2 + 8;
-              for (var d2 = 16 * ((a2 - a2 % 64) / 64 + 1), e2 = Array(d2 - 1), f2 = 0, g = 0; g < c2; ) a2 = (g - g % 4) / 4, f2 = g % 4 * 8, e2[a2] |= b2.charCodeAt(g) << f2, g++;
-              return a2 = (g - g % 4) / 4, e2[a2] |= 128 << g % 4 * 8, e2[d2 - 2] = c2 << 3, e2[d2 - 1] = c2 >>> 29, e2;
-            })(e), a = 1732584193, b = 4023233417, c = 2562383102, d = 271733878, e = 0; e < f.length; e += 16) q = a, r = b, s = c, t = d, a = k(a, b, c, d, f[e + 0], 7, 3614090360), d = k(d, a, b, c, f[e + 1], 12, 3905402710), c = k(c, d, a, b, f[e + 2], 17, 606105819), b = k(b, c, d, a, f[e + 3], 22, 3250441966), a = k(a, b, c, d, f[e + 4], 7, 4118548399), d = k(d, a, b, c, f[e + 5], 12, 1200080426), c = k(c, d, a, b, f[e + 6], 17, 2821735955), b = k(b, c, d, a, f[e + 7], 22, 4249261313), a = k(a, b, c, d, f[e + 8], 7, 1770035416), d = k(d, a, b, c, f[e + 9], 12, 2336552879), c = k(c, d, a, b, f[e + 10], 17, 4294925233), b = k(b, c, d, a, f[e + 11], 22, 2304563134), a = k(a, b, c, d, f[e + 12], 7, 1804603682), d = k(d, a, b, c, f[e + 13], 12, 4254626195), c = k(c, d, a, b, f[e + 14], 17, 2792965006), b = k(b, c, d, a, f[e + 15], 22, 1236535329), a = l(a, b, c, d, f[e + 1], 5, 4129170786), d = l(d, a, b, c, f[e + 6], 9, 3225465664), c = l(c, d, a, b, f[e + 11], 14, 643717713), b = l(b, c, d, a, f[e + 0], 20, 3921069994), a = l(a, b, c, d, f[e + 5], 5, 3593408605), d = l(d, a, b, c, f[e + 10], 9, 38016083), c = l(c, d, a, b, f[e + 15], 14, 3634488961), b = l(b, c, d, a, f[e + 4], 20, 3889429448), a = l(a, b, c, d, f[e + 9], 5, 568446438), d = l(d, a, b, c, f[e + 14], 9, 3275163606), c = l(c, d, a, b, f[e + 3], 14, 4107603335), b = l(b, c, d, a, f[e + 8], 20, 1163531501), a = l(a, b, c, d, f[e + 13], 5, 2850285829), d = l(d, a, b, c, f[e + 2], 9, 4243563512), c = l(c, d, a, b, f[e + 7], 14, 1735328473), b = l(b, c, d, a, f[e + 12], 20, 2368359562), a = m(a, b, c, d, f[e + 5], 4, 4294588738), d = m(d, a, b, c, f[e + 8], 11, 2272392833), c = m(c, d, a, b, f[e + 11], 16, 1839030562), b = m(b, c, d, a, f[e + 14], 23, 4259657740), a = m(a, b, c, d, f[e + 1], 4, 2763975236), d = m(d, a, b, c, f[e + 4], 11, 1272893353), c = m(c, d, a, b, f[e + 7], 16, 4139469664), b = m(b, c, d, a, f[e + 10], 23, 3200236656), a = m(a, b, c, d, f[e + 13], 4, 681279174), d = m(d, a, b, c, f[e + 0], 11, 3936430074), c = m(c, d, a, b, f[e + 3], 16, 3572445317), b = m(b, c, d, a, f[e + 6], 23, 76029189), a = m(a, b, c, d, f[e + 9], 4, 3654602809), d = m(d, a, b, c, f[e + 12], 11, 3873151461), c = m(c, d, a, b, f[e + 15], 16, 530742520), b = m(b, c, d, a, f[e + 2], 23, 3299628645), a = n(a, b, c, d, f[e + 0], 6, 4096336452), d = n(d, a, b, c, f[e + 7], 10, 1126891415), c = n(c, d, a, b, f[e + 14], 15, 2878612391), b = n(b, c, d, a, f[e + 5], 21, 4237533241), a = n(a, b, c, d, f[e + 12], 6, 1700485571), d = n(d, a, b, c, f[e + 3], 10, 2399980690), c = n(c, d, a, b, f[e + 10], 15, 4293915773), b = n(b, c, d, a, f[e + 1], 21, 2240044497), a = n(a, b, c, d, f[e + 8], 6, 1873313359), d = n(d, a, b, c, f[e + 15], 10, 4264355552), c = n(c, d, a, b, f[e + 6], 15, 2734768916), b = n(b, c, d, a, f[e + 13], 21, 1309151649), a = n(a, b, c, d, f[e + 4], 6, 4149444226), d = n(d, a, b, c, f[e + 11], 10, 3174756917), c = n(c, d, a, b, f[e + 2], 15, 718787259), b = n(b, c, d, a, f[e + 9], 21, 3951481745), a = h(a, q), b = h(b, r), c = h(c, s), d = h(d, t);
-            return (p(a) + p(b) + p(c) + p(d)).toLowerCase();
+            return this.ensureProviderClient().MD5(e);
           }
           checkForSpecialCase(text, input) {
             if (input.special) return input;

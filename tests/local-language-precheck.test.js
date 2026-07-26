@@ -87,20 +87,23 @@ test("requestWithTimeout fires a 504 callback when the underlying request hangs"
 
 test("requestWithTimeout triggers backoff on a 429 response", () => {
 	const plugin = createPluginInstance();
-	let backoffMs = null;
-	plugin.scheduleAutoTranslationBackoff = ms => { backoffMs = ms; };
 	plugin._testBdfdb.LibraryRequires.request = (url, opts, cb) => cb(null, {statusCode: 429}, "");
+	const before = Date.now();
 	plugin.requestWithTimeout("https://example.invalid", {}, () => {}, 1000);
-	assert.equal(backoffMs, 5000);
+	// A rate-limited provider must pause the queue for a window, not just log.
+	const client = plugin.ensureProviderClient();
+	assert.equal(client.isBackoffActive(), true);
+	assert.equal(client.getBackoffUntil() - before >= 5000, true);
 });
 
 test("requestWithTimeout triggers backoff on a 5xx response", () => {
 	const plugin = createPluginInstance();
-	let backoffMs = null;
-	plugin.scheduleAutoTranslationBackoff = ms => { backoffMs = ms; };
 	plugin._testBdfdb.LibraryRequires.request = (url, opts, cb) => cb(null, {statusCode: 503}, "");
+	const before = Date.now();
 	plugin.requestWithTimeout("https://example.invalid", {}, () => {}, 1000);
-	assert.equal(backoffMs, 2000);
+	const client = plugin.ensureProviderClient();
+	assert.equal(client.isBackoffActive(), true);
+	assert.equal(client.getBackoffUntil() - before >= 2000, true);
 });
 
 test("requestWithTimeout does not double-fire when the real response arrives late", async () => {
