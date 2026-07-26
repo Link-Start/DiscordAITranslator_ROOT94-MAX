@@ -1000,7 +1000,7 @@ git commit -m "refactor: add acknowledged Discord render adapter"
 - Create: `tests/helpers/createReceivedDisplayHarness.js`
 - Create: `tests/integration/received-display-runtime.test.js`
 
-- [ ] **Step 1: Write failing integration tests for one authoritative display view**
+- [x] **Step 1: Write failing integration tests for one authoritative display view**
 
 Create `tests/helpers/createReceivedDisplayHarness.js`:
 
@@ -1142,7 +1142,7 @@ test("a pending view renders one loading indicator without translated decoration
 });
 ```
 
-- [ ] **Step 2: Verify the integration tests fail**
+- [x] **Step 2: Verify the integration tests fail**
 
 ```powershell
 npm run build
@@ -1151,7 +1151,7 @@ node --test tests/integration/received-display-runtime.test.js
 
 Expected: FAIL because the plugin does not expose or use the new display runtime.
 
-- [ ] **Step 3: Create the runtime wiring module**
+- [x] **Step 3: Create the runtime wiring module**
 
 Create `src/display/display-runtime.js`:
 
@@ -1180,7 +1180,7 @@ function createDisplayRuntime(dependencies) {
 module.exports = {createDisplayRuntime};
 ```
 
-- [ ] **Step 4: Instantiate it once inside the BDFDB runtime closure**
+- [x] **Step 4: Instantiate it once inside the BDFDB runtime closure**
 
 In `src/legacy/runtime.js`, require `createDisplayRuntime` near the logical module declarations. Add `ensureReceivedDisplayRuntime()` on the plugin class so the runtime is created once per plugin instance. Inject `BDFDB`, `document`, `requestAnimationFrame`, `setTimeout`, a getter for `autoTranslationUserScrollIntentSequence`, and callbacks to the existing `captureMessageScrollerState()` and `restoreMessageScrollerState()` methods.
 
@@ -1219,7 +1219,7 @@ Historical commit wiring is completed in Task 7. Automatic received records go o
 
 When `checkMessage` captures a message during the same Discord render, call `markReceivedDisplayPending(request, {refresh: false})`. `MessageContent` reads that pending view later in the same render and adds the loading indicator without scheduling another list refresh. A caller that marks an already-mounted message pending may use the default `{refresh: true}` path.
 
-- [ ] **Step 6: Make both patch paths consume the same view**
+- [x] **Step 6: Make both patch paths consume the same view**
 
 `processMessages` obtains one view and calls `applyReceivedDisplayViewToStream`. `processMessageContent` obtains the same revision and calls `applyReceivedDisplayViewToContent` for watermark, translated class, color variables, loading state, and reason. The stream method clones the Discord message before replacing `content`; it never mutates the message store object. Add this prop to the rendered message content root:
 
@@ -1231,7 +1231,7 @@ Whenever a view exists, set the revision attribute even when the view renders or
 
 `applyReceivedDisplayViewToContent` converts a translated view to the existing decoration input only at this compatibility boundary. A pending view adds the fixed-size loading node. A cancelled, skipped, or failed view keeps the revision attribute but removes watermark, translated classes, color variables, and loading state. A missing view removes all translator-owned attributes and decoration.
 
-- [ ] **Step 7: Update the test helper only for injected adapter dependencies**
+- [x] **Step 7: Update the test helper only for injected adapter dependencies**
 
 Add no-op patch targets to the base BDFDB fixture so lifecycle tests can call `onStart()` without loading Discord modules:
 
@@ -1248,7 +1248,7 @@ PatchUtils: {
 
 The dedicated `createReceivedDisplayHarness` supplies `ReactUtils.findOwner`, `ReactUtils.forceUpdate`, DOM nodes, animation frames, and message confirmation. Tests still enter through plugin compatibility methods and never bypass the controller.
 
-- [ ] **Step 8: Build and run focused tests**
+- [x] **Step 8: Build and run focused tests**
 
 ```powershell
 npm run build
@@ -1257,13 +1257,17 @@ node --test tests/integration/received-display-runtime.test.js tests/translation
 
 Expected: PASS.
 
-- [ ] **Step 9: Run full verification and commit**
+- [x] **Step 9: Run full verification and commit**
 
 ```powershell
 npm run verify
 git add src DiscordAITranslator.plugin.js tests
 git commit -m "refactor: route received display through one state owner"
 ```
+
+**Verification evidence (2026-07-26):** `640e01b`; red phase observed 6/6 integration failures (`captureReceivedMessageSource is not a function`); focused integration tests `6/6`; full `npm run verify` `262/262`. Adjustments against the plan baseline: the committed state store requires terminal results to carry a matching `sourceSignature`, so the harness result fixtures include it; the injected `captureScrollState`/`restoreScrollState` callbacks guard exceptions because scroll-anchor capture requires DOM APIs a test environment does not provide. Step 5 is intentionally partial: `checkMessage` now captures every received source into the store and both patch paths consume a store view when one is authoritative, but pending-marking and the live/cached/historical commit-target switch stay on the legacy path because Task 7's red-phase tests require observing that path before replacing it. Until Task 7 lands, no runtime path commits translated results into the store, so the store cannot diverge from the legacy display maps.
+
+- [ ] **Step 5 (deferred remainder): moved to Task 7** — route live, cached, and historical automatic received commits through the controller and mark queue items pending in the store.
 
 ## Task 6: Fix Channel Disable And Plugin Stop Restoration
 
