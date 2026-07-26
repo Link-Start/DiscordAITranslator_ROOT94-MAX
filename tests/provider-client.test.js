@@ -927,7 +927,10 @@ test("each validated engine is probed with its own native generation call", asyn
 		["deepseek", {deepseek: {key: "k-ds", endpoint: "https://api.deepseek.com/chat/completions", model: "ds-x"}}, call => {
 			const body = JSON.parse(call.options.body);
 			assert.equal(body.temperature, 0);
-			assert.equal(body.max_tokens, 32, "a validation probe must stay cheap");
+			// A cap, not a charge: you pay for what the model generates, so headroom is
+			// only spent when the model actually reasons. 32 was tight enough that a
+			// reasoning model never reached its answer and validation reported failure.
+			assert.ok(body.max_tokens >= 256 && body.max_tokens <= 1024, `validation probe budget out of range: ${body.max_tokens}`);
 		}, JSON.stringify({choices: [{message: {content: " Guten Morgen "}}]})]
 	];
 	for (const [engineKey, authKeys, checkCall, body] of cases) {
@@ -1078,4 +1081,33 @@ test("every adapter settles with an empty translation when the network fails out
 		});
 		assert.equal(settled, "", `${adapter} must settle with an empty translation on a network failure, got ${JSON.stringify(settled)}`);
 	}
+});
+
+test("validation accepts a reasoning model that spent its budget before answering", async () => {
+	// The 检测模型 button caps max_tokens so the check stays cheap. A reasoning model
+	// fills reasoning_content first, so a small cap returns HTTP 200 with an empty
+	// message.content - which read as "验证失败 (200)" even though the key, endpoint
+	// and model were all provably fine. What this button is asked to prove is that the
+	// provider accepted the request, and a truncated answer proves exactly that.
+	const truncated = createHarness({authKeys: {deepseek: {key: "k", model: "deepseek-reasoner"}}});
+	const pending = truncated.client.validateEngineConfig("deepseek");
+	const sent = JSON.parse(truncated.calls[0].options.body);
+	assert.ok(sent.max_tokens >= 256, `max_tokens ${sent.max_tokens} leaves no room for reasoning`);
+	truncated.respond(0, null, {statusCode: 200}, JSON.stringify({
+		choices: [{message: {role: "assistant", content: "", reasoning_content: "Let me think about the German."}, finish_reason: "length"}]
+	}));
+	assert.equal((await pending).ok, true);
+
+	// A 200 carrying no choice at all is still a failure - nothing was proven.
+	const empty = createHarness({authKeys: {deepseek: {key: "k", model: "deepseek-chat"}}});
+	const emptyPending = empty.client.validateEngineConfig("deepseek");
+	empty.respond(0, null, {statusCode: 200}, JSON.stringify({choices: []}));
+	assert.equal((await emptyPending).ok, false);
+
+	// The ordinary case still reports the translation it got back.
+	const normal = createHarness({authKeys: {deepseek: {key: "k", model: "deepseek-chat"}}});
+	const normalPending = normal.client.validateEngineConfig("deepseek");
+	normal.respond(0, null, {statusCode: 200}, JSON.stringify({choices: [{message: {content: "Hallo"}, finish_reason: "stop"}]}));
+	assert.equal((await normalPending).ok, true);
+	assert.match(normal.toasts[normal.toasts.length - 1].message, /Hallo/);
 });

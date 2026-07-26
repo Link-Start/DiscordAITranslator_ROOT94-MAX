@@ -834,14 +834,24 @@ function createProviderClient({
 								content: `Translate the following text from English to German. Return only the translation.\n\n${sample.text}`
 							}],
 							temperature: 0,
-							max_tokens: 32
+							// Room for a reasoning model to think and still answer. At 32 the
+							// whole budget went to reasoning_content, content came back empty,
+							// and a perfectly good configuration reported validate_failed.
+							max_tokens: 512
 						})
 					}, (error, response, body) => {
 						if (!error && body && response && response && response.statusCode == 200) {
 							try {
 								body = JSON.parse(body);
-								const translation = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
-								return finish(!!translation, translation ? successMessage(translation.trim()) : failMessage(response && response.statusCode, body), normalized);
+								const choice = body && body.choices && body.choices[0];
+								const message = choice && choice.message;
+								const translation = message && message.content;
+								if (translation && translation.trim()) return finish(true, successMessage(translation.trim()), normalized);
+								// What this button is asked to prove is that the provider accepts
+								// this key, endpoint and model. A model that reasoned and then ran
+								// out of room has proven exactly that, empty content or not.
+								const answeredWithoutContent = !!(message && message.reasoning_content) || !!(choice && choice.finish_reason == "length");
+								return finish(answeredWithoutContent, answeredWithoutContent ? successMessage("") : failMessage(response && response.statusCode, body), normalized);
 							}
 							catch (err) {}
 						}
