@@ -499,6 +499,2400 @@ var require_display_runtime = __commonJS({
   }
 });
 
+// src/ui/styles.js
+var require_styles = __commonJS({
+  "src/ui/styles.js"(exports2, module2) {
+    function createTranslatorStyles(BDFDB) {
+      return `
+					${BDFDB.dotCN._translatortranslatebutton + BDFDB.dotCNS._translatortranslating + BDFDB.dotCN.textareaicon} {
+						color: var(--status-danger) !important;
+					}
+					${BDFDB.dotCN._translatorconfigbutton} {
+						margin: 2px 3px 0 6px;
+					}
+					.translator-original-message {
+						margin-top: 6px;
+						padding: 0;
+						border: 0;
+						white-space: pre-wrap;
+						line-height: 1.35;
+						opacity: 0.9;
+						color: var(--text-normal) !important;
+						text-align: left;
+					}
+					.translator-original-message > span {
+						display: block;
+						width: 100%;
+						color: var(--text-normal) !important;
+						text-align: left;
+					}
+					.translator-discord-emoji {
+						width: 1.375em;
+						height: 1.375em;
+						object-fit: contain;
+						vertical-align: -0.275em;
+						margin: 0 0.05em;
+					}
+					.translator-discord-mention {
+						display: inline;
+						padding: 0 2px;
+						border-radius: 3px;
+						background: var(--mention-background, color-mix(in srgb, var(--brand-500, #5865f2) 30%, transparent));
+						color: var(--mention-foreground, var(--brand-260, #c9cdfb)) !important;
+						font-weight: 500;
+						white-space: break-spaces;
+					}
+					.translator-discord-mention:hover {
+						background: var(--mention-background-hover, color-mix(in srgb, var(--brand-500, #5865f2) 45%, transparent));
+						color: var(--white-500, #fff) !important;
+					}
+					.translator-translated-message {
+						margin-top: 4px;
+						padding: 6px 10px 6px 12px;
+						border-left: 2px solid var(--translator-accent-color, var(--brand-500, var(--text-link)));
+						background: color-mix(in srgb, var(--translator-accent-color, var(--brand-500, var(--text-link))) 8%, transparent);
+						border-radius: 6px;
+						color: var(--translator-text-color, inherit);
+					}
+					.translator-translation-loading {
+						display: inline-block;
+						width: 12px;
+						height: 12px;
+						margin-left: 6px;
+						box-sizing: border-box;
+						vertical-align: -1px;
+						border: 2px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
+						border-top-color: var(--text-link);
+						border-radius: 50%;
+						animation: translator-loading-spin 750ms linear infinite;
+					}
+					@keyframes translator-loading-spin {
+						to {transform: rotate(360deg);}
+					}
+					@media (prefers-reduced-motion: reduce) {
+						.translator-translation-loading {animation-duration: 1600ms;}
+					}
+					.translator-protected-quote {
+						color: var(--text-link);
+						background: color-mix(in srgb, var(--brand-500, var(--text-link)) 14%, transparent);
+						padding: 0 4px;
+						border-radius: 4px;
+						font-weight: 600;
+					}
+					.translator-original-spoiler {
+						filter: blur(4px);
+						transition: filter 120ms ease;
+					}
+					.translator-original-message:hover .translator-original-spoiler {
+						filter: blur(0);
+					}
+					.translator-reply-preview-multiline {
+						overflow: visible !important;
+						max-height: none !important;
+					}
+					.translator-reply-preview-body {
+						overflow: visible !important;
+						max-height: none !important;
+						height: auto !important;
+					}
+					.translator-reply-preview-text {
+						display: block !important;
+						white-space: pre-wrap !important;
+						overflow: visible !important;
+						text-overflow: unset !important;
+						-webkit-line-clamp: unset !important;
+						line-clamp: unset !important;
+						max-height: none !important;
+						height: auto !important;
+					}
+					.translator-reply-preview-text > span {
+						white-space: inherit !important;
+						overflow: visible !important;
+						text-overflow: unset !important;
+					}
+					.translator-reply-preview-body .translator-translated-message,
+					.translator-reply-preview-text.translator-translated-message,
+					.translator-reply-preview-text .translator-translated-message {
+						margin: 0 !important;
+						padding: 0 !important;
+						border: 0 !important;
+						border-left: 0 !important;
+						background: transparent !important;
+						box-shadow: none !important;
+						color: inherit !important;
+					}
+					.translator-reply-preview-body [class*="translator"],
+					.translator-reply-preview-text [class*="translator"] {
+						background: transparent !important;
+						box-shadow: none !important;
+						color: inherit !important;
+					}
+					.translator-settings-inline-header {
+						display: flex;
+						align-items: center;
+						justify-content: space-between;
+						gap: 12px;
+						margin-bottom: 8px;
+					}
+					.translator-settings-panel-root {
+						overflow-anchor: none;
+						overflow-x: hidden;
+						max-width: 100%;
+						box-sizing: border-box;
+					}
+					.translator-settings-panel-root [class*="select"] {
+						overflow-anchor: none;
+					}
+										.translator-settings-panel-root {
+						overflow-anchor: none;
+					}
+					.translator-settings-panel-root [class*="select"],
+					.translator-settings-panel-root [class*="Select"],
+					.translator-settings-panel-root [role="combobox"],
+					.translator-stable-select-wrap,
+					.translator-stable-select-wrap * {
+						overflow-anchor: none;
+						scroll-margin-top: 0 !important;
+						scroll-margin-bottom: 0 !important;
+					}
+					.translator-stable-select-wrap {
+						width: 100%;
+						min-width: 0;
+						max-width: 100%;
+					}
+					.translator-prefix-translation-row {
+						display: grid;
+						grid-template-columns: minmax(76px, 0.75fr) minmax(0, 1.65fr) 34px;
+						gap: 10px;
+						align-items: center;
+						width: 100%;
+						max-width: 100%;
+						box-sizing: border-box;
+						margin-bottom: 8px;
+						overflow: hidden;
+					}
+					.translator-prefix-translation-cell,
+					.translator-prefix-translation-cell > * {
+						min-width: 0;
+						max-width: 100%;
+						box-sizing: border-box;
+					}
+					.translator-prefix-delete-cell {
+						display: flex;
+						align-items: center;
+						justify-content: flex-end;
+						min-width: 0;
+						max-width: 34px;
+						overflow: hidden;
+					}
+					.translator-prefix-delete-cell button {
+						width: 30px !important;
+						min-width: 30px !important;
+						max-width: 30px !important;
+						padding-left: 0 !important;
+						padding-right: 0 !important;
+					}
+					.translator-prefix-input-cell input,
+					.translator-prefix-language-cell .translator-stable-select-wrap,
+					.translator-prefix-language-cell [class*="select"],
+					.translator-prefix-language-cell [class*="Select"] {
+						min-width: 0 !important;
+						max-width: 100% !important;
+						box-sizing: border-box;
+					}
+					.translator-token-editor {
+						display: flex;
+						flex-direction: column;
+						gap: 8px;
+						width: 100%;
+						min-width: 0;
+					}
+					.translator-token-list {
+						display: flex;
+						flex-wrap: wrap;
+						align-content: flex-start;
+						gap: 6px;
+						width: 100%;
+						min-width: 0;
+						min-height: 44px;
+						max-height: 112px;
+						overflow-y: auto;
+						padding: 8px;
+						border: 1px solid var(--background-modifier-accent);
+						border-radius: 8px;
+						background: var(--input-background, var(--background-tertiary));
+						box-sizing: border-box;
+					}
+					.translator-token-empty {
+						color: var(--text-muted);
+						font-size: 12px;
+						line-height: 1.5;
+						padding: 2px 0;
+					}
+					.translator-token-badge {
+						display: inline-flex;
+						align-items: center;
+						max-width: 100%;
+						gap: 6px;
+						padding: 4px 8px;
+						border-radius: 6px;
+						background: var(--bdfdb-blurple);
+						color: #fff;
+						font-size: 12px;
+						line-height: 1.3;
+						box-sizing: border-box;
+					}
+					.translator-token-badge-text {
+						max-width: 100%;
+						overflow-wrap: anywhere;
+						word-break: break-word;
+						white-space: normal;
+					}
+					.translator-token-badge-delete {
+						display: inline-flex;
+						align-items: center;
+						justify-content: center;
+						width: 14px;
+						height: 14px;
+						flex: 0 0 auto;
+						cursor: pointer;
+						opacity: 0.92;
+					}
+					.translator-token-badge-delete:hover {
+						opacity: 1;
+					}
+					.translator-token-input-row,
+					.translator-token-input-row > * {
+						width: 100%;
+						min-width: 0;
+						max-width: 100%;
+						box-sizing: border-box;
+					}
+					@media (max-width: 620px) {
+						.translator-prefix-translation-row {
+							grid-template-columns: minmax(76px, 1fr) 34px;
+						}
+						.translator-prefix-language-cell {
+							grid-column: 1 / -1;
+						}
+					}
+
+.translator-settings-inline-actions {
+						display: flex;
+						flex-wrap: wrap;
+						justify-content: flex-end;
+						gap: 8px;
+					}
+					.translator-settings-divider-spacious {
+						margin-top: 14px !important;
+						margin-bottom: 14px !important;
+					}
+					.translator-settings-note {
+						margin-bottom: 8px;
+						font-size: 12px;
+						line-height: 1.45;
+						color: var(--text-muted);
+					}
+					.translator-settings-switch-group {
+						display: flex;
+						flex-direction: column;
+						margin: 6px 0 10px;
+					}
+					.translator-settings-switch-row {
+						margin: 0 !important;
+					}
+					.translator-settings-switch-row + .translator-settings-switch-row {
+						margin-top: 4px !important;
+					}
+					.translator-settings-primary-actions {
+						gap: 10px;
+					}
+					.translator-settings-inline-grid {
+						display: grid;
+						grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+						gap: 12px;
+						align-items: start;
+					}
+					.translator-settings-inline-grid > * {
+						min-width: 0;
+					}
+					.translator-settings-color-option {
+						display: flex;
+						align-items: center;
+						justify-content: space-between;
+						gap: 12px;
+						width: 100%;
+					}
+					.translator-color-palette {
+						display: flex;
+						flex-wrap: wrap;
+						gap: 6px;
+						margin-top: 6px;
+					}
+					.translator-loaded-status-floating {
+						position: fixed;
+						z-index: 999;
+						display: inline-flex;
+						align-items: center;
+						gap: 6px;
+						width: auto !important;
+						min-width: 0 !important;
+						max-width: min(360px, calc(100vw - 32px));
+						padding: 4px 9px;
+						border: 1px solid var(--background-modifier-accent, rgba(255,255,255,0.08)) !important;
+						border-radius: 999px;
+						background: var(--background-floating, #232428) !important;
+						background: color-mix(in srgb, var(--background-floating, #232428) 90%, black 10%) !important;
+						box-shadow: 0 1px 3px rgba(0,0,0,0.32) !important;
+						color: var(--text-muted, #b5bac1);
+						font-size: 12px;
+						font-weight: 500;
+						line-height: 16px;
+						pointer-events: none;
+						backdrop-filter: none;
+						text-shadow: none;
+					}
+					.translator-loaded-status-floating::before,
+					.translator-loaded-status-floating::after {
+						content: none !important;
+						display: none !important;
+					}
+					.translator-loaded-status-floating.translator-loaded-status-retryable {pointer-events: auto;}
+					.translator-loaded-status-dot {
+						width: 6px;
+						height: 6px;
+						border-radius: 50%;
+						background: var(--interactive-normal, #b5bac1);
+						box-shadow: none;
+						flex: 0 0 auto;
+					}
+					.translator-loaded-status-text {white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%;}
+					.translator-loaded-status-retry {
+						appearance: none;
+						margin: 0 0 0 2px;
+						padding: 0 0 0 7px;
+						border: 0;
+						border-left: 1px solid var(--background-modifier-accent, rgba(255,255,255,0.12));
+						background: transparent;
+						color: var(--interactive-active, #f2f3f5);
+						font: inherit;
+						font-weight: 600;
+						line-height: 16px;
+						cursor: pointer;
+					}
+					.translator-loaded-status-retry:hover {color: var(--text-normal, #dbdee1);}
+					.translator-loaded-status-inline {
+						display: inline-flex;
+						align-items: center;
+						gap: 6px;
+						width: fit-content;
+						max-width: 100%;
+						margin: 6px 0 10px;
+						padding: 4px 9px;
+						border: 1px solid var(--background-modifier-accent, rgba(255,255,255,0.08));
+						border-radius: 999px;
+						background: color-mix(in srgb, var(--background-secondary, #2b2d31) 88%, black 12%);
+						color: var(--text-muted, #b5bac1);
+						font-size: 12px;
+						font-weight: 500;
+						line-height: 16px;
+						box-sizing: border-box;
+					}
+					.translator-loaded-status-inline-text {
+						white-space: nowrap;
+						overflow: hidden;
+						text-overflow: ellipsis;
+						min-width: 0;
+					}
+					.translator-native-color-input {
+						width: 34px; height: 32px; padding: 0; border: 1px solid var(--background-modifier-accent);
+						border-radius: 8px; background: transparent; cursor: pointer;
+					}
+					.translator-color-chip {
+						appearance: none;
+						position: relative;
+						display: inline-flex;
+						align-items: center;
+						justify-content: center;
+						width: 32px;
+						height: 32px;
+						padding: 0;
+						border-radius: 8px;
+						border: 1px solid var(--background-modifier-accent);
+						background: var(--background-secondary-alt);
+						box-shadow: none;
+						color: var(--text-normal);
+						cursor: pointer;
+						font: inherit;
+						transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+					}
+					.translator-color-chip:hover {
+						background: var(--background-modifier-hover);
+						border-color: var(--brand-500, var(--text-link));
+						color: var(--header-primary);
+					}
+					.translator-color-chip-active {
+						background: color-mix(in srgb, var(--brand-500, var(--text-link)) 14%, var(--background-secondary-alt));
+						border-color: var(--brand-500, var(--text-link));
+						box-shadow: inset 0 0 0 1px var(--brand-500, var(--text-link));
+						color: var(--header-primary);
+					}
+					.translator-color-chip-add {
+						font-size: 14px;
+						font-weight: 700;
+					}
+					.translator-color-chip-remove {
+						font-size: 16px;
+						font-weight: 700;
+						color: var(--text-muted);
+					}
+					.translator-color-chip-remove:hover {
+						color: var(--status-danger);
+						border-color: var(--status-danger);
+					}
+					.translator-color-chip-delete {
+						position: absolute;
+						top: -5px;
+						right: -5px;
+						width: 15px;
+						height: 15px;
+						border-radius: 50%;
+						display: flex;
+						align-items: center;
+						justify-content: center;
+						background: var(--status-danger);
+						color: white;
+						font-size: 11px;
+						font-weight: 700;
+						line-height: 1;
+						box-shadow: 0 0 0 2px var(--background-secondary-alt);
+					}
+					.translator-color-chip-code {
+						display: none;
+					}
+					.translator-settings-color-swatch {
+						width: 16px;
+						height: 16px;
+						border-radius: 4px;
+						border: 1px solid var(--background-modifier-accent);
+						flex: 0 0 auto;
+					}
+					.translator-color-custom-row {
+						display: flex;
+						align-items: center;
+						gap: 8px;
+						margin-top: 8px;
+						max-width: 360px;
+					}
+					.translator-color-custom-input {
+						flex: 1 1 auto;
+						min-width: 0;
+						height: 32px;
+						box-sizing: border-box;
+						padding: 0 10px;
+						border: 1px solid var(--background-modifier-accent);
+						border-radius: 8px;
+						background: var(--input-background, var(--background-tertiary));
+						color: var(--text-normal);
+						font: inherit;
+					}
+					.translator-color-custom-input:focus {
+						outline: none;
+						border-color: var(--brand-500, var(--text-link));
+					}
+					.translator-secret-input-row {
+						position: relative;
+						margin-bottom: 8px;
+					}
+					.translator-secret-input-row .translator-secret-input {
+						margin-bottom: 0 !important;
+					}
+					.translator-secret-input input {
+						padding-right: 48px !important;
+					}
+					.translator-secret-toggle {
+						position: absolute !important;
+						top: 1px;
+						right: 1px;
+						bottom: 1px;
+						width: 40px !important;
+						padding: 0 !important;
+						margin: 0 !important;
+						display: flex !important;
+						align-items: center !important;
+						justify-content: center !important;
+						border-radius: 0 4px 4px 0 !important;
+						border: 0 !important;
+						border-left: 1px solid var(--background-modifier-accent) !important;
+						background: var(--input-background, var(--background-tertiary)) !important;
+						box-shadow: none !important;
+						color: var(--interactive-normal) !important;
+						cursor: pointer !important;
+						font-size: 16px !important;
+						line-height: 1 !important;
+						z-index: 2;
+					}
+					.translator-secret-toggle:hover {
+						background: var(--background-modifier-hover) !important;
+					}
+					.translator-secret-toggle:focus-visible {
+						outline: none !important;
+						box-shadow: inset 0 0 0 1px var(--button-filled-brand-background, var(--brand-500)) !important;
+					}
+					.translator-secret-toggle svg {
+						display: block;
+					}
+					.translator-settings-field-action {
+						min-width: 92px !important;
+						height: 32px !important;
+						box-shadow: none !important;
+						flex: 0 0 auto;
+					}
+					.translator-detector-panel {
+						margin-bottom: 14px;
+						padding: 12px 14px;
+						border: 1px solid rgba(255, 255, 255, 0.055);
+						border-radius: 8px;
+						background: #202124;
+						background: color-mix(in srgb, var(--background-secondary, #2b2d31) 78%, black 22%);
+						box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+						box-sizing: border-box;
+					}
+					.translator-detector-panel .translator-settings-support-title {
+						margin-bottom: 4px;
+						font-size: 14px;
+						font-weight: 700;
+						line-height: 20px;
+						color: var(--header-primary, #ffffff);
+					}
+					.translator-detector-panel .translator-settings-support-hint {
+						margin-bottom: 10px;
+						font-size: 13px;
+						line-height: 1.45;
+						color: var(--text-muted, #949ba4);
+						opacity: 1;
+					}
+					.translator-detector-input-wrap {
+						position: relative;
+					}
+					.translator-detector-textinput input {
+						min-height: 34px !important;
+						padding-right: 68px !important;
+						border-color: rgba(255, 255, 255, 0.035) !important;
+						background: color-mix(in srgb, var(--background-tertiary, #1e1f22) 86%, black 14%) !important;
+					}
+					.translator-detector-input-button {
+						position: absolute !important;
+						top: 50%;
+						right: 8px;
+						height: 26px !important;
+						min-width: 46px !important;
+						padding: 0 10px !important;
+						transform: translateY(-50%);
+						box-shadow: none !important;
+						z-index: 2;
+					}
+					.translator-detector-input-button:active {
+						transform: translateY(-50%) !important;
+					}
+					.translator-detector-result-row {
+						display: flex;
+						align-items: center;
+						justify-content: space-between;
+						gap: 10px;
+						margin-top: 10px;
+						padding: 8px 10px;
+						border: 1px solid rgba(255, 255, 255, 0.045);
+						border-radius: 7px;
+						background: color-mix(in srgb, var(--background-tertiary, #1e1f22) 86%, black 14%);
+					}
+					.translator-detector-result-text {
+						min-width: 0;
+						color: var(--text-muted, #949ba4);
+						font-size: 12.5px;
+						line-height: 1.4;
+						overflow: hidden;
+						text-overflow: ellipsis;
+						white-space: nowrap;
+					}
+					.translator-detector-apply-button {
+						flex: 0 0 auto;
+						height: 28px !important;
+						box-shadow: none !important;
+					}
+					.translator-settings-support-panel {
+						margin-bottom: 8px;
+						padding: 4px 0 0 0;
+						border: 0;
+						border-radius: 0;
+						background: transparent;
+					}
+					.translator-advanced-protection-section {
+						margin: 0 0 14px;
+						padding: 0 0 2px;
+					}
+					.translator-advanced-protection-section + .translator-advanced-protection-section {
+						margin-top: 16px;
+						padding-top: 16px;
+						border-top: 1px solid var(--background-modifier-accent);
+					}
+					.translator-advanced-protection-section .translator-settings-switch-group {
+						margin-top: 8px;
+						margin-bottom: 8px;
+					}
+					.translator-settings-support-row {
+						display: flex;
+						flex-wrap: wrap;
+						gap: 8px;
+					}
+					.translator-settings-support-block + .translator-settings-support-block {
+						margin-top: 12px;
+						padding-top: 12px;
+						border-top: 1px solid var(--background-modifier-accent);
+					}
+					.translator-settings-support-title {
+						margin-bottom: 4px;
+						font-size: 13px;
+						font-weight: 600;
+					}
+					.translator-settings-support-hint {
+						margin-bottom: 8px;
+						line-height: 1.45;
+						opacity: 0.8;
+					}
+					.translator-settings-meta {
+						margin-top: 6px;
+						font-size: 13px;
+						line-height: 1.4;
+						opacity: 0.75;
+					}
+					.translator-segmented-group {
+						display: flex;
+						flex-wrap: wrap;
+						gap: 4px;
+						margin-bottom: 8px;
+						padding: 3px;
+						border: 1px solid var(--background-modifier-accent);
+						border-radius: 8px;
+						background: var(--background-tertiary, var(--background-secondary));
+					}
+					.translator-segmented-button {
+						appearance: none;
+						display: inline-flex;
+						align-items: center;
+						justify-content: center;
+						min-height: 32px;
+						padding: 0 14px;
+						border-radius: 7px;
+						border: 0;
+						background: transparent;
+						box-shadow: none;
+						color: var(--text-muted);
+						cursor: pointer;
+						font: inherit;
+						font-size: 12px !important;
+						font-weight: 600 !important;
+						line-height: 1;
+						transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+					}
+					.translator-segmented-button:hover {
+						background: var(--background-modifier-hover);
+						color: var(--text-normal);
+					}
+					.translator-segmented-button-active {
+						background: var(--background-secondary-alt);
+						color: var(--header-primary);
+						box-shadow: inset 0 0 0 1px var(--brand-500, var(--text-link));
+					}
+					.translator-segmented-button-disabled {
+						opacity: 0.45;
+						cursor: not-allowed;
+					}
+					.translator-segmented-button-disabled:hover {
+						background: transparent;
+						color: var(--text-muted);
+					}
+					.translator-decision-mode-grid {
+						display: grid;
+						grid-template-columns: 1fr 1fr;
+						gap: 4px;
+						width: 100%;
+						margin: 8px 0 10px;
+						padding: 3px;
+						border: 1px solid var(--background-modifier-accent);
+						border-radius: 7px;
+						background: var(--background-secondary, #2b2d31);
+					}
+					.translator-decision-mode-grid .translator-segmented-button {
+						width: 100%;
+						min-height: 34px;
+						border-radius: 5px;
+						font-size: 13px !important;
+						font-weight: 700 !important;
+						background: transparent;
+						color: var(--text-muted);
+					}
+					.translator-decision-mode-grid .translator-segmented-button:hover {
+						background: var(--background-modifier-hover);
+						color: var(--text-normal);
+					}
+					.translator-decision-mode-grid .translator-segmented-button-active {
+						background: var(--brand-500, #5865f2);
+						color: var(--white-500, #fff);
+						box-shadow: none;
+					}
+					.translator-decision-mode-grid .translator-segmented-button-disabled {
+						opacity: 0.45;
+					}
+					.translator-ai-prompt-textarea {
+						box-sizing: border-box;
+						width: 100%;
+						min-height: 118px;
+						margin: 8px 0;
+						padding: 10px 12px;
+						border: 1px solid var(--background-modifier-accent);
+						border-radius: 6px;
+						background: var(--input-background, var(--background-secondary, #2b2d31));
+						color: var(--text-normal);
+						font: inherit;
+						font-size: 13px;
+						line-height: 1.45;
+						resize: vertical;
+						outline: none;
+						scrollbar-width: thin;
+						scrollbar-color: var(--scrollbar-auto-thumb, var(--background-modifier-accent)) var(--input-background, var(--background-secondary, #2b2d31));
+					}
+					.translator-ai-prompt-textarea:focus {
+						border-color: var(--brand-500, #5865f2);
+					}
+					.translator-ai-prompt-textarea::-webkit-scrollbar {
+						width: 8px;
+					}
+					.translator-ai-prompt-textarea::-webkit-scrollbar-track {
+						background: var(--input-background, var(--background-secondary, #2b2d31));
+						border-radius: 8px;
+					}
+					.translator-ai-prompt-textarea::-webkit-scrollbar-thumb {
+						background: var(--scrollbar-auto-thumb, var(--background-modifier-accent));
+						border: 2px solid var(--input-background, var(--background-secondary, #2b2d31));
+						border-radius: 8px;
+					}
+					.translator-ai-prompt-textarea::-webkit-scrollbar-thumb:hover {
+						background: var(--scrollbar-auto-scrollbar-color-thumb, var(--interactive-muted));
+					}
+					.translator-preset-grid .translator-segmented-button {
+						min-width: 84px;
+					}
+					.translator-scope-grid .translator-segmented-button {
+						flex: 1 1 180px;
+						min-height: 34px;
+					}
+					.translator-window-grid .translator-segmented-button {
+						flex: 1 1 96px;
+						min-height: 34px;
+					}
+					.translator-scope-switch {
+						display: grid;
+						grid-template-columns: 1fr 1fr;
+						position: relative;
+						padding: 3px;
+						border: 1px solid var(--background-modifier-accent);
+						border-radius: 999px;
+						background: var(--background-tertiary, var(--background-secondary));
+						overflow: hidden;
+					}
+					.translator-scope-switch::before {
+						content: "";
+						position: absolute;
+						top: 3px;
+						bottom: 3px;
+						left: 3px;
+						width: calc(50% - 3px);
+						border-radius: 999px;
+						background: var(--background-secondary-alt);
+						box-shadow: inset 0 0 0 1px var(--brand-500, var(--text-link));
+						transition: transform 160ms ease;
+					}
+					.translator-scope-switch-loaded::before {
+						transform: translateX(100%);
+					}
+					.translator-scope-switch-button {
+						appearance: none;
+						position: relative;
+						z-index: 1;
+						height: 32px;
+						padding: 0 12px;
+						border: 0;
+						border-radius: 999px;
+						background: transparent;
+						box-shadow: none;
+						color: var(--text-muted);
+						cursor: pointer;
+						font: inherit;
+						font-size: 12px !important;
+						font-weight: 700 !important;
+						line-height: 1;
+					}
+					.translator-scope-switch-button-active {
+						color: var(--header-primary);
+					}
+					.translator-loaded-warning {
+						margin: 7px 2px 4px;
+						font-size: 12px;
+						line-height: 1.45;
+						color: var(--text-muted);
+					}
+					.translator-loaded-limit-row {
+						display: grid;
+						grid-template-columns: minmax(160px, 1fr) minmax(210px, 1.2fr);
+						align-items: center;
+						gap: 12px;
+						margin: 10px 2px 4px;
+					}
+					.translator-loaded-limit-title {
+						font-size: 13px;
+						font-weight: 600;
+						color: var(--header-primary);
+					}
+					.translator-loaded-limit-input {
+						width: 100%;
+					}
+					.translator-loaded-window-switch {
+						grid-template-columns: repeat(5, 1fr);
+					}
+					.translator-loaded-window-switch::before {
+						display: none;
+					}
+					.translator-preset-grid {
+						display: flex;
+						flex-wrap: wrap;
+						gap: 8px;
+						margin-bottom: 10px;
+					}
+					.translator-preset-button {
+						height: 30px !important;
+						padding: 0 12px !important;
+						border-radius: 999px !important;
+						border: 1px solid var(--background-modifier-accent) !important;
+						background: transparent !important;
+						box-shadow: none !important;
+						color: var(--text-normal) !important;
+						font-size: 13px !important;
+						font-weight: 600 !important;
+					}
+					.translator-preset-button:hover {
+						background: var(--background-secondary-alt) !important;
+						border-color: var(--brand-500, var(--text-link)) !important;
+					}
+					.translator-preset-button-active {
+						background: color-mix(in srgb, var(--brand-500, var(--text-link)) 18%, transparent) !important;
+						border-color: var(--brand-500, var(--text-link)) !important;
+						color: var(--header-primary) !important;
+					}
+	`;
+    }
+    __name(createTranslatorStyles, "createTranslatorStyles");
+    module2.exports = { createTranslatorStyles };
+  }
+});
+
+// src/i18n/labels.js
+var require_labels = __commonJS({
+  "src/i18n/labels.js"(exports2, module2) {
+    function getLabelsForUiLanguage(uiLanguageId) {
+      switch (uiLanguageId) {
+        case "bg":
+          return {
+            backup_engine: "Резервен-Преводач",
+            backup_engine_warning: "Ще използва Резервен-Преводач",
+            context_messagetranslateoption: "Превод на съобщението",
+            context_messageuntranslateoption: "Превод на съобщението",
+            context_translator: "Търсене превод",
+            detect_language: "Разпознаване на езика",
+            error_dailylimit: "Дневният лимит на заявките е достигнат.",
+            error_hourlylimit: "Почасовият лимит на заявките е достигнат.",
+            error_keyoutdated: "API-ключът е остарял.",
+            error_monthlylimit: "Месечният лимит на заявките е достигнат.",
+            error_serverdown: "Сървърът за превод може да е офлайн.",
+            exception_text: "Думите, започващи с {{var0}}, ще бъдат игнорирани",
+            general_sendOriginalMessage: "Също така изпраща оригиналното съобщение, когато превежда вашето изпратено съобщение",
+            general_showOriginalMessage: "Също така показва оригиналното съобщение при превод на получено съобщение",
+            language_choice_input_received: "Език на въвеждане в получените съобщения",
+            language_choice_input_sent: "Език на въвеждане в изпратените от вас съобщения",
+            language_choice_output_received: "Изходен език в получените съобщения",
+            language_choice_output_sent: "Изходен език в изпратените ви съобщения",
+            language_selection_channel: "Изборът на език ще бъде променен специално за този канал",
+            language_selection_global: "Изборът на език ще бъде променен за всички сървъри",
+            language_selection_server: "Изборът на език ще бъде променен специално за този сървър",
+            popout_translateoption: "Превод",
+            popout_untranslateoption: "Непревод",
+            prefixes_disable_text: "Префикси, които деактивират превода на съобщението",
+            prefixes_enable_text: "Префикси, които активират превод със специфичен език (напр. $fr, $de, $jp)",
+            toast_translating: "Превод",
+            toast_translating_failed: "Преводът не бе успешен",
+            toast_translating_tryanother: "Опитайте друг преводач",
+            translate_your_message: "Преведете вашите съобщения преди изпращане",
+            translated_watermark: "преведено",
+            translator_engine: "Преводач"
+          };
+        case "cs":
+          return {
+            backup_engine: "Backup-Překladatel",
+            backup_engine_warning: "Použije Backup-Překladatel",
+            context_messagetranslateoption: "Přeložit zprávu",
+            context_messageuntranslateoption: "Přeložit zprávu",
+            context_translator: "Hledat Překlad",
+            detect_language: "Rozpoznat jazyk",
+            error_dailylimit: "Denní limit požadavků byl dosažen.",
+            error_hourlylimit: "Bylo dosaženo limitu hodinového požadavku.",
+            error_keyoutdated: "Klíč API je zastaralý.",
+            error_monthlylimit: "Byl dosažen limit měsíčních požadavků.",
+            error_serverdown: "Překladový server může být offline.",
+            exception_text: "Slova začínající na {{var0}} budou ignorována",
+            general_sendOriginalMessage: "Při překladu odeslané zprávy také odešle původní zprávu",
+            general_showOriginalMessage: "Také zobrazuje původní zprávu při překladu přijaté zprávy",
+            language_choice_input_received: "Vstupní jazyk do přijatých zpráv",
+            language_choice_input_sent: "Zadejte jazyk do odeslaných zpráv",
+            language_choice_output_received: "Výstupní jazyk v přijatých zprávách",
+            language_choice_output_sent: "Jazyk výstupu ve vašich odeslaných zprávách",
+            language_selection_channel: "Výběr jazyka bude změněn speciálně pro tento kanál",
+            language_selection_global: "Výběr jazyka se změní pro všechny servery",
+            language_selection_server: "Výběr jazyka bude změněn speciálně pro tento server",
+            popout_translateoption: "Přeložit",
+            popout_untranslateoption: "Nepřeložit",
+            prefixes_disable_text: "Předpony, které deaktivují překlad zprávy",
+            prefixes_enable_text: "Předpony, které aktivují překlad s konkrétním jazykem (např. $fr, $de, $jp)",
+            toast_translating: "Překládání",
+            toast_translating_failed: "Překlad se nezdařil",
+            toast_translating_tryanother: "Zkuste jiný překladač",
+            translate_your_message: "Před odesláním si zprávy přeložte",
+            translated_watermark: "přeloženo",
+            translator_engine: "Překladatel"
+          };
+        case "da":
+          return {
+            backup_engine: "Backup-Oversætter",
+            backup_engine_warning: "Vil bruge Backup-Oversætter",
+            context_messagetranslateoption: "Oversæt besked",
+            context_messageuntranslateoption: "Ikke-oversat besked",
+            context_translator: "Søg oversættelse",
+            detect_language: "Find sprog",
+            error_dailylimit: "Daglig anmodningsgrænse nået.",
+            error_hourlylimit: "Timegrænsen for anmodning er nået.",
+            error_keyoutdated: "API-nøgle forældet.",
+            error_monthlylimit: "Månedlig anmodningsgrænse nået.",
+            error_serverdown: "Oversættelsesserveren er muligvis offline.",
+            exception_text: "Ord, der begynder med {{var0}}, ignoreres",
+            general_sendOriginalMessage: "Sender også den originale besked, når du oversætter din sendte besked",
+            general_showOriginalMessage: "Viser også den originale besked, når du oversætter modtaget besked",
+            language_choice_input_received: "Inputsprog i modtagne beskeder",
+            language_choice_input_sent: "Indtast sprog i dine sendte beskeder",
+            language_choice_output_received: "Outputsprog i modtagne beskeder",
+            language_choice_output_sent: "Outputsprog i dine sendte beskeder",
+            language_selection_channel: "Valg af sprog vil blive ændret specifikt for denne kanal",
+            language_selection_global: "Valg af sprog vil blive ændret for alle servere",
+            language_selection_server: "Sprogvalg vil blive ændret specifikt for denne server",
+            popout_translateoption: "Oversætte",
+            popout_untranslateoption: "Untranslate",
+            prefixes_disable_text: "Præfikser, der deaktiverer oversættelse af meddelelse",
+            prefixes_enable_text: "Præfikser, der aktiverer oversættelse med specifikt sprog (f.eks. $fr, $de, $jp)",
+            toast_translating: "Oversætter",
+            toast_translating_failed: "Kunne ikke oversætte",
+            toast_translating_tryanother: "Prøv en anden oversætter",
+            translate_your_message: "Oversæt dine beskeder før afsendelse",
+            translated_watermark: "oversat",
+            translator_engine: "Oversætter"
+          };
+        case "de":
+          return {
+            backup_engine: "Backup-Übersetzer",
+            backup_engine_warning: "Wird Backup-Übersetzer verwenden",
+            context_messagetranslateoption: "Nachricht übersetzen",
+            context_messageuntranslateoption: "Nachricht unübersetzen",
+            context_translator: "Übersetzung suchen",
+            detect_language: "Sprache erkennen",
+            error_dailylimit: "Tägliches Anforderungslimit erreicht.",
+            error_hourlylimit: "Stündliches Anforderungslimit erreicht.",
+            error_keyoutdated: "API-Schlüssel veraltet.",
+            error_monthlylimit: "Monatliches Anforderungslimit erreicht.",
+            error_serverdown: "Der Übersetzungsserver ist möglicherweise offline.",
+            exception_text: "Wörter, die mit {{var0}} beginnen, werden ignoriert",
+            general_sendOriginalMessage: "Sendet auch die ursprüngliche Nachricht, wenn die gesendete Nachricht übersetzt wird",
+            general_showOriginalMessage: "Zeigt auch die ursprüngliche Nachricht an, wenn eine empfangene Nachricht übersetzt wird",
+            language_choice_input_received: "Eingabesprache in empfangenen Nachrichten",
+            language_choice_input_sent: "Eingabesprache in gesendeten Nachrichten",
+            language_choice_output_received: "Ausgabesprache in empfangenen Nachrichten",
+            language_choice_output_sent: "Ausgabesprache in gesendeten Nachrichten",
+            language_selection_channel: "Die Sprachauswahl wird speziell für diesen Kanal geändert",
+            language_selection_global: "Die Sprachauswahl wird für alle Server geändert",
+            language_selection_server: "Die Sprachauswahl wird speziell für diesen Server geändert",
+            popout_translateoption: "Übersetzen",
+            popout_untranslateoption: "Unübersetzen",
+            prefixes_disable_text: "Präfixe, die die Übersetzung der Nachricht deaktivieren",
+            prefixes_enable_text: "Präfixe, die die Übersetzung mit einer bestimmten Sprache aktivieren (z.B. $fr, $de, $jp)",
+            toast_translating: "Übersetzen",
+            toast_translating_failed: "Übersetzung fehlgeschlagen",
+            toast_translating_tryanother: "Versuch einen anderen Übersetzer",
+            translate_your_message: "Übersetzt Nachrichten vor dem Senden",
+            translated_watermark: "übersetzt",
+            translator_engine: "Übersetzer"
+          };
+        case "el":
+          return {
+            backup_engine: "Μεταφράστης-Αντίγραφο ασφαλείας",
+            backup_engine_warning: "Θα χρησιμοποιηθεί Μεταφράστης-Αντίγραφο ασφαλείας",
+            context_messagetranslateoption: "Μετάφραση μηνύματος",
+            context_messageuntranslateoption: "Αναίρεση μετάφρασης μηνύματος",
+            context_translator: "Αναζήτηση μετάφρασης",
+            detect_language: "Εντοπισμός γλώσσας",
+            error_dailylimit: "Συμπληρώθηκε το ημερήσιο όριο αιτημάτων.",
+            error_hourlylimit: "Συμπληρώθηκε το ωριαίο όριο αιτημάτων.",
+            error_keyoutdated: "Το κλειδί API δεν είναι ενημερωμένο.",
+            error_monthlylimit: "Συμπληρώθηκε το μηνιαίο όριο αιτημάτων.",
+            error_serverdown: "Ο διακομιστής μετάφρασης ενδέχεται να είναι εκτός σύνδεσης.",
+            exception_text: "Οι λέξεις θα αγνοηθούν που ξεκινούν με {{var0}}",
+            general_sendOriginalMessage: "Αποστολή αρχικού Μηνύματος με τη μετάφραση απεσταλμένου μηνύματος",
+            general_showOriginalMessage: "Εμφάνιση αρχικού Μηνύματος με τη μετάφραση ενός ληφθέντος μηνύματος",
+            language_choice_input_received: "Γλώσσα εισαγωγής στα ληφθέντα μηνύματα",
+            language_choice_input_sent: "Γλώσσα εισαγωγής στα απεσταλμένα μηνύματά σας",
+            language_choice_output_received: "Γλώσσα εξαγωγής στα ληφθέντα μηνύματα",
+            language_choice_output_sent: "Γλώσσα εξαγωγής στα απεσταλμένα μηνύματά σας",
+            language_selection_channel: "Η επιλογή γλώσσας θα αλλάξει ειδικά για αυτό το κανάλι",
+            language_selection_global: "Η Επιλογή Γλώσσας θα αλλάξει για όλους τους Διακομιστές",
+            language_selection_server: "Η επιλογή γλώσσας θα αλλάξει ειδικά για αυτόν τον διακομιστή",
+            popout_translateoption: "Μετάφραση",
+            popout_untranslateoption: "Αναίρεση μετάφρασης",
+            prefixes_disable_text: "Προθέσεις που απενεργοποιούν την μετάφραση του μηνύματος",
+            prefixes_enable_text: "Προθέσεις που ενεργοποιούν την μετάφραση με συγκεκριμένη γλώσσα (π.χ. $fr, $de, $jp)",
+            toast_translating: "Μετάφραση",
+            toast_translating_failed: "Αποτυχία μετάφρασης",
+            toast_translating_tryanother: "Δοκιμάστε έναν άλλο Μεταφραστή",
+            translate_your_message: "Μεταφράστε τα Μηνύματά σας πριν την αποστολή",
+            translated_watermark: "μεταφρασμένο",
+            translator_engine: "Μεταφράστης"
+          };
+        case "es":
+          return {
+            backup_engine: "Backup-Traductor",
+            backup_engine_warning: "Utilizará Backup-Traductor",
+            context_messagetranslateoption: "Traducir mensaje",
+            context_messageuntranslateoption: "Mensaje sin traducir",
+            context_translator: "Buscar traducción",
+            detect_language: "Detectar idioma",
+            error_dailylimit: "Se alcanzó el límite de solicitudes diarias.",
+            error_hourlylimit: "Se alcanzó el límite de solicitudes por hora.",
+            error_keyoutdated: "API-Key obsoleta.",
+            error_monthlylimit: "Se alcanzó el límite de solicitudes mensuales.",
+            error_serverdown: "El servidor de traducción puede estar fuera de línea.",
+            exception_text: "Las palabras que comienzan con {{var0}} serán ignoradas",
+            general_sendOriginalMessage: "También envía el mensaje original al traducir su mensaje enviado",
+            general_showOriginalMessage: "También muestra el mensaje original al traducir un mensaje recibido",
+            language_choice_input_received: "Idioma de entrada en los mensajes recibidos",
+            language_choice_input_sent: "Idioma de entrada en sus mensajes enviados",
+            language_choice_output_received: "Idioma de salida en los mensajes recibidos",
+            language_choice_output_sent: "Idioma de salida en sus mensajes enviados",
+            language_selection_channel: "La selección de idioma se cambiará específicamente para este canal",
+            language_selection_global: "La selección de idioma se cambiará para todos los servidores",
+            language_selection_server: "La selección de idioma se cambiará específicamente para este servidor",
+            popout_translateoption: "Traducir",
+            popout_untranslateoption: "No traducir",
+            prefixes_disable_text: "Prefijos que desactivan la traducción del mensaje",
+            prefixes_enable_text: "Prefijos que activan la traducción con un idioma específico (por ejemplo, $fr, $de, $jp)",
+            toast_translating: "Traductorio",
+            toast_translating_failed: "No se pudo traducir",
+            toast_translating_tryanother: "Prueba con otro traductor",
+            translate_your_message: "Traduce tus mensajes antes de enviarlos",
+            translated_watermark: "traducido",
+            translator_engine: "Traductor"
+          };
+        case "es-419":
+          return {
+            backup_engine: "Traspaso de respaldo",
+            backup_engine_warning: "Utilizará el traductor de respaldo",
+            context_messagetranslateoption: "Mensaje de traducir",
+            context_messageuntranslateoption: "Mensaje no traducido",
+            context_translator: "Traducción de búsqueda",
+            detect_language: "Detectar lenguaje",
+            error_dailylimit: "Límite de solicitud diaria alcanzado.",
+            error_hourlylimit: "Límite de solicitud por hora alcanzado.",
+            error_keyoutdated: "Api-key anticuado.",
+            error_monthlylimit: "Límite de solicitud mensual alcanzado.",
+            error_serverdown: "El servidor de traducción puede estar fuera de línea.",
+            exception_text: "Las palabras que comienzan con {{var0}} se ignorarán",
+            general_sendOriginalMessage: "También envía el mensaje original al traducir su mensaje enviado",
+            general_showOriginalMessage: "También muestra el mensaje original al traducir un mensaje recibido",
+            language_choice_input_received: "Idioma de entrada en mensajes recibidos",
+            language_choice_input_sent: "Idioma de entrada en sus mensajes enviados",
+            language_choice_output_received: "Lenguaje de salida en mensajes recibidos",
+            language_choice_output_sent: "Lenguaje de salida en sus mensajes enviados",
+            language_selection_channel: "La selección del idioma se cambiará específicamente para este canal",
+            language_selection_global: "La selección del idioma se cambiará para todos los servidores",
+            language_selection_server: "La selección del idioma se cambiará específicamente para este servidor",
+            popout_translateoption: "Traducir",
+            popout_untranslateoption: "No traducido",
+            prefixes_disable_text: "Prefijos que deshabilitan la traducción del mensaje",
+            prefixes_enable_text: "Prefijos que habilitan la traducción con un lenguaje específico (por ejemplo, $fr, $de, $jp)",
+            toast_translating: "Traductorio",
+            toast_translating_failed: "No se pudo traducir",
+            toast_translating_tryanother: "Prueba otro traductor",
+            translate_your_message: "Traducir sus mensajes antes de enviar",
+            translated_watermark: "traducido",
+            translator_engine: "Traductor"
+          };
+        case "fi":
+          return {
+            backup_engine: "Backup-Kääntäjä",
+            backup_engine_warning: "Käyttää Backup-Kääntäjä",
+            context_messagetranslateoption: "Käännä viesti",
+            context_messageuntranslateoption: "Käännä viesti",
+            context_translator: "Hae käännöstä",
+            detect_language: "Tunnista kieli",
+            error_dailylimit: "Päivittäinen pyyntöraja saavutettu.",
+            error_hourlylimit: "Tuntikohtainen pyyntöraja saavutettu.",
+            error_keyoutdated: "API-avain vanhentunut.",
+            error_monthlylimit: "Kuukauden pyyntöraja saavutettu.",
+            error_serverdown: "Käännöspalvelin saattaa olla offline-tilassa.",
+            exception_text: "{{var0}} alkavat sanat ohitetaan",
+            general_sendOriginalMessage: "Lähettää myös alkuperäisen viestin kääntäessään lähettämääsi viestiä",
+            general_showOriginalMessage: "Näyttää myös alkuperäisen viestin käännettäessä vastaanotettua viestiä",
+            language_choice_input_received: "Syöttökieli vastaanotetuissa viesteissä",
+            language_choice_input_sent: "Syötä kieli lähettämiisi viesteihin",
+            language_choice_output_received: "Tulostuskieli vastaanotetuissa viesteissä",
+            language_choice_output_sent: "Lähetyskieli lähetetyissä viesteissä",
+            language_selection_channel: "Kielen valintaa muutetaan erityisesti tätä kanavaa varten",
+            language_selection_global: "Kielen valintaa muutetaan kaikille palvelimille",
+            language_selection_server: "Kielen valintaa muutetaan erityisesti tätä palvelinta varten",
+            popout_translateoption: "Kääntää",
+            popout_untranslateoption: "Käännä",
+            prefixes_disable_text: "Etuliitteet, jotka poistavat viestin käännöksen käytöstä",
+            prefixes_enable_text: "Etuliitteet, jotka mahdollistavat käännöksen tietyllä kielellä (esim. $fr, $de, $jp)",
+            toast_translating: "Kääntäminen",
+            toast_translating_failed: "Käännös epäonnistui",
+            toast_translating_tryanother: "Kokeile toista kääntäjää",
+            translate_your_message: "Käännä viestisi ennen lähettämistä",
+            translated_watermark: "käännetty",
+            translator_engine: "Kääntäjä"
+          };
+        case "fr":
+          return {
+            backup_engine: "Backup-Traducteur",
+            backup_engine_warning: "Utilisera Backup-Traducteur",
+            context_messagetranslateoption: "Traduire le message",
+            context_messageuntranslateoption: "Message non traduit",
+            context_translator: "Recherche de traduction",
+            detect_language: "Détecter la langue",
+            error_dailylimit: "Limite quotidienne de requêtes atteinte.",
+            error_hourlylimit: "Limite horaire de demandes atteinte.",
+            error_keyoutdated: "Clé API obsolète.",
+            error_monthlylimit: "Limite mensuelle de demandes atteinte.",
+            error_serverdown: "Le serveur de traduction est peut-être hors ligne.",
+            exception_text: "Les mots commençant par {{var0}} seront ignorés",
+            general_sendOriginalMessage: "Envoie également le message d'origine lors de la traduction de votre message envoyé",
+            general_showOriginalMessage: "Affiche également le message d'origine lors de la traduction d'un message reçu",
+            language_choice_input_received: "Langue d'entrée dans les messages reçus",
+            language_choice_input_sent: "Langue d'entrée dans vos messages envoyés",
+            language_choice_output_received: "Langue de sortie dans les messages reçus",
+            language_choice_output_sent: "Langue de sortie dans vos messages envoyés",
+            language_selection_channel: "La sélection de la langue sera modifiée spécifiquement pour ce canal",
+            language_selection_global: "La sélection de la langue sera modifiée pour tous les serveurs",
+            language_selection_server: "La sélection de la langue sera modifiée spécifiquement pour ce serveur",
+            popout_translateoption: "Traduire",
+            popout_untranslateoption: "Non traduit",
+            prefixes_disable_text: "Préfixes qui désactivent la traduction du message",
+            prefixes_enable_text: "Préfixes qui activent la traduction avec un langage spécifique (par exemple, $fr, $de, $jp)",
+            toast_translating: "Traduction en cours",
+            toast_translating_failed: "Échec de la traduction",
+            toast_translating_tryanother: "Essayez un autre traducteur",
+            translate_your_message: "Traduisez vos messages avant de les envoyer",
+            translated_watermark: "traduit",
+            translator_engine: "Traducteur"
+          };
+        case "hi":
+          return {
+            backup_engine: "बैकअप-अनुवादक",
+            backup_engine_warning: "बैकअप-अनुवादक का उपयोग करेंगे",
+            context_messagetranslateoption: "संदेश का अनुवाद करें",
+            context_messageuntranslateoption: "संदेश का अनुवाद न करें",
+            context_translator: "अनुवाद खोजें",
+            detect_language: "भाषा की जांच करो",
+            error_dailylimit: "दैनिक अनुरोध सीमा पूरी हो गई है।",
+            error_hourlylimit: "घंटे के अनुरोध की सीमा पूरी हो गई है.",
+            error_keyoutdated: "एपीआई-कुंजी पुरानी हो चुकी है।",
+            error_monthlylimit: "मासिक अनुरोध सीमा पूरी हो गई है।",
+            error_serverdown: "अनुवाद सर्वर ऑफ़लाइन हो सकता है।",
+            exception_text: "{{var0}} से शुरू होने वाले शब्दों पर ध्यान नहीं दिया जाएगा",
+            general_sendOriginalMessage: "आपके भेजे गए संदेश का अनुवाद करते समय मूल संदेश भी भेजता है",
+            general_showOriginalMessage: "प्राप्त संदेश का अनुवाद करते समय मूल संदेश भी दिखाता है",
+            language_choice_input_received: "प्राप्त संदेशों में इनपुट भाषा",
+            language_choice_input_sent: "आपके भेजे गए संदेशों में इनपुट भाषा",
+            language_choice_output_received: "प्राप्त संदेशों में आउटपुट भाषा",
+            language_choice_output_sent: "आपके भेजे गए संदेशों में आउटपुट भाषा",
+            language_selection_channel: "इस चैनल के लिए भाषा चयन विशेष रूप से बदला जाएगा",
+            language_selection_global: "सभी सर्वरों के लिए भाषा चयन बदल दिया जाएगा",
+            language_selection_server: "इस सर्वर के लिए भाषा चयन विशेष रूप से बदल दिया जाएगा",
+            popout_translateoption: "अनुवाद करना",
+            popout_untranslateoption: "अनुवाद न करें",
+            prefixes_disable_text: "उपसर्ग जो संदेश के अनुवाद को अक्षम करते हैं",
+            prefixes_enable_text: "उपसर्ग जो विशिष्ट भाषा के साथ अनुवाद को सक्षम करते हैं (जैसे $fr, $de, $jp)",
+            toast_translating: "अनुवाद",
+            toast_translating_failed: "अनुवाद करने में विफल",
+            toast_translating_tryanother: "दूसरे अनुवादक का प्रयास करें",
+            translate_your_message: "भेजने से पहले अपने संदेशों का अनुवाद करें",
+            translated_watermark: "अनुवाद",
+            translator_engine: "अनुवादक"
+          };
+        case "hr":
+          return {
+            backup_engine: "Rezervni-Prevoditelj",
+            backup_engine_warning: "Koristit će se Rezervni-Prevoditelj",
+            context_messagetranslateoption: "Prevedi poruku",
+            context_messageuntranslateoption: "Prevedi poruku",
+            context_translator: "Pretraži prijevod",
+            detect_language: "Prepoznaj jezik",
+            error_dailylimit: "Dosegnuto je dnevno ograničenje zahtjeva.",
+            error_hourlylimit: "Dosegnuto je ograničenje zahtjeva po satu.",
+            error_keyoutdated: "API-ključ zastario.",
+            error_monthlylimit: "Dosegnuto je mjesečno ograničenje zahtjeva.",
+            error_serverdown: "Translation Server možda je offline.",
+            exception_text: "Riječi koje počinju s {{var0}} bit će zanemarene",
+            general_sendOriginalMessage: "Također šalje izvornu poruku prilikom prijevoda vaše poslane poruke",
+            general_showOriginalMessage: "Također prikazuje izvornu poruku prilikom prijevoda primljene poruke",
+            language_choice_input_received: "Jezik unosa u primljenim porukama",
+            language_choice_input_sent: "Jezik unosa u vaše poslane poruke",
+            language_choice_output_received: "Izlazni jezik u primljenim porukama",
+            language_choice_output_sent: "Izlazni jezik u vašim poslanim porukama",
+            language_selection_channel: "Odabir jezika bit će promijenjen posebno za ovaj kanal",
+            language_selection_global: "Odabir jezika bit će promijenjen za sve poslužitelje",
+            language_selection_server: "Odabir jezika bit će promijenjen posebno za ovaj poslužitelj",
+            popout_translateoption: "Prevedi",
+            popout_untranslateoption: "Neprevedi",
+            prefixes_disable_text: "Prefiksi koji onemogućuju prijevod poruke",
+            prefixes_enable_text: "Prefiksi koji omogućuju prijevod određenim jezikom (npr. $fr, $de, $jp)",
+            toast_translating: "Prevođenje",
+            toast_translating_failed: "Prijevod nije uspio",
+            toast_translating_tryanother: "Pokušajte s drugim prevoditeljem",
+            translate_your_message: "Prevedite svoje poruke prije slanja",
+            translated_watermark: "prevedeno",
+            translator_engine: "Prevoditelj"
+          };
+        case "hu":
+          return {
+            backup_engine: "Backup-Fordító",
+            backup_engine_warning: "A Backup-Fordító programot fogja használni",
+            context_messagetranslateoption: "Üzenet lefordítása",
+            context_messageuntranslateoption: "Az üzenet lefordítása",
+            context_translator: "Keresés a fordításban",
+            detect_language: "Nyelvfelismerés",
+            error_dailylimit: "Elérte a napi igénylési korlátot.",
+            error_hourlylimit: "Elérte az óránkénti igénylési korlátot.",
+            error_keyoutdated: "API-kulcs elavult.",
+            error_monthlylimit: "Elérte a havi igénylési limitet.",
+            error_serverdown: "Lehet, hogy a Fordítószerver offline állapotban van.",
+            exception_text: "A(z) {{var0}} kezdetű szavak figyelmen kívül maradnak",
+            general_sendOriginalMessage: "Az eredeti üzenetet is elküldi az elküldött üzenet fordítása során",
+            general_showOriginalMessage: "A fogadott üzenet lefordításakor az eredeti üzenetet is megjeleníti",
+            language_choice_input_received: "Beviteli nyelv a fogadott üzenetekben",
+            language_choice_input_sent: "Írja be a nyelvet az elküldött üzenetekben",
+            language_choice_output_received: "Kimeneti nyelv a fogadott üzenetekben",
+            language_choice_output_sent: "Kimeneti nyelv az elküldött üzenetekben",
+            language_selection_channel: "A nyelvválasztás kifejezetten ehhez a csatornához fog módosulni",
+            language_selection_global: "A nyelv kiválasztása minden szerveren módosul",
+            language_selection_server: "A nyelvválasztás kifejezetten ehhez a szerverhez módosul",
+            popout_translateoption: "fordít",
+            popout_untranslateoption: "Fordítás le",
+            prefixes_disable_text: "Az üzenet fordítását letiltó előtagok",
+            prefixes_enable_text: "Előtagok, amelyek lehetővé teszik a fordítás meghatározott nyelvvel (például $fr, $de, $jp)",
+            toast_translating: "Fordítás",
+            toast_translating_failed: "Nem sikerült lefordítani",
+            toast_translating_tryanother: "Próbálkozzon másik fordítóval",
+            translate_your_message: "Küldés előtt fordítsa le az üzeneteit",
+            translated_watermark: "lefordított",
+            translator_engine: "Fordító"
+          };
+        case "it":
+          return {
+            backup_engine: "Backup-Traduttore",
+            backup_engine_warning: "Utilizzerà Backup-Traduttore",
+            context_messagetranslateoption: "Traduci messaggio",
+            context_messageuntranslateoption: "Annulla traduzione messaggio",
+            context_translator: "Cerca traduzione",
+            detect_language: "Rileva lingua",
+            error_dailylimit: "Limite di richieste giornaliere raggiunto.",
+            error_hourlylimit: "Limite di richiesta oraria raggiunto.",
+            error_keyoutdated: "Chiave API obsoleta.",
+            error_monthlylimit: "Limite di richieste mensili raggiunto.",
+            error_serverdown: "Il server di traduzione potrebbe essere offline.",
+            exception_text: "Le parole che iniziano con {{var0}} verranno ignorate",
+            general_sendOriginalMessage: "Invia anche il messaggio originale durante la traduzione del messaggio inviato",
+            general_showOriginalMessage: "Mostra anche il messaggio originale durante la traduzione di un messaggio ricevuto",
+            language_choice_input_received: "Lingua di input nei messaggi ricevuti",
+            language_choice_input_sent: "Inserisci la lingua nei tuoi messaggi inviati",
+            language_choice_output_received: "Lingua di output nei messaggi ricevuti",
+            language_choice_output_sent: "Lingua di output nei messaggi inviati",
+            language_selection_channel: "La selezione della lingua verrà modificata in modo specifico per questo canale",
+            language_selection_global: "La selezione della lingua verrà modificata per tutti i server",
+            language_selection_server: "La selezione della lingua verrà modificata in modo specifico per questo server",
+            popout_translateoption: "Tradurre",
+            popout_untranslateoption: "Non tradurre",
+            prefixes_disable_text: "Parole che iniziano con {{var0}} verranno ignorate",
+            prefixes_enable_text: "Parole che attivano la traduzione con un linguaggio specifico (ad esempio, $fr, $de, $jp)",
+            toast_translating: "Tradurre",
+            toast_translating_failed: "Impossibile tradurre",
+            toast_translating_tryanother: "Prova un altro traduttore",
+            translate_your_message: "Traduci i tuoi messaggi prima di inviarli",
+            translated_watermark: "tradotto",
+            translator_engine: "Traduttore"
+          };
+        case "ja":
+          return {
+            backup_engine: "バックアップ翻訳者",
+            backup_engine_warning: "バックアップ翻訳者 を使用します",
+            context_messagetranslateoption: "メッセージの翻訳",
+            context_messageuntranslateoption: "メッセージの翻訳解除",
+            context_translator: "翻訳を検索",
+            detect_language: "言語を検出",
+            error_dailylimit: "1 日のリクエスト上限に達しました。",
+            error_hourlylimit: "1 時間あたりのリクエスト制限に達しました。",
+            error_keyoutdated: "API キーが古くなっています。",
+            error_monthlylimit: "月間リクエスト制限に達しました。",
+            error_serverdown: "翻訳サーバーがオフラインになっている可能性があります。",
+            exception_text: "{{var0}} で始まる単語は無視されます",
+            general_sendOriginalMessage: "送信したメッセージを翻訳するときに元のメッセージも送信します",
+            general_showOriginalMessage: "受信したメッセージを翻訳するときに元のメッセージも表示します",
+            language_choice_input_received: "受信メッセージの入力言語",
+            language_choice_input_sent: "送信メッセージの入力言語",
+            language_choice_output_received: "受信メッセージの出力言語",
+            language_choice_output_sent: "送信メッセージの出力言語",
+            language_selection_channel: "言語の選択は、このチャンネル専用に変更されます",
+            language_selection_global: "すべてのサーバーの言語選択が変更されます",
+            language_selection_server: "言語の選択は、このサーバー専用に変更されます",
+            popout_translateoption: "翻訳する",
+            popout_untranslateoption: "翻訳しない",
+            prefixes_disable_text: "メッセージの翻訳を無効にするプレフィックス",
+            prefixes_enable_text: "特定の言語で翻訳を可能にするプレフィックス（例：$fr, $de, $jp）",
+            toast_translating: "翻訳",
+            toast_translating_failed: "翻訳に失敗しました",
+            toast_translating_tryanother: "別の翻訳者を試す",
+            translate_your_message: "送信する前にメッセージを翻訳する",
+            translated_watermark: "翻訳済み",
+            translator_engine: "翻訳者"
+          };
+        case "ko":
+          return {
+            backup_engine: "백업 번역기",
+            backup_engine_warning: "백업 번역기를 사용합니다",
+            context_messagetranslateoption: "메시지 번역",
+            context_messageuntranslateoption: "메시지 번역 취소",
+            context_translator: "번역 검색",
+            detect_language: "언어를 감지",
+            error_dailylimit: "일일 요청 한도에 도달했습니다.",
+            error_hourlylimit: "시간당 요청 한도에 도달했습니다.",
+            error_keyoutdated: "API 키가 오래되었습니다.",
+            error_monthlylimit: "월간 요청 한도에 도달했습니다.",
+            error_serverdown: "번역 서버가 오프라인일 수 있습니다.",
+            exception_text: "{{var0}}로 시작하는 단어는 무시됩니다.",
+            general_sendOriginalMessage: "또한 보낸 메시지를 번역할 때 원본 메시지를 보냅니다.",
+            general_showOriginalMessage: "또한 수신된 메시지를 번역할 때 원본 메시지를 표시합니다.",
+            language_choice_input_received: "수신된 메시지의 입력 언어",
+            language_choice_input_sent: "보낸 메시지의 입력 언어",
+            language_choice_output_received: "수신된 메시지의 출력 언어",
+            language_choice_output_sent: "보낸 메시지의 출력 언어",
+            language_selection_channel: "이 채널에 대해 특별히 언어 선택이 변경됩니다.",
+            language_selection_global: "모든 서버에 대해 언어 선택이 변경됩니다.",
+            language_selection_server: "이 서버에 대해 특별히 언어 선택이 변경됩니다.",
+            popout_translateoption: "옮기다",
+            popout_untranslateoption: "번역 취소",
+            prefixes_disable_text: "메시지 변환을 비활성화하는 접두사",
+            prefixes_enable_text: "특정 언어로 변환을 가능하게하는 접두사 (예: $fr, $de, $jp)",
+            toast_translating: "번역 중",
+            toast_translating_failed: "번역하지 못했습니다.",
+            toast_translating_tryanother: "다른 번역기 시도",
+            translate_your_message: "보내기 전에 메시지 번역",
+            translated_watermark: "번역",
+            translator_engine: "역자"
+          };
+        case "lt":
+          return {
+            backup_engine: "Backup-Vertėjas",
+            backup_engine_warning: "Naudos Backup-Vertėjas",
+            context_messagetranslateoption: "Versti pranešimą",
+            context_messageuntranslateoption: "Išversti pranešimą",
+            context_translator: "Paieškos vertimas",
+            detect_language: "Aptikti kalbą",
+            error_dailylimit: "Pasiektas dienos užklausų limitas.",
+            error_hourlylimit: "Pasiektas valandinių užklausų limitas.",
+            error_keyoutdated: "API raktas pasenęs.",
+            error_monthlylimit: "Pasiektas mėnesio užklausų limitas.",
+            error_serverdown: "Vertimo serveris gali būti neprisijungęs.",
+            exception_text: "Žodžiai, prasidedantys {{var0}}, bus ignoruojami",
+            general_sendOriginalMessage: "Taip pat siunčia originalų pranešimą verčiant jūsų išsiųstą žinutę",
+            general_showOriginalMessage: "Taip pat rodomas pradinis pranešimas, kai verčiamas gautas pranešimas",
+            language_choice_input_received: "Įvesties kalba gautuose pranešimuose",
+            language_choice_input_sent: "Įveskite kalbą siunčiamuose pranešimuose",
+            language_choice_output_received: "Išvesties kalba gautuose pranešimuose",
+            language_choice_output_sent: "Išvesties kalba jūsų išsiųstuose pranešimuose",
+            language_selection_channel: "Kalbos pasirinkimas bus pakeistas specialiai šiam kanalui",
+            language_selection_global: "Kalbos pasirinkimas bus pakeistas visiems serveriams",
+            language_selection_server: "Kalbos pasirinkimas bus pakeistas specialiai šiam serveriui",
+            popout_translateoption: "Išversti",
+            popout_untranslateoption: "Neišversti",
+            prefixes_disable_text: "Priešdėliai, kurie išjungia pranešimo vertimą",
+            prefixes_enable_text: "Priešdėliai, įgalinantys vertimą su konkrečia kalba (pvz., $fr, $de, $jp)",
+            toast_translating: "Vertimas",
+            toast_translating_failed: "Nepavyko išversti",
+            toast_translating_tryanother: "Išbandykite kitą vertėją",
+            translate_your_message: "Prieš siųsdami išverskite savo pranešimus",
+            translated_watermark: "išverstas",
+            translator_engine: "Vertėjas"
+          };
+        case "nl":
+          return {
+            backup_engine: "Backup-Vertaler",
+            backup_engine_warning: "Zal Backup-Vertaler gebruiken",
+            context_messagetranslateoption: "Bericht vertalen",
+            context_messageuntranslateoption: "Bericht onvertalen",
+            context_translator: "Zoek vertaling",
+            detect_language: "Taal detecteren",
+            error_dailylimit: "Dagelijkse verzoeklimiet bereikt.",
+            error_hourlylimit: "Verzoeklimiet per uur bereikt.",
+            error_keyoutdated: "API-sleutel verouderd.",
+            error_monthlylimit: "Maandelijkse aanvraaglimiet bereikt.",
+            error_serverdown: "Vertaalserver is mogelijk offline.",
+            exception_text: "Woorden die beginnen met {{var0}} worden genegeerd",
+            general_sendOriginalMessage: "Verzendt ook het originele bericht bij het vertalen van uw verzonden bericht",
+            general_showOriginalMessage: "Toont ook het originele bericht bij het vertalen van een ontvangen bericht",
+            language_choice_input_received: "Invoertaal in ontvangen berichten",
+            language_choice_input_sent: "Invoertaal in uw verzonden berichten",
+            language_choice_output_received: "Uitvoertaal in ontvangen berichten",
+            language_choice_output_sent: "Uitvoertaal in uw verzonden berichten",
+            language_selection_channel: "De taalselectie wordt specifiek voor dit kanaal gewijzigd",
+            language_selection_global: "Taalkeuze wordt voor alle servers gewijzigd",
+            language_selection_server: "Taalselectie wordt specifiek voor deze server gewijzigd",
+            popout_translateoption: "Vertalen",
+            popout_untranslateoption: "Onvertalen",
+            prefixes_disable_text: "Voorvoegsels die de vertaling van het bericht uitschakelen",
+            prefixes_enable_text: "Voorvoegsels die vertaling mogelijk maken met specifieke taal (bijv. $fr, $de, $jp)",
+            toast_translating: "Vertalen",
+            toast_translating_failed: "Kan niet vertalen",
+            toast_translating_tryanother: "Probeer een andere vertaler",
+            translate_your_message: "Vertaal uw berichten voordat u ze verzendt",
+            translated_watermark: "vertaald",
+            translator_engine: "Vertaler"
+          };
+        case "no":
+          return {
+            backup_engine: "Backup-Oversetter",
+            backup_engine_warning: "Vil bruke Backup-Oversetter",
+            context_messagetranslateoption: "Oversett melding",
+            context_messageuntranslateoption: "Ikke oversett melding",
+            context_translator: "Søk i oversettelse",
+            detect_language: "Oppdage språk",
+            error_dailylimit: "Daglig forespørselsgrense nådd.",
+            error_hourlylimit: "Forespørselsgrensen for time nådd.",
+            error_keyoutdated: "API-nøkkel utdatert.",
+            error_monthlylimit: "Månedlig forespørselsgrense nådd.",
+            error_serverdown: "Oversettelsesserveren kan være frakoblet.",
+            exception_text: "Ord som begynner med {{var0}} vil bli ignorert",
+            general_sendOriginalMessage: "Sender også den originale meldingen når du oversetter den sendte meldingen",
+            general_showOriginalMessage: "Viser også den originale meldingen når du oversetter en mottatt melding",
+            language_choice_input_received: "Inndataspråk i mottatte meldinger",
+            language_choice_input_sent: "Inntastingsspråk i sendte meldinger",
+            language_choice_output_received: "Utdataspråk i mottatte meldinger",
+            language_choice_output_sent: "Utdataspråk i dine sendte meldinger",
+            language_selection_channel: "Språkvalg vil bli endret spesifikt for denne kanalen",
+            language_selection_global: "Språkvalg vil bli endret for alle servere",
+            language_selection_server: "Språkvalg vil bli endret spesifikt for denne serveren",
+            popout_translateoption: "Oversette",
+            popout_untranslateoption: "Ikke oversett",
+            prefixes_disable_text: "Prefikser som deaktiverer oversettelse av meldingen",
+            prefixes_enable_text: "Prefikser som muliggjør oversettelse med spesifikt språk (f.eks. $fr, $de, $jp)",
+            toast_translating: "Oversetter",
+            toast_translating_failed: "Kunne ikke oversette",
+            toast_translating_tryanother: "Prøv en annen oversetter",
+            translate_your_message: "Oversett meldingene dine før sending",
+            translated_watermark: "oversatt",
+            translator_engine: "Oversetter"
+          };
+        case "pl":
+          return {
+            backup_engine: "Backup-Tłumacz",
+            backup_engine_warning: "Użyje Backup-Tłumacz",
+            context_messagetranslateoption: "Przetłumacz wiadomość",
+            context_messageuntranslateoption: "Nieprzetłumacz wiadomość",
+            context_translator: "Wyszukaj tłumaczenie",
+            detect_language: "Wykryj język",
+            error_dailylimit: "Osiągnięto dzienny limit żądań.",
+            error_hourlylimit: "Osiągnięto godzinowy limit żądań.",
+            error_keyoutdated: "Klucz API jest nieaktualny.",
+            error_monthlylimit: "Osiągnięto miesięczny limit żądań.",
+            error_serverdown: "Serwer tłumaczeń może być w trybie offline.",
+            exception_text: "Słowa zaczynające się od {{var0}} będą ignorowane",
+            general_sendOriginalMessage: "Wysyła również oryginalną wiadomość podczas tłumaczenia wysłanej wiadomości",
+            general_showOriginalMessage: "Pokazuje również oryginalną wiadomość podczas tłumaczenia otrzymanej wiadomości",
+            language_choice_input_received: "Język wprowadzania w odebranych wiadomościach",
+            language_choice_input_sent: "Język wprowadzania w wysyłanych wiadomościach",
+            language_choice_output_received: "Język wyjściowy w odebranych wiadomościach",
+            language_choice_output_sent: "Język wyjściowy w wysłanych wiadomościach",
+            language_selection_channel: "Wybór języka zostanie zmieniony specjalnie dla tego kanału",
+            language_selection_global: "Wybór języka zostanie zmieniony dla wszystkich serwerów",
+            language_selection_server: "Wybór języka zostanie zmieniony specjalnie dla tego serwera",
+            popout_translateoption: "Tłumaczyć",
+            popout_untranslateoption: "Nie przetłumacz",
+            prefixes_disable_text: "Słowa zaczynające się od {{var0}} będą ignorowane",
+            prefixes_enable_text: "Słowa, które aktywują tłumaczenie na określony język (np. $fr, $de, $jp)",
+            toast_translating: "Tłumaczenie",
+            toast_translating_failed: "Nie udało się przetłumaczyć",
+            toast_translating_tryanother: "Wypróbuj innego tłumacza",
+            translate_your_message: "Przetłumacz swoje wiadomości przed wysłaniem",
+            translated_watermark: "przetłumaczony",
+            translator_engine: "Tłumacz"
+          };
+        case "pt-BR":
+          return {
+            backup_engine: "Backup-Tradutor",
+            backup_engine_warning: "Usará o Backup-Tradutor",
+            context_messagetranslateoption: "Traduzir mensagem",
+            context_messageuntranslateoption: "Mensagem não traduzida",
+            context_translator: "Tradução de pesquisa",
+            detect_language: "Detectar idioma",
+            error_dailylimit: "Limite de solicitações diárias atingido.",
+            error_hourlylimit: "Limite de solicitação por hora atingido.",
+            error_keyoutdated: "Chave de API desatualizada.",
+            error_monthlylimit: "Limite de solicitação mensal atingido.",
+            error_serverdown: "O servidor de tradução pode estar offline.",
+            exception_text: "Palavras que começam com {{var0}} serão ignoradas",
+            general_sendOriginalMessage: "Também envia a Mensagem original ao traduzir sua Mensagem enviada",
+            general_showOriginalMessage: "Também mostra a Mensagem original ao traduzir uma Mensagem recebida",
+            language_choice_input_received: "Idioma de entrada nas mensagens recebidas",
+            language_choice_input_sent: "Idioma de entrada em suas mensagens enviadas",
+            language_choice_output_received: "Idioma de saída nas mensagens recebidas",
+            language_choice_output_sent: "Idioma de saída em suas mensagens enviadas",
+            language_selection_channel: "A seleção de idioma será alterada especificamente para este canal",
+            language_selection_global: "A seleção de idioma será alterada para todos os servidores",
+            language_selection_server: "A seleção de idioma será alterada especificamente para este servidor",
+            popout_translateoption: "Traduzir",
+            popout_untranslateoption: "Não traduzido",
+            prefixes_disable_text: "Prefixos que desativam a tradução da mensagem",
+            prefixes_enable_text: "Prefixos que permitem a tradução com linguagem específica (por exemplo, $fr, $de, $jp)",
+            toast_translating: "Traduzindo",
+            toast_translating_failed: "Falha ao traduzir",
+            toast_translating_tryanother: "Tente outro tradutor",
+            translate_your_message: "Traduza suas mensagens antes de enviar",
+            translated_watermark: "traduzido",
+            translator_engine: "Tradutor"
+          };
+        case "ro":
+          return {
+            backup_engine: "Backup-Traducător",
+            backup_engine_warning: "Va folosi Backup-Traducător",
+            context_messagetranslateoption: "Traduceți mesajul",
+            context_messageuntranslateoption: "Untraduceți mesajul",
+            context_translator: "Căutare traducere",
+            detect_language: "Detecteaza limba",
+            error_dailylimit: "Limita zilnică de solicitare a fost atinsă.",
+            error_hourlylimit: "Limita orară de solicitare a fost atinsă.",
+            error_keyoutdated: "API-Key este învechită.",
+            error_monthlylimit: "Limita lunară de solicitare a fost atinsă.",
+            error_serverdown: "Serverul de traducere ar putea fi offline.",
+            exception_text: "Cuvintele care încep cu {{var0}} vor fi ignorate",
+            general_sendOriginalMessage: "De asemenea, trimite mesajul original atunci când traduceți mesajul trimis",
+            general_showOriginalMessage: "Afișează, de asemenea, mesajul original atunci când traduceți un mesaj primit",
+            language_choice_input_received: "Limba de intrare în mesajele primite",
+            language_choice_input_sent: "Introduceți limba în mesajele trimise",
+            language_choice_output_received: "Limba de ieșire în mesajele primite",
+            language_choice_output_sent: "Limba de ieșire în mesajele trimise",
+            language_selection_channel: "Selectarea limbii va fi modificată special pentru acest canal",
+            language_selection_global: "Selectarea limbii va fi modificată pentru toate serverele",
+            language_selection_server: "Selectarea limbii va fi modificată special pentru acest Server",
+            popout_translateoption: "Traduceți",
+            popout_untranslateoption: "Netradus",
+            prefixes_disable_text: "Prefixele care dezactivează traducerea mesajului",
+            prefixes_enable_text: "Prefixele care permit traducerea cu un limbaj specific (de exemplu, $fr, $de, $jp)",
+            toast_translating: "Traducere",
+            toast_translating_failed: "Nu s-a putut traduce",
+            toast_translating_tryanother: "Încercați un alt traducător",
+            translate_your_message: "Traduceți mesajele înainte de a le trimite",
+            translated_watermark: "tradus",
+            translator_engine: "Traducător"
+          };
+        case "ru":
+          return {
+            backup_engine: "Резервный-Переводчик",
+            backup_engine_warning: "Буду использовать Резервный-Переводчик",
+            context_messagetranslateoption: "Перевести сообщение",
+            context_messageuntranslateoption: "Непереведенное сообщение",
+            context_translator: "Искать перевод",
+            detect_language: "Определить язык",
+            error_dailylimit: "Достигнут дневной лимит запросов.",
+            error_hourlylimit: "Достигнут лимит почасовых запросов.",
+            error_keyoutdated: "API-ключ устарел.",
+            error_monthlylimit: "Достигнут месячный лимит запросов.",
+            error_serverdown: "Сервер переводов может быть отключен.",
+            exception_text: "Слова, начинающиеся с {{var0}}, будут игнорироваться.",
+            general_sendOriginalMessage: "Также отправляет исходное сообщение при переводе отправленного сообщения.",
+            general_showOriginalMessage: "Также показывает исходное сообщение при переводе полученного сообщения.",
+            language_choice_input_received: "Язык ввода в полученных сообщениях",
+            language_choice_input_sent: "Язык ввода в ваших отправленных сообщениях",
+            language_choice_output_received: "Язык вывода в полученных сообщениях",
+            language_choice_output_sent: "Язык вывода в ваших отправленных сообщениях",
+            language_selection_channel: "Выбор языка будет изменен специально для этого канала.",
+            language_selection_global: "Выбор языка будет изменен для всех серверов.",
+            language_selection_server: "Выбор языка будет изменен специально для этого сервера",
+            popout_translateoption: "Переведите",
+            popout_untranslateoption: "Неперевести",
+            prefixes_disable_text: "Префиксы, которые отключают перевод сообщения",
+            prefixes_enable_text: "Префиксы, которые обеспечивают перевод с конкретным языком (например, $fr, $de, $jp)",
+            toast_translating: "Идет перевод",
+            toast_translating_failed: "Не удалось перевести",
+            toast_translating_tryanother: "Попробуйте другой переводчик",
+            translate_your_message: "Переводите свои сообщения перед отправкой",
+            translated_watermark: "переведено",
+            translator_engine: "Переводчик"
+          };
+        case "sv":
+          return {
+            backup_engine: "Backup-Översättare",
+            backup_engine_warning: "Kommer att använda Backup-Översättare",
+            context_messagetranslateoption: "Översätt meddelande",
+            context_messageuntranslateoption: "Untranslate meddelande",
+            context_translator: "Sök översättning",
+            detect_language: "Upptäck språk",
+            error_dailylimit: "Daglig förfrågningsgräns nådd.",
+            error_hourlylimit: "Begäran per timme nådd.",
+            error_keyoutdated: "API-nyckel föråldrad.",
+            error_monthlylimit: "Gränsen för månatlig begäran har nåtts.",
+            error_serverdown: "Översättningsservern kan vara offline.",
+            exception_text: "Ord som börjar med {{var0}} kommer att ignoreras",
+            general_sendOriginalMessage: "Skickar också det ursprungliga meddelandet när du översätter ditt skickade meddelande",
+            general_showOriginalMessage: "Visar även det ursprungliga meddelandet när ett mottaget meddelande översätts",
+            language_choice_input_received: "Inmatningsspråk i mottagna meddelanden",
+            language_choice_input_sent: "Inmatningsspråk i dina skickade meddelanden",
+            language_choice_output_received: "Utmatningsspråk i mottagna meddelanden",
+            language_choice_output_sent: "Utmatningsspråk i dina skickade meddelanden",
+            language_selection_channel: "Språkval kommer att ändras specifikt för denna kanal",
+            language_selection_global: "Språkval kommer att ändras för alla servrar",
+            language_selection_server: "Språkval kommer att ändras specifikt för denna server",
+            popout_translateoption: "Översätt",
+            popout_untranslateoption: "Untranslate",
+            prefixes_disable_text: "Prefix som inaktiverar översättning av meddelandet",
+            prefixes_enable_text: "Prefix som möjliggör översättning med specifikt språk (t.ex. $fr, $de, $jp)",
+            toast_translating: "Översätter",
+            toast_translating_failed: "Det gick inte att översätta",
+            toast_translating_tryanother: "Prova en annan översättare",
+            translate_your_message: "Översätt dina meddelanden innan du skickar",
+            translated_watermark: "översatt",
+            translator_engine: "Översättare"
+          };
+        case "th":
+          return {
+            backup_engine: "สำรอง-นักแปล",
+            backup_engine_warning: "จะใช้การสำรองข้อมูล-นักแปล",
+            context_messagetranslateoption: "แปลข้อความ",
+            context_messageuntranslateoption: "ยกเลิกการแปลข้อความ",
+            context_translator: "ค้นหาคำแปล",
+            detect_language: "ตรวจจับภาษา",
+            error_dailylimit: "ถึงขีดจำกัดคำขอรายวันแล้ว",
+            error_hourlylimit: "ถึงขีดจำกัดคำขอรายชั่วโมงแล้ว",
+            error_keyoutdated: "API-Key ล้าสมัยแล้ว",
+            error_monthlylimit: "ถึงขีดจำกัดคำขอรายเดือนแล้ว",
+            error_serverdown: "เซิร์ฟเวอร์การแปลอาจออฟไลน์อยู่",
+            exception_text: "คำที่ขึ้นต้นด้วย {{var0}} จะถูกละเว้น",
+            general_sendOriginalMessage: "ส่งข้อความต้นฉบับเมื่อแปลข้อความที่ส่งของคุณ",
+            general_showOriginalMessage: "ยังแสดงข้อความต้นฉบับเมื่อแปลข้อความที่ได้รับ",
+            language_choice_input_received: "ป้อนภาษาในข้อความที่ได้รับ",
+            language_choice_input_sent: "ป้อนภาษาในข้อความที่คุณส่ง",
+            language_choice_output_received: "ภาษาเอาต์พุตในข้อความที่ได้รับ",
+            language_choice_output_sent: "ภาษาที่ส่งออกในข้อความที่ส่งของคุณ",
+            language_selection_channel: "การเลือกภาษาจะมีการเปลี่ยนแปลงเฉพาะสำหรับช่องนี้",
+            language_selection_global: "การเลือกภาษาจะมีการเปลี่ยนแปลงสำหรับเซิร์ฟเวอร์ทั้งหมด",
+            language_selection_server: "การเลือกภาษาจะมีการเปลี่ยนแปลงโดยเฉพาะสำหรับเซิร์ฟเวอร์นี้",
+            popout_translateoption: "แปลภาษา",
+            popout_untranslateoption: "ไม่แปล",
+            prefixes_disable_text: "คำนำหน้าการปิดใช้งานการแปลข้อความ",
+            prefixes_enable_text: "คำนำหน้าที่เปิดใช้งานการแปลด้วยภาษาที่เฉพาะเจาะจง (เช่น $fr, $de, $jp)",
+            toast_translating: "กำลังแปล",
+            toast_translating_failed: "แปลไม่สำเร็จ",
+            toast_translating_tryanother: "ลองใช้นักแปลคนอื่น",
+            translate_your_message: "แปลข้อความของคุณก่อนส่ง",
+            translated_watermark: "แปล",
+            translator_engine: "นักแปล"
+          };
+        case "tr":
+          return {
+            backup_engine: "Yedekleme-Çevirmen",
+            backup_engine_warning: "Yedekleme-Çevirmen kullanacak",
+            context_messagetranslateoption: "Mesajı Çevir",
+            context_messageuntranslateoption: "Çeviriyi Kaldır Mesajı",
+            context_translator: "Çeviri ara",
+            detect_language: "Dili Algıla",
+            error_dailylimit: "Günlük İstek Sınırına ulaşıldı.",
+            error_hourlylimit: "Saatlik İstek Sınırına ulaşıldı.",
+            error_keyoutdated: "API Anahtarı güncel değil.",
+            error_monthlylimit: "Aylık İstek Sınırına ulaşıldı.",
+            error_serverdown: "Çeviri Sunucusu çevrimdışı olabilir.",
+            exception_text: "{{var0}} ile başlayan kelimeler yok sayılacak",
+            general_sendOriginalMessage: "Gönderilen Mesajınızı çevirirken orijinal Mesajı da gönderir",
+            general_showOriginalMessage: "Alınan bir Mesajı tercüme ederken orijinal Mesajı da gösterir.",
+            language_choice_input_received: "Alınan Mesajlarda Giriş Dili",
+            language_choice_input_sent: "Gönderilen Mesajlarınızda Dil Girin",
+            language_choice_output_received: "Alınan Mesajlarda Çıktı Dili",
+            language_choice_output_sent: "Gönderilen Mesajlarınızda Çıktı Dili",
+            language_selection_channel: "Dil Seçimi bu Kanal için özel olarak değiştirilecektir.",
+            language_selection_global: "Tüm Sunucular için Dil Seçimi değiştirilecek",
+            language_selection_server: "Dil Seçimi bu Sunucuya özel olarak değiştirilecektir.",
+            popout_translateoption: "Çevirmek",
+            popout_untranslateoption: "Çevirmeyi kaldır",
+            prefixes_disable_text: "Mesajın çevirisini devre dışı bırakan önekler",
+            prefixes_enable_text: "Belirli bir dille çeviriyi etkinleştiren önekler (örn. $fr, $de, $jp)",
+            toast_translating: "Çeviri",
+            toast_translating_failed: "Tercüme edilemedi",
+            toast_translating_tryanother: "Başka bir Çevirmen deneyin",
+            translate_your_message: "Göndermeden önce Mesajlarınızı çevirin",
+            translated_watermark: "tercüme",
+            translator_engine: "Çevirmen"
+          };
+        case "uk":
+          return {
+            backup_engine: "Резервний-перекладач",
+            backup_engine_warning: "Використовуватиме Резервний-Перекладач",
+            context_messagetranslateoption: "Перекласти повідомлення",
+            context_messageuntranslateoption: "Неперекладене повідомлення",
+            context_translator: "Пошук перекладу",
+            detect_language: "Визначити мову",
+            error_dailylimit: "Денний ліміт запитів досягнуто.",
+            error_hourlylimit: "Досягнуто погодинного ліміту запитів.",
+            error_keyoutdated: "API-ключ застарів.",
+            error_monthlylimit: "Досягнуто місячного ліміту запитів.",
+            error_serverdown: "Сервер перекладу може бути офлайн.",
+            exception_text: "Слова, що починаються з {{var0}}, ігноруватимуться",
+            general_sendOriginalMessage: "Також надсилає оригінальне повідомлення під час перекладу вашого надісланого повідомлення",
+            general_showOriginalMessage: "Також показує оригінальне повідомлення під час перекладу отриманого повідомлення",
+            language_choice_input_received: "Мова введення в отриманих повідомленнях",
+            language_choice_input_sent: "Мова введення у ваших надісланих повідомленнях",
+            language_choice_output_received: "Мова виводу в отриманих повідомленнях",
+            language_choice_output_sent: "Мова виведення у ваших надісланих повідомленнях",
+            language_selection_channel: "Вибір мови буде змінено спеціально для цього каналу",
+            language_selection_global: "Вибір мови буде змінено для всіх серверів",
+            language_selection_server: "Вибір мови буде змінено спеціально для цього сервера",
+            popout_translateoption: "Перекласти",
+            popout_untranslateoption: "Неперекласти",
+            prefixes_disable_text: "Префікси, що відключають переклад повідомлення",
+            prefixes_enable_text: "Префікси, що дозволяють перекладати з конкретною мовою (наприклад, $fr, $de, $jp)",
+            toast_translating: "Переклад",
+            toast_translating_failed: "Не вдалося перекласти",
+            toast_translating_tryanother: "Спробуйте іншого перекладача",
+            translate_your_message: "Перекладіть свої повідомлення перед надсиланням",
+            translated_watermark: "переклав",
+            translator_engine: "Перекладач"
+          };
+        case "vi":
+          return {
+            backup_engine: "Backup-Gười phiên dịch",
+            backup_engine_warning: "Sẽ sử dụng Backup-Gười phiên dịch",
+            context_messagetranslateoption: "Dịch tin nhắn",
+            context_messageuntranslateoption: "Thư chưa dịch",
+            context_translator: "Tìm kiếm bản dịch",
+            detect_language: "Phát hiện ngôn ngữ",
+            error_dailylimit: "Đã đạt đến Giới hạn Yêu cầu Hàng ngày.",
+            error_hourlylimit: "Đã đạt đến Giới hạn Yêu cầu Hàng giờ.",
+            error_keyoutdated: "API-Key đã lỗi thời.",
+            error_monthlylimit: "Đã đạt đến Giới hạn Yêu cầu Hàng tháng.",
+            error_serverdown: "Máy chủ dịch có thể ngoại tuyến.",
+            exception_text: "Các từ bắt đầu bằng {{var0}} sẽ bị bỏ qua",
+            general_sendOriginalMessage: "Đồng thời gửi Tin nhắn gốc khi dịch Tin nhắn đã gửi của bạn",
+            general_showOriginalMessage: "Đồng thời hiển thị Tin nhắn gốc khi dịch một Tin nhắn đã nhận",
+            language_choice_input_received: "Nhập Ngôn ngữ trong Tin nhắn đã nhận",
+            language_choice_input_sent: "Nhập Ngôn ngữ trong Tin nhắn đã gửi của bạn",
+            language_choice_output_received: "Ngôn ngữ đầu ra trong Tin nhắn đã nhận",
+            language_choice_output_sent: "Ngôn ngữ đầu ra trong Tin nhắn đã gửi của bạn",
+            language_selection_channel: "Lựa chọn ngôn ngữ sẽ được thay đổi cụ thể cho Kênh này",
+            language_selection_global: "Lựa chọn ngôn ngữ sẽ được thay đổi cho tất cả các Máy chủ",
+            language_selection_server: "Lựa chọn ngôn ngữ sẽ được thay đổi cụ thể cho Máy chủ này",
+            popout_translateoption: "Phiên dịch",
+            popout_untranslateoption: "Chưa dịch",
+            prefixes_disable_text: "Tiền tố vô hiệu hóa dịch tin nhắn",
+            prefixes_enable_text: "Tiền tố cho phép dịch với ngôn ngữ cụ thể (ví dụ: $fr, $de, $jp)",
+            toast_translating: "Phiên dịch",
+            toast_translating_failed: "Không dịch được",
+            toast_translating_tryanother: "Thử một Trình dịch khác",
+            translate_your_message: "Dịch Tin nhắn của bạn trước khi gửi",
+            translated_watermark: "đã dịch",
+            translator_engine: "Người phiên dịch"
+          };
+        case "zh-CN":
+          return {
+            backup_engine: "备份翻译器",
+            backup_engine_warning: "将使用备份翻译器",
+            context_messagetranslateoption: "翻译消息",
+            context_messageuntranslateoption: "取消翻译消息",
+            context_translator: "搜索翻译",
+            detect_language: "检测语言",
+            error_dailylimit: "已达到每日请求限制。",
+            error_hourlylimit: "已达到每小时请求限制。",
+            error_keyoutdated: "API 密钥已过时。",
+            error_monthlylimit: "已达到每月请求限制。",
+            error_serverdown: "翻译服务器可能离线。",
+            exception_text: "以 {{var0}} 开头的单词将被忽略",
+            general_sendOriginalMessage: "翻译您发送的消息时也会发送原始消息",
+            general_showOriginalMessage: "翻译收到的消息时还显示原始消息",
+            language_choice_input_received: "收到消息中的输入语言",
+            language_choice_input_sent: "在您发送的消息中输入语言",
+            language_choice_output_received: "接收消息中的输出语言",
+            language_choice_output_sent: "您发送的消息中的输出语言",
+            language_selection_channel: "将专门为此频道更改语言选择",
+            language_selection_global: "将更改所有服务器的语言选择",
+            language_selection_server: "语言选择将专门为此服务器更改",
+            popout_translateoption: "翻译",
+            popout_untranslateoption: "取消翻译",
+            prefixes_disable_text: "禁用消息翻译的前缀",
+            prefixes_enable_text: "用特定语言启用翻译的前缀（例如 $fr, $de, $jp）",
+            toast_translating: "正在翻译",
+            toast_translating_failed: "翻译失败",
+            toast_translating_tryanother: "尝试其它翻译器",
+            translate_your_message: "发送前翻译您的消息",
+            translated_watermark: "已翻译",
+            translator_engine: "译者"
+          };
+        case "zh-TW":
+          return {
+            backup_engine: "備份翻譯器",
+            backup_engine_warning: "將使用備份翻譯器",
+            context_messagetranslateoption: "翻譯訊息",
+            context_messageuntranslateoption: "取消翻譯訊息",
+            context_translator: "搜尋翻譯",
+            detect_language: "檢測語言",
+            error_dailylimit: "已達到每日請求限制。",
+            error_hourlylimit: "已達到每小時請求限制。",
+            error_keyoutdated: "API 密鑰已過時。",
+            error_monthlylimit: "已達到每月請求限制。",
+            error_serverdown: "翻譯服務器可能離線。",
+            exception_text: "以 {{var0}} 開頭的單詞將被忽略",
+            general_sendOriginalMessage: "翻譯您發送的消息時也會發送原始消息",
+            general_showOriginalMessage: "翻譯收到的消息時還顯示原始消息",
+            language_choice_input_received: "收到消息中的輸入語言",
+            language_choice_input_sent: "在您發送的消息中輸入語言",
+            language_choice_output_received: "接收消息中的輸出語言",
+            language_choice_output_sent: "您發送的消息中的輸出語言",
+            language_selection_channel: "將專門為此頻道更改語言選擇",
+            language_selection_global: "將更改所有服務器的語言選擇",
+            language_selection_server: "語言選擇將專門為此服務器更改",
+            popout_translateoption: "翻譯",
+            popout_untranslateoption: "取消翻譯",
+            prefixes_disable_text: "禁用消息翻译的前缀",
+            prefixes_enable_text: "用特定语言启用翻译的前缀（例如 $fr, $de, $jp）",
+            toast_translating: "正在翻譯",
+            toast_translating_failed: "無法翻譯",
+            toast_translating_tryanother: "嘗試其它翻譯器",
+            translate_your_message: "發送前翻譯您的消息",
+            translated_watermark: "已翻譯",
+            translator_engine: "譯者"
+          };
+        default:
+          return {
+            backup_engine: "Backup-Translator",
+            backup_engine_warning: "Will use Backup-Translator",
+            context_messagetranslateoption: "Translate Message",
+            context_messageuntranslateoption: "Untranslate Message",
+            context_translator: "Search Translation",
+            detect_language: "Detect Language",
+            error_dailylimit: "Daily Request Limit reached.",
+            error_hourlylimit: "Hourly Request Limit reached.",
+            error_keyoutdated: "API-Key outdated.",
+            error_monthlylimit: "Monthly Request Limit reached.",
+            error_serverdown: "Translation Server might be offline.",
+            exception_text: "Words starting with {{var0}} will be ignored",
+            general_sendOriginalMessage: "Also sends the original Message when translating your sent Message",
+            general_showOriginalMessage: "Also shows the original Message when translating a received Message",
+            language_choice_input_received: "Input Language in received Messages",
+            language_choice_input_sent: "Input Language in your sent Messages",
+            language_choice_output_received: "Output Language in received Messages",
+            language_choice_output_sent: "Output Language in your sent Messages",
+            language_selection_channel: "Language Selection will be changed specifically for this Channel",
+            language_selection_global: "Language Selection will be changed for all Servers",
+            language_selection_server: "Language Selection will be changed specifically for this Server",
+            popout_translateoption: "Translate",
+            popout_untranslateoption: "Untranslate",
+            prefixes_disable_text: "Prefixes that disable translation of message",
+            prefixes_enable_text: "Prefixes that enable translation with specific language (e.g. $fr, $de, $jp)",
+            toast_translating: "Translating",
+            toast_translating_failed: "Failed to translate",
+            toast_translating_tryanother: "Try another Translator",
+            translate_your_message: "Translate your Messages before sending",
+            translated_watermark: "translated",
+            translator_engine: "Translator"
+          };
+      }
+    }
+    __name(getLabelsForUiLanguage, "getLabelsForUiLanguage");
+    module2.exports = { getLabelsForUiLanguage };
+  }
+});
+
+// src/i18n/text.js
+var require_text = __commonJS({
+  "src/i18n/text.js"(exports2, module2) {
+    function getCustomTextValue(key, isChinese, isRussian) {
+      let texts = isChinese ? {
+        auth_keys_title: "自定义密钥",
+        custom_section_title: "自定义",
+        api_key_label: "API 密钥：",
+        api_endpoint_label: "接口地址：",
+        model_id_label: "模型名：",
+        paid_version_label: "付费版",
+        microsoft_region_label: "地区：",
+        section_service_title: "翻译服务",
+        section_service_hint: "先选服务商，再填写对应参数。Google 默认可直接用；如果你想用正式接口，推荐选 Azure Translator 或 Google Cloud Translation。",
+        primary_engine_title: "主服务商",
+        backup_engine_title: "备用服务（可选）",
+        backup_engine_select_title: "备用服务商",
+        backup_engine_hint: "主服务失败时，才会尝试备用服务。",
+        backup_engine_none: "不使用备用服务",
+        backup_engine_none_hint: "当前未启用备用服务。",
+        google_default_hint: "当前使用 Google 默认模式，不需要填写 API、接口地址或模型名。",
+        engine_unknown_hint: "当前服务商的设置项暂时无法显示。",
+        engine_no_extra_fields: "当前服务商没有额外的可填写参数。",
+        other_service_title: "其他服务商密钥（高级，可不填）",
+        other_service_hint: "这里保留兼容功能，只有你以后想切换到这些服务商时才需要填写。",
+        section_language_title: "语言设置",
+        section_language_hint: "这里是默认语言规则。发送前翻译会优先按这里的设置处理。",
+        sent_input_title: "发送消息的源语言",
+        sent_output_title: "发送消息的目标语言",
+        received_input_title: "收到消息的源语言",
+        received_output_title: "收到消息的目标语言",
+        source_filter_title: "发送前只翻这些源语言",
+        source_filter_hint: "不添加任何语言时，不限制源语言；添加后，只翻译检测为这些语言的发送内容。",
+        source_filter_empty_state: "当前未限制发送消息源语言。",
+        source_filter_add: "+ 添加源语言",
+        section_display_title: "显示与交互",
+        section_display_hint: "这里控制按钮显示方式，以及原文和译文的展示规则。这里的剧透模式就是 Discord 原生 spoiler，也就是刮刮乐遮盖效果。",
+        section_advanced_title: "高级功能",
+        prefix_section_title: "快捷前缀",
+        disable_prefix_title: "跳过翻译前缀",
+        disable_prefix_hint: "输入以这些前缀开头的消息时，将直接发送原文，不走翻译。",
+        disable_prefix_placeholder: "新增禁用前缀（例如 !）",
+        translate_prefix_title: "指定目标语言前缀",
+        translate_prefix_hint: "例如输入 $fr hello，会把 hello 翻成法语后再发送。",
+        translate_prefix_placeholder: "前缀（例如 $fr）",
+        add_prefix_button: "+ 添加新前缀",
+        validate_button_label: "验证当前配置",
+        validate_hint: "会发送一次最小在线请求，用来检查 API Key、接口地址和模型是否可用。",
+        validate_running: "正在验证",
+        validate_success: "验证成功",
+        validate_failed: "验证失败",
+        validate_saved_endpoint: "已自动修正并保存接口地址",
+        validate_missing_key: "请先填写 API Key。",
+        validate_missing_model: "请先填写模型名。",
+        validate_missing_endpoint: "请先填写接口地址。",
+        support_panel_validate_title: "连接测试",
+        support_panel_links_title: "帮助与开通",
+        model_detect_button: "检测模型",
+        model_fetch_button: "获取模型列表",
+        model_fetch_loading: "正在获取模型列表…",
+        model_catalog_title: "已获取模型列表",
+        model_catalog_loaded: "已获取 {count} 个模型，选择后会自动填回上面的模型输入框。",
+        model_catalog_empty: "没有获取到可用模型。"
+      } : {
+        auth_keys_title: "Own Auth Keys",
+        custom_section_title: "Custom",
+        api_key_label: "API Key:",
+        api_endpoint_label: "API Endpoint:",
+        model_id_label: "Model ID:",
+        paid_version_label: "Paid Version",
+        microsoft_region_label: "Region:",
+        section_service_title: "Translation Provider",
+        section_service_hint: "Choose a provider first, then fill in only the fields that provider needs. For official paid APIs, Azure Translator and Google Cloud Translation are recommended.",
+        primary_engine_title: "Primary Provider",
+        backup_engine_title: "Backup Provider (Optional)",
+        backup_engine_select_title: "Backup Provider",
+        backup_engine_hint: "The backup provider is used only when the primary one fails.",
+        backup_engine_none: "No Backup Provider",
+        backup_engine_none_hint: "No backup provider is enabled right now.",
+        google_default_hint: "Google default mode does not require your own API key, endpoint, or model.",
+        engine_unknown_hint: "This provider does not have a visible settings form right now.",
+        engine_no_extra_fields: "This provider has no extra editable fields.",
+        other_service_title: "Other Provider Keys (Advanced)",
+        other_service_hint: "These are kept for compatibility and only matter if you switch to them later.",
+        section_language_title: "Language Rules",
+        section_language_hint: "These are the default language rules used for sending and receiving messages.",
+        sent_input_title: "Source language for sent messages",
+        sent_output_title: "Target language for sent messages",
+        received_input_title: "Source language for received messages",
+        received_output_title: "Target language for received messages",
+        source_filter_title: "Outgoing source languages for auto-translate",
+        source_filter_hint: "If you do not add any languages here, outgoing source languages are not restricted. After adding languages, only detected outgoing content in those languages is translated.",
+        source_filter_empty_state: "Outgoing source languages are currently unrestricted.",
+        source_filter_add: "+ Add source language",
+        section_display_title: "Display and Interaction",
+        section_display_hint: "Control button visibility and how original text is shown together with translations. Spoiler mode here is the same Discord scratch-off effect.",
+        section_advanced_title: "Advanced Features",
+        prefix_section_title: "Prefix Rules",
+        disable_prefix_title: "Skip-translation prefixes",
+        disable_prefix_hint: "Messages that start with these prefixes are sent without translation.",
+        disable_prefix_placeholder: "New exception prefix (e.g. !)",
+        translate_prefix_title: "Forced target-language prefixes",
+        translate_prefix_hint: "For example, `$fr hello` translates `hello` into French before sending.",
+        translate_prefix_placeholder: "Prefix (e.g. $fr)",
+        add_prefix_button: "+ Add new prefix",
+        validate_button_label: "Validate Current Config",
+        validate_hint: "This sends one minimal live request to verify that the API key, endpoint, and model are usable.",
+        validate_running: "Validating",
+        validate_success: "Validation succeeded",
+        validate_failed: "Validation failed",
+        validate_saved_endpoint: "Endpoint was normalized and saved automatically",
+        validate_missing_key: "Please enter an API key first.",
+        validate_missing_model: "Please enter a model ID first.",
+        validate_missing_endpoint: "Please enter an API endpoint first.",
+        support_panel_validate_title: "Connection Test",
+        support_panel_links_title: "Help and Setup",
+        model_detect_button: "Check Model",
+        model_fetch_button: "Fetch Models",
+        model_fetch_loading: "Loading model list…",
+        model_catalog_title: "Fetched Models",
+        model_catalog_loaded: "{count} models loaded. Selecting one will fill the model field above.",
+        model_catalog_empty: "No models were returned."
+      };
+      return Object.assign(texts, isChinese ? {
+        protected_terms_title: "保护词 / 保护短语",
+        protected_terms_hint: "填入不希望被翻译的固定名词或短语，例如项目名、模型名、品牌名或团队名。翻译前会先保护它们，翻译后再原样放回。",
+        protected_terms_placeholder: "新增保护词或短语",
+        protected_terms_scope_sent: "保护我发送的消息",
+        protected_terms_scope_received: "保护收到的消息",
+        channel_auto_translate_label: "当前频道收到消息自动翻译",
+        channel_auto_translate_on: "当前频道收到消息自动翻译已开启",
+        channel_auto_translate_off: "在设置中单独开启当前频道收到消息自动翻译",
+        language_detector_title: "语言识别助手",
+        language_detector_hint: "把频道里的陌生文本粘贴到这里，插件会识别语言，并可一键填入“您发送的消息中的输出语言”。",
+        language_detector_placeholder: "粘贴一小段待识别文本",
+        language_detector_button: "识别",
+        language_detector_button_loading: "识别中",
+        language_detector_empty: "请先粘贴要识别的文本。",
+        language_detector_failed: "暂时无法识别这段文本，请换一段更长或更典型的内容再试。",
+        language_detector_detected: "识别结果",
+        language_detector_apply_received: "填入收到消息源语言",
+        language_detector_apply_sent: "填入发送消息输入语言"
+      } : {
+        protected_terms_title: "Protected Terms / Phrases",
+        protected_terms_hint: "Add names or phrases that must stay unchanged, such as project names, model names, brand names, or team names. They will be protected before translation and restored afterward.",
+        protected_terms_placeholder: "Add protected term or phrase",
+        protected_terms_scope_sent: "Protect sent messages",
+        protected_terms_scope_received: "Protect received messages",
+        channel_auto_translate_label: "Incoming auto-translate for this channel",
+        channel_auto_translate_on: "Incoming auto-translate is enabled for this channel",
+        channel_auto_translate_off: "Enable incoming auto-translate separately in settings",
+        language_detector_title: "Language Detection Helper",
+        language_detector_hint: "Paste a short sample here. The plugin will detect the language and apply it to the sent-message output language.",
+        language_detector_placeholder: "Paste text to detect",
+        language_detector_button: "Detect",
+        language_detector_button_loading: "Detecting",
+        language_detector_empty: "Please paste some text to detect first.",
+        language_detector_failed: "Could not detect the language from that text. Try a longer or more representative sample.",
+        language_detector_detected: "Detected language",
+        language_detector_apply_received: "Use for received-source language",
+        language_detector_apply_sent: "Use for sent-input language"
+      }), Object.assign(texts, isChinese ? {
+        language_detector_apply_sent_output: "填入发送消息输出语言",
+        context_detect_message_language: "识别这条消息的语言",
+        context_reply_in_detected_language: "以该语言回复",
+        detect_message_empty: "这条消息没有可识别的文本内容。",
+        detect_message_failed: "暂时无法识别这条消息的语言。",
+        detect_message_success: "识别到",
+        reply_language_applied: "已将当前频道的发送目标语言切换为",
+        reply_language_hint: "保持当前频道翻译开启后，直接用你的语言回复即可。",
+        translated_label: "译文"
+      } : {
+        language_detector_apply_sent_output: "Use for sent output language",
+        context_detect_message_language: "Detect this message language",
+        context_reply_in_detected_language: "Reply in this language",
+        detect_message_empty: "This message has no text content to detect.",
+        detect_message_failed: "Could not detect the language of this message.",
+        detect_message_success: "Detected",
+        reply_language_applied: "Sent target language for this channel was switched to",
+        reply_language_hint: "Keep translation enabled for this channel, then reply in your own language.",
+        translated_label: "Translated"
+      }), Object.assign(texts, isChinese ? {
+        wrapper_pairs_title: "自动保护包裹符规则",
+        wrapper_pairs_hint: '按“左包裹符|右包裹符”的格式添加规则，例如 "|"、“|” 、`|`、【|】、「|」。被这些符号包起来的内容会自动跳过翻译，并在译文里高亮显示。',
+        wrapper_pairs_placeholder: "例如 【|】 或 `|`",
+        wrapper_pairs_scope_sent: "保护我发送的消息",
+        wrapper_pairs_scope_received: "保护收到的消息"
+      } : {
+        wrapper_pairs_title: "Protected Wrapper Rules",
+        wrapper_pairs_hint: 'Add rules in the format left|right, for example "|", “|”, `|`, 【|】, or 「|」. Text wrapped by these symbols will be skipped during translation and highlighted in the translated result.',
+        wrapper_pairs_placeholder: "For example 【|】 or `|`",
+        wrapper_pairs_scope_sent: "Protect sent messages",
+        wrapper_pairs_scope_received: "Protect received messages"
+      }), Object.assign(texts, isChinese ? {
+        wrapper_pairs_title: "自动保护包裹符规则",
+        wrapper_pairs_hint: '按“左包裹符|右包裹符”的格式添加规则，例如 "|"、“|” 、`|`、【|】、「|」。被这些符号包起来的内容会自动跳过翻译，并在译文里高亮显示。',
+        wrapper_pairs_placeholder: "例如 【|】 或 `|`"
+      } : {
+        wrapper_pairs_title: "Protected Wrapper Rules",
+        wrapper_pairs_hint: 'Add rules in the format left|right, for example "|", “|”, `|`, 【|】, or 「|」. Text wrapped by these symbols will be skipped during translation and highlighted in the translated result.',
+        wrapper_pairs_placeholder: "For example 【|】 or `|`"
+      }), Object.assign(texts, isChinese ? {
+        received_auto_translate_title: "收到消息自动翻译",
+        received_auto_translate_hint: "设置哪些收到的消息自动翻译。",
+        received_auto_translate_preset_title: "自动翻译策略",
+        received_auto_translate_preset_loose: "宽松",
+        received_auto_translate_preset_balanced: "平衡",
+        received_auto_translate_preset_strict: "严格",
+        received_auto_translate_preset_custom: "自定义",
+        received_source_filter_title: "收到消息源语言过滤",
+        received_source_filter_hint: "不添加任何语言时，收到的任何源语言都可以自动翻译；添加后，只自动翻译检测为这些语言的收到消息。",
+        received_source_filter_empty_state: "当前未限制收到消息源语言。",
+        received_source_filter_add: "+ 添加收到消息源语言",
+        auto_translate_decision_title: "自动翻译判断方式",
+        auto_translate_decision_hint: "基础规则适用于所有服务商；AI 智能判断仅 AI 服务商可用，判断与翻译合并为一次请求。保护词会先本地保护，不参与改写。",
+        auto_translate_decision_basic: "基础规则",
+        auto_translate_decision_ai: "AI 智能判断",
+        auto_translate_decision_ai_disabled: "AI 智能判断（当前服务商不支持）",
+        auto_translate_ai_prompt_hint: "下面是默认 AI 判断提示词，可直接修改；{{INPUT_LANGUAGE}} / {{OUTPUT_LANGUAGE}} 会自动替换为当前语言设置，⟦0⟧ 这类占位符会在翻译后恢复。",
+        auto_translate_ai_prompt_reset: "恢复默认判断提示词",
+        skip_mixed_received_label: "跳过混合语言消息",
+        skip_same_language_received_label: "跳过与目标语言相同的消息",
+        treat_language_variants_label: "将地区/方言变体视为同一种语言",
+        drop_similar_translations_label: "丢弃与原文高度相似的译文",
+        minimum_auto_translate_length_title: "自动翻译最小文本长度",
+        translation_similarity_threshold_title: "译文相似度过滤阈值",
+        plugin_language_title: "插件界面语言",
+        plugin_language_hint: "可跟随 Discord，也可单独固定插件界面语言。",
+        translated_text_color_title: "译文模块颜色",
+        translated_text_color_hint: "直接点击色板切换颜色。点击右侧 + 号后，可手动填写颜色代码并保存。",
+        translated_text_color_save_button: "保存",
+        translated_text_color_invalid: "颜色代码无效，请填写有效的 HEX 或 CSS 颜色。"
+      } : {
+        received_auto_translate_title: "Incoming Auto-Translate",
+        received_auto_translate_hint: "Choose which incoming messages are auto-translated.",
+        received_auto_translate_preset_title: "Auto-translate preset",
+        received_auto_translate_preset_loose: "Loose",
+        received_auto_translate_preset_balanced: "Balanced",
+        received_auto_translate_preset_strict: "Strict",
+        received_auto_translate_preset_custom: "Custom",
+        received_source_filter_title: "Incoming source language filter",
+        received_source_filter_hint: "If you do not add any languages here, incoming source languages are not restricted. After adding languages, only detected incoming messages in those languages are auto-translated.",
+        received_source_filter_empty_state: "Incoming source languages are currently unrestricted.",
+        received_source_filter_add: "+ Add incoming source language",
+        auto_translate_decision_title: "Auto-translate decision mode",
+        auto_translate_decision_hint: "Basic rules work with every provider. AI smart decision is only available for AI providers and is merged into the translation request. Protected terms are protected locally first.",
+        auto_translate_decision_basic: "Basic rules",
+        auto_translate_decision_ai: "AI smart decision",
+        auto_translate_decision_ai_disabled: "AI smart decision (unsupported provider)",
+        auto_translate_ai_prompt_hint: "Default AI decision prompt. You can edit it directly. {{INPUT_LANGUAGE}} / {{OUTPUT_LANGUAGE}} are replaced with the current language settings, and placeholders like ⟦DTA0⟧ are restored after translation.",
+        auto_translate_ai_prompt_reset: "Restore default decision prompt",
+        skip_mixed_received_label: "Skip mixed-language messages",
+        skip_same_language_received_label: "Skip messages already in the target language",
+        treat_language_variants_label: "Treat regional variants as the same language",
+        drop_similar_translations_label: "Drop nearly identical translations",
+        minimum_auto_translate_length_title: "Minimum text length for auto-translate",
+        translation_similarity_threshold_title: "Translation similarity threshold",
+        plugin_language_title: "Plugin UI Language",
+        plugin_language_hint: "You can follow Discord or pin the plugin UI to its own language.",
+        translated_text_color_title: "Translated text color",
+        translated_text_color_hint: "Click a swatch to switch colors. Use the + button to enter and save a custom color code.",
+        translated_text_color_save_button: "Save",
+        translated_text_color_invalid: "Invalid color code. Please enter a valid HEX or CSS color."
+      }), Object.assign(texts, isChinese ? {
+        received_auto_translate_title: "收到消息自动翻译策略",
+        received_auto_translate_hint: "设置收到消息后的自动翻译规则。",
+        received_auto_translate_preset_loose: "多翻一点",
+        received_auto_translate_preset_balanced: "推荐",
+        received_auto_translate_preset_strict: "少翻一点",
+        received_auto_translate_preset_custom: "自定义",
+        received_auto_translate_profile_loose_title: "多翻一点",
+        received_auto_translate_profile_loose_desc: "更积极地自动翻译，适合多语频道，可能会多翻一些短句或混合内容。",
+        received_auto_translate_profile_balanced_title: "推荐",
+        received_auto_translate_profile_balanced_desc: "在准确率和覆盖率之间做平衡，适合大多数日常聊天频道。",
+        received_auto_translate_profile_strict_title: "少翻一点",
+        received_auto_translate_profile_strict_desc: "更谨慎，尽量避免误翻，适合已经有较多中文或双语内容的频道。",
+        received_auto_translate_profile_custom_title: "自定义",
+        received_auto_translate_profile_custom_desc: "你可以自己决定哪些消息跳过，哪些消息继续自动翻译。",
+        received_auto_translate_advanced_title: "高级规则",
+        received_auto_translate_advanced_locked: "当前正在使用预设模式。普通用户不需要改下面这些细项；如果你想手动调整，请切换到“自定义”。",
+        skip_mixed_received_label: "跳过中英混合或多语言混合的消息",
+        skip_same_language_received_label: "跳过本来就已经是目标语言的消息",
+        treat_language_variants_label: "把地区变体当成同一种语言",
+        drop_similar_translations_label: "如果译文和原文几乎一样，就不显示",
+        minimum_auto_translate_length_title: "最短多少字才自动翻译",
+        translation_similarity_threshold_title: "多像才算“几乎没变”"
+      } : {
+        received_auto_translate_title: "Incoming Auto-Translate Rules",
+        received_auto_translate_hint: "Set the auto-translate rules for incoming messages.",
+        received_auto_translate_preset_loose: "Translate More",
+        received_auto_translate_preset_balanced: "Recommended",
+        received_auto_translate_preset_strict: "Translate Less",
+        received_auto_translate_preset_custom: "Custom",
+        received_auto_translate_profile_loose_title: "Translate More",
+        received_auto_translate_profile_loose_desc: "More aggressive auto-translation for multilingual channels. It may translate more short or mixed messages.",
+        received_auto_translate_profile_balanced_title: "Recommended",
+        received_auto_translate_profile_balanced_desc: "Balanced for most channels. Good default between coverage and accuracy.",
+        received_auto_translate_profile_strict_title: "Translate Less",
+        received_auto_translate_profile_strict_desc: "More conservative. Best when the channel already contains lots of bilingual or target-language content.",
+        received_auto_translate_profile_custom_title: "Custom",
+        received_auto_translate_profile_custom_desc: "Manually decide which incoming messages should be skipped or translated.",
+        received_auto_translate_advanced_title: "Advanced Rules",
+        received_auto_translate_advanced_locked: "A preset is active right now. Most users do not need these low-level switches. Switch to Custom if you want manual control.",
+        drop_similar_translations_label: "Hide translations that are almost identical to the source",
+        minimum_auto_translate_length_title: "Minimum text length before auto-translate",
+        translation_similarity_threshold_title: "How similar counts as 'almost unchanged'"
+      }), isRussian && Object.assign(texts, {
+        auth_keys_title: "Ключи доступа",
+        custom_section_title: "Настройка",
+        api_key_label: "API ключ:",
+        api_endpoint_label: "API адрес:",
+        model_id_label: "ID модели:",
+        paid_version_label: "Платная версия",
+        microsoft_region_label: "Регион:",
+        section_service_title: "Провайдер перевода",
+        section_service_hint: "Сначала выберите провайдера, затем заполните только нужные поля.",
+        primary_engine_title: "Основной провайдер",
+        backup_engine_title: "Резервный провайдер",
+        backup_engine_select_title: "Резервный провайдер",
+        backup_engine_hint: "Резервный провайдер используется только при ошибке основного.",
+        backup_engine_none: "Без резервного провайдера",
+        backup_engine_none_hint: "Резервный провайдер сейчас не включен.",
+        google_default_hint: "Режим Google по умолчанию не требует отдельного API ключа.",
+        engine_unknown_hint: "Для этого провайдера сейчас нет отдельной формы настроек.",
+        engine_no_extra_fields: "Для этого провайдера нет дополнительных полей.",
+        other_service_title: "Ключи других провайдеров",
+        other_service_hint: "Эти поля оставлены для совместимости, если вы захотите переключиться позже.",
+        section_language_title: "Языковые правила",
+        section_language_hint: "Базовые языковые правила для отправки и получения сообщений.",
+        sent_input_title: "Исходный язык отправляемых сообщений",
+        sent_output_title: "Целевой язык отправляемых сообщений",
+        received_input_title: "Исходный язык входящих сообщений",
+        received_output_title: "Целевой язык входящих сообщений",
+        source_filter_title: "Автоперевод исходящих только с этих языков",
+        source_filter_hint: "Если языки не добавлены, исходный язык исходящих сообщений не ограничен. После добавления будут переводиться только эти языки.",
+        source_filter_empty_state: "Исходные языки исходящих сообщений сейчас не ограничены.",
+        source_filter_add: "+ Добавить исходный язык",
+        received_auto_translate_title: "Автоперевод входящих сообщений",
+        received_auto_translate_hint: "Здесь задаются правила, какие входящие сообщения переводить автоматически.",
+        received_auto_translate_preset_title: "Профиль автоперевода",
+        received_auto_translate_preset_loose: "Свободный",
+        received_auto_translate_preset_balanced: "Сбалансированный",
+        received_auto_translate_preset_strict: "Строгий",
+        received_auto_translate_preset_custom: "Пользовательский",
+        received_source_filter_title: "Разрешённые исходные языки для входящих",
+        received_source_filter_hint: "Если языки не добавлены, входящие сообщения на любом исходном языке могут переводиться автоматически. После добавления будут переводиться только эти языки.",
+        received_source_filter_empty_state: "Исходные языки входящих сообщений сейчас не ограничены.",
+        received_source_filter_add: "+ Добавить язык входящих",
+        auto_translate_decision_title: "Режим автоопределения перевода",
+        auto_translate_decision_hint: "Базовые правила работают со всеми сервисами. AI-режим доступен только для AI-провайдеров и объединяется с запросом перевода.",
+        auto_translate_decision_basic: "Базовые правила",
+        auto_translate_decision_ai: "AI-решение",
+        auto_translate_decision_ai_disabled: "AI-решение (не поддерживается)",
+        auto_translate_ai_prompt_hint: "Если AI вернёт перевод, он будет показан. Если вернёт __SKIP_TRANSLATION__, блок перевода не показывается.",
+        auto_translate_ai_prompt_reset: "Восстановить стандартную подсказку",
+        skip_mixed_received_label: "Пропускать смешанные сообщения",
+        skip_same_language_received_label: "Пропускать сообщения на том же языке, что и целевой",
+        treat_language_variants_label: "Считать региональные варианты одним языком",
+        drop_similar_translations_label: "Отбрасывать почти одинаковые переводы",
+        minimum_auto_translate_length_title: "Минимальная длина текста для автоперевода",
+        translation_similarity_threshold_title: "Порог схожести перевода",
+        section_display_title: "Отображение и интерфейс",
+        section_display_hint: "Управляет тем, как показываются переводы и элементы интерфейса.",
+        section_advanced_title: "Дополнительные функции",
+        prefix_section_title: "Правила префиксов",
+        disable_prefix_title: "Префиксы пропуска перевода",
+        disable_prefix_hint: "Сообщения с этими префиксами отправляются без перевода.",
+        disable_prefix_placeholder: "Новый префикс исключения",
+        translate_prefix_title: "Префиксы целевого языка",
+        translate_prefix_hint: "Например, `$fr hello` переведёт `hello` на французский перед отправкой.",
+        translate_prefix_placeholder: "Префикс (например, $fr)",
+        add_prefix_button: "+ Добавить префикс",
+        validate_button_label: "Проверить текущую конфигурацию",
+        validate_hint: "Отправляет минимальный запрос, чтобы проверить ключ, адрес и модель.",
+        validate_running: "Проверка",
+        validate_success: "Проверка успешна",
+        validate_failed: "Проверка не удалась",
+        validate_saved_endpoint: "Адрес автоматически исправлен и сохранён",
+        validate_missing_key: "Сначала введите API ключ.",
+        validate_missing_model: "Сначала введите ID модели.",
+        validate_missing_endpoint: "Сначала введите API адрес.",
+        support_panel_validate_title: "Проверка подключения",
+        support_panel_links_title: "Ссылки и помощь",
+        model_detect_button: "Проверить модель",
+        model_fetch_button: "Получить модели",
+        model_fetch_loading: "Загрузка списка моделей…",
+        model_catalog_title: "Полученные модели",
+        model_catalog_loaded: "Загружено моделей: {count}. Выбор заполнит поле модели выше.",
+        model_catalog_empty: "Список моделей пуст.",
+        protected_terms_title: "Защищённые слова / фразы",
+        protected_terms_hint: "Добавьте имена или фразы, которые нельзя переводить.",
+        protected_terms_placeholder: "Добавить защищённый термин",
+        protected_terms_scope_sent: "Защищать исходящие сообщения",
+        protected_terms_scope_received: "Защищать входящие сообщения",
+        channel_auto_translate_label: "Автоперевод этого канала",
+        channel_auto_translate_on: "Автоперевод включён для этого канала",
+        channel_auto_translate_off: "ЛКМ: открыть настройки, ПКМ: включить автоперевод канала",
+        language_detector_title: "Помощник определения языка",
+        language_detector_hint: "Вставьте пример текста из канала, чтобы определить язык и применить его к правилам выше.",
+        language_detector_placeholder: "Вставьте текст для определения",
+        language_detector_button: "Опред.",
+        language_detector_button_loading: "Поиск",
+        language_detector_empty: "Сначала вставьте текст для определения.",
+        language_detector_failed: "Не удалось определить язык этого текста.",
+        language_detector_detected: "Определённый язык",
+        language_detector_apply_received: "Использовать для входящих",
+        language_detector_apply_sent: "Использовать для исходного языка отправки",
+        language_detector_apply_sent_output: "Использовать для целевого языка отправки",
+        context_detect_message_language: "Определить язык сообщения",
+        context_reply_in_detected_language: "Ответить на этом языке",
+        detect_message_empty: "В этом сообщении нет текста для определения языка.",
+        detect_message_failed: "Не удалось определить язык сообщения.",
+        detect_message_success: "Определено",
+        reply_language_applied: "Целевой язык отправки для канала переключён на",
+        reply_language_hint: "Оставьте перевод в канале включённым и отвечайте на своём языке.",
+        translated_label: "Перевод",
+        wrapper_pairs_title: "Защищённые пары обрамления",
+        wrapper_pairs_hint: 'Добавляйте правила в формате левая|правая часть, например "|", `|`, 【|】 или 「|」.',
+        wrapper_pairs_placeholder: "Например 【|】 или `|`",
+        wrapper_pairs_scope_sent: "Защищать исходящие сообщения",
+        wrapper_pairs_scope_received: "Защищать входящие сообщения",
+        plugin_language_title: "Язык интерфейса плагина",
+        plugin_language_hint: "Можно следовать языку Discord или зафиксировать язык интерфейса плагина отдельно.",
+        translated_text_color_title: "Цвет переведённого текста",
+        translated_text_color_hint: "Нажмите на цветовую плашку, чтобы выбрать цвет. Через кнопку + можно ввести и сохранить свой код цвета.",
+        translated_text_color_save_button: "Сохранить",
+        translated_text_color_invalid: "Некорректный код цвета. Укажите корректный HEX- или CSS-цвет."
+      }), Object.assign(texts, {
+        channel_primary_engine_title: texts.channel_primary_engine_title || (isChinese ? "当前频道主服务商" : isRussian ? "Основной сервис текущего канала" : "Current Channel Primary Provider"),
+        channel_primary_engine_restore: texts.channel_primary_engine_restore || (isChinese ? "恢复全局默认" : isRussian ? "Вернуть глобальный" : "Use Global Default"),
+        channel_primary_engine_unconfigured_warning: texts.channel_primary_engine_unconfigured_warning || (isChinese ? "尚未完成 API 配置，翻译时会沿用现有失败处理并尝试备用服务。" : isRussian ? "API ещё не настроен; при ошибке будет использован резервный сервис." : "API setup is incomplete; failures will keep using the existing backup behavior."),
+        language_not_supported_by_channel_engines: texts.language_not_supported_by_channel_engines || (isChinese ? "当前频道主服务和全局备用服务都不支持这个语言组合" : isRussian ? "Текущая основная и глобальная резервная службы не поддерживают эту языковую пару" : "Neither the channel primary nor global backup provider supports this language pair"),
+        primary_engine_section_title: texts.primary_engine_section_title || (isChinese ? "主服务商设置" : isRussian ? "Настройки основного сервиса" : "Primary Provider Settings"),
+        section_message_language_title: texts.section_message_language_title || (isChinese ? "发送与接收语言" : isRussian ? "Языки отправки и получения" : "Sent and Received Languages"),
+        section_sent_language_title: texts.section_sent_language_title || (isChinese ? "发送消息" : isRussian ? "Исходящие сообщения" : "Sent Messages"),
+        section_received_language_title: texts.section_received_language_title || (isChinese ? "收到消息" : isRussian ? "Входящие сообщения" : "Received Messages"),
+        section_display_message_title: texts.section_display_message_title || (isChinese ? "消息显示" : isRussian ? "Отображение сообщений" : "Message Display"),
+        protection_section_title: texts.protection_section_title || (isChinese ? "保护规则" : isRussian ? "Правила защиты" : "Protection Rules"),
+        received_auto_translate_scope_title: texts.received_auto_translate_scope_title || (isChinese ? "自动翻译模式" : isRussian ? "Диапазон автоперевода" : "Auto-translate range"),
+        received_auto_translate_scope_hint: texts.received_auto_translate_scope_hint || (isChinese ? "只翻译新消息，或连当前已加载消息一起翻译。" : isRussian ? "Выберите: переводить только новые сообщения или также уже загруженные на экран." : "Translate only new messages, or include the messages already loaded on screen."),
+        received_auto_translate_scope_new_only: texts.received_auto_translate_scope_new_only || (isChinese ? "只翻译新消息" : isRussian ? "Только новые сообщения (рекомендуется)" : "Only new messages (Recommended)"),
+        received_auto_translate_scope_loaded_messages: texts.received_auto_translate_scope_loaded_messages || (isChinese ? "当前已加载消息" : isRussian ? "Переводить уже загруженные сообщения" : "Translate currently loaded messages"),
+        received_auto_translate_loaded_window_title: texts.received_auto_translate_loaded_window_title || (isChinese ? "已加载消息的时间范围" : isRussian ? "Временной диапазон загруженных сообщений" : "Loaded message time range"),
+        received_auto_translate_loaded_window_hint: texts.received_auto_translate_loaded_window_hint || (isChinese ? "只处理这个时间范围内的已加载消息。" : isRussian ? "Переводить только загруженные сообщения в этом диапазоне времени." : "Only translate loaded messages inside this time range."),
+        received_auto_translate_loaded_window_15m: texts.received_auto_translate_loaded_window_15m || (isChinese ? "15分钟" : isRussian ? "15 мин" : "15 min"),
+        received_auto_translate_loaded_window_1h: texts.received_auto_translate_loaded_window_1h || (isChinese ? "1小时" : isRussian ? "1 час" : "1 hour"),
+        received_auto_translate_loaded_window_6h: texts.received_auto_translate_loaded_window_6h || (isChinese ? "6小时" : isRussian ? "6 часов" : "6 hours"),
+        received_auto_translate_loaded_window_24h: texts.received_auto_translate_loaded_window_24h || (isChinese ? "24小时" : isRussian ? "24 часа" : "24 hours"),
+        received_auto_translate_loaded_window_all: texts.received_auto_translate_loaded_window_all || (isChinese ? "全部已加载（高风险）" : isRussian ? "Все загруженные (риск)" : "All loaded (High risk)"),
+        received_auto_translate_scope_new_only_desc: texts.received_auto_translate_scope_new_only_desc || (isChinese ? "只处理开启后出现的新消息，滚动和历史记录最稳定。" : isRussian ? "Переводит только новые сообщения после включения; самый стабильный режим." : "Only translate messages that appear after enabling; safest for scrolling."),
+        received_auto_translate_scope_loaded_messages_desc: texts.received_auto_translate_scope_loaded_messages_desc || (isChinese ? "会回扫当前屏幕已加载消息，适合临时看历史，但会限制数量并在滚动时暂停。" : isRussian ? "Сканирует уже загруженные сообщения; лимитируется и ставится на паузу при прокрутке." : "Backfills currently loaded messages; capped and paused while scrolling."),
+        received_auto_translate_loaded_range_mode_title: texts.received_auto_translate_loaded_range_mode_title || (isChinese ? "已加载消息范围方式" : isRussian ? "Способ ограничения" : "Loaded message range mode"),
+        received_auto_translate_loaded_range_mode_count: texts.received_auto_translate_loaded_range_mode_count || (isChinese ? "按数量" : isRussian ? "По количеству" : "By count"),
+        received_auto_translate_loaded_range_mode_time: texts.received_auto_translate_loaded_range_mode_time || (isChinese ? "按时间" : isRussian ? "По времени" : "By time"),
+        received_auto_translate_loaded_warning: texts.received_auto_translate_loaded_warning || (isChinese ? "会翻译当前屏幕已加载的消息；每批按数量限制，向上滚动时可继续处理新加载的历史消息。" : isRussian ? "Чем длиннее диапазон, тем больше скачков высоты. Плагин ограничивает очередь, обновляет пакетами и ставит работу на паузу при прокрутке." : "Longer ranges can cause more height changes. The plugin caps the queue, rerenders in batches, and pauses while you scroll."),
+        received_auto_translate_loaded_limit_title: texts.received_auto_translate_loaded_limit_title || (isChinese ? "每批最多翻译已加载消息" : isRussian ? "Максимум уже загруженных сообщений" : "Max loaded messages per pass"),
+        received_auto_translate_loaded_limit_hint: texts.received_auto_translate_loaded_limit_hint || (isChinese ? "建议 25 或 50，最大 100。AI 服务商会优先按该数量批量请求，失败时自动拆包补翻。" : isRussian ? "Рекомендуется 25 или 50. Чем больше, тем выше риск скачков." : "25 or 50 is recommended; max 100. AI providers try this batch size first and split/fallback if needed."),
+        received_auto_translate_loaded_pause_scroll: texts.received_auto_translate_loaded_pause_scroll || (isChinese ? "拖动滚动条/阅读历史时暂停已加载消息翻译" : isRussian ? "Пауза перевода загруженных сообщений при прокрутке" : "Pause loaded-message translation while scrolling")
+      }), texts.show_secret_label || (texts.show_secret_label = isChinese ? "显示密钥" : isRussian ? "Показать ключ" : "Show secret"), texts.hide_secret_label || (texts.hide_secret_label = isChinese ? "隐藏密钥" : isRussian ? "Скрыть ключ" : "Hide secret"), texts[key] || key;
+    }
+    __name(getCustomTextValue, "getCustomTextValue");
+    module2.exports = { getCustomTextValue };
+  }
+});
+
 // src/legacy/runtime.js
 var require_runtime = __commonJS({
   "src/legacy/runtime.js"(exports2, module2) {
@@ -1575,7 +3969,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             let maskedString = newString.join(place == messageTypes.RECEIVED ? "" : " "), hasTranslatableContent = maskedString.replace(/(?:⟦\s*(?:DTA\s*)?\d+\s*⟧|【\s*\d+\s*】|\[\s*\d+\s*\]|<<<\s*\d+\s*>>>|\{\{\d+\}\})/g, "").trim().length > 0;
             return [maskedString, protectedSegments, hasTranslatableContent];
           }
-        }, { createDisplayRuntime } = require_display_runtime(), receivedTranslationRuntime = {
+        }, { createDisplayRuntime } = require_display_runtime(), { createTranslatorStyles } = require_styles(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text(), receivedTranslationRuntime = {
           resetLoadedMessageTracking(channelId = null) {
             if (!channelId) {
               loadedAutoTranslationSeenMessages = {};
@@ -2739,893 +5133,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                 "ThreadCard",
                 "ThreadSidebar"
               ]
-            }, this.css = `
-					${BDFDB.dotCN._translatortranslatebutton + BDFDB.dotCNS._translatortranslating + BDFDB.dotCN.textareaicon} {
-						color: var(--status-danger) !important;
-					}
-					${BDFDB.dotCN._translatorconfigbutton} {
-						margin: 2px 3px 0 6px;
-					}
-					.translator-original-message {
-						margin-top: 6px;
-						padding: 0;
-						border: 0;
-						white-space: pre-wrap;
-						line-height: 1.35;
-						opacity: 0.9;
-						color: var(--text-normal) !important;
-						text-align: left;
-					}
-					.translator-original-message > span {
-						display: block;
-						width: 100%;
-						color: var(--text-normal) !important;
-						text-align: left;
-					}
-					.translator-discord-emoji {
-						width: 1.375em;
-						height: 1.375em;
-						object-fit: contain;
-						vertical-align: -0.275em;
-						margin: 0 0.05em;
-					}
-					.translator-discord-mention {
-						display: inline;
-						padding: 0 2px;
-						border-radius: 3px;
-						background: var(--mention-background, color-mix(in srgb, var(--brand-500, #5865f2) 30%, transparent));
-						color: var(--mention-foreground, var(--brand-260, #c9cdfb)) !important;
-						font-weight: 500;
-						white-space: break-spaces;
-					}
-					.translator-discord-mention:hover {
-						background: var(--mention-background-hover, color-mix(in srgb, var(--brand-500, #5865f2) 45%, transparent));
-						color: var(--white-500, #fff) !important;
-					}
-					.translator-translated-message {
-						margin-top: 4px;
-						padding: 6px 10px 6px 12px;
-						border-left: 2px solid var(--translator-accent-color, var(--brand-500, var(--text-link)));
-						background: color-mix(in srgb, var(--translator-accent-color, var(--brand-500, var(--text-link))) 8%, transparent);
-						border-radius: 6px;
-						color: var(--translator-text-color, inherit);
-					}
-					.translator-translation-loading {
-						display: inline-block;
-						width: 12px;
-						height: 12px;
-						margin-left: 6px;
-						box-sizing: border-box;
-						vertical-align: -1px;
-						border: 2px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
-						border-top-color: var(--text-link);
-						border-radius: 50%;
-						animation: translator-loading-spin 750ms linear infinite;
-					}
-					@keyframes translator-loading-spin {
-						to {transform: rotate(360deg);}
-					}
-					@media (prefers-reduced-motion: reduce) {
-						.translator-translation-loading {animation-duration: 1600ms;}
-					}
-					.translator-protected-quote {
-						color: var(--text-link);
-						background: color-mix(in srgb, var(--brand-500, var(--text-link)) 14%, transparent);
-						padding: 0 4px;
-						border-radius: 4px;
-						font-weight: 600;
-					}
-					.translator-original-spoiler {
-						filter: blur(4px);
-						transition: filter 120ms ease;
-					}
-					.translator-original-message:hover .translator-original-spoiler {
-						filter: blur(0);
-					}
-					.translator-reply-preview-multiline {
-						overflow: visible !important;
-						max-height: none !important;
-					}
-					.translator-reply-preview-body {
-						overflow: visible !important;
-						max-height: none !important;
-						height: auto !important;
-					}
-					.translator-reply-preview-text {
-						display: block !important;
-						white-space: pre-wrap !important;
-						overflow: visible !important;
-						text-overflow: unset !important;
-						-webkit-line-clamp: unset !important;
-						line-clamp: unset !important;
-						max-height: none !important;
-						height: auto !important;
-					}
-					.translator-reply-preview-text > span {
-						white-space: inherit !important;
-						overflow: visible !important;
-						text-overflow: unset !important;
-					}
-					.translator-reply-preview-body .translator-translated-message,
-					.translator-reply-preview-text.translator-translated-message,
-					.translator-reply-preview-text .translator-translated-message {
-						margin: 0 !important;
-						padding: 0 !important;
-						border: 0 !important;
-						border-left: 0 !important;
-						background: transparent !important;
-						box-shadow: none !important;
-						color: inherit !important;
-					}
-					.translator-reply-preview-body [class*="translator"],
-					.translator-reply-preview-text [class*="translator"] {
-						background: transparent !important;
-						box-shadow: none !important;
-						color: inherit !important;
-					}
-					.translator-settings-inline-header {
-						display: flex;
-						align-items: center;
-						justify-content: space-between;
-						gap: 12px;
-						margin-bottom: 8px;
-					}
-					.translator-settings-panel-root {
-						overflow-anchor: none;
-						overflow-x: hidden;
-						max-width: 100%;
-						box-sizing: border-box;
-					}
-					.translator-settings-panel-root [class*="select"] {
-						overflow-anchor: none;
-					}
-										.translator-settings-panel-root {
-						overflow-anchor: none;
-					}
-					.translator-settings-panel-root [class*="select"],
-					.translator-settings-panel-root [class*="Select"],
-					.translator-settings-panel-root [role="combobox"],
-					.translator-stable-select-wrap,
-					.translator-stable-select-wrap * {
-						overflow-anchor: none;
-						scroll-margin-top: 0 !important;
-						scroll-margin-bottom: 0 !important;
-					}
-					.translator-stable-select-wrap {
-						width: 100%;
-						min-width: 0;
-						max-width: 100%;
-					}
-					.translator-prefix-translation-row {
-						display: grid;
-						grid-template-columns: minmax(76px, 0.75fr) minmax(0, 1.65fr) 34px;
-						gap: 10px;
-						align-items: center;
-						width: 100%;
-						max-width: 100%;
-						box-sizing: border-box;
-						margin-bottom: 8px;
-						overflow: hidden;
-					}
-					.translator-prefix-translation-cell,
-					.translator-prefix-translation-cell > * {
-						min-width: 0;
-						max-width: 100%;
-						box-sizing: border-box;
-					}
-					.translator-prefix-delete-cell {
-						display: flex;
-						align-items: center;
-						justify-content: flex-end;
-						min-width: 0;
-						max-width: 34px;
-						overflow: hidden;
-					}
-					.translator-prefix-delete-cell button {
-						width: 30px !important;
-						min-width: 30px !important;
-						max-width: 30px !important;
-						padding-left: 0 !important;
-						padding-right: 0 !important;
-					}
-					.translator-prefix-input-cell input,
-					.translator-prefix-language-cell .translator-stable-select-wrap,
-					.translator-prefix-language-cell [class*="select"],
-					.translator-prefix-language-cell [class*="Select"] {
-						min-width: 0 !important;
-						max-width: 100% !important;
-						box-sizing: border-box;
-					}
-					.translator-token-editor {
-						display: flex;
-						flex-direction: column;
-						gap: 8px;
-						width: 100%;
-						min-width: 0;
-					}
-					.translator-token-list {
-						display: flex;
-						flex-wrap: wrap;
-						align-content: flex-start;
-						gap: 6px;
-						width: 100%;
-						min-width: 0;
-						min-height: 44px;
-						max-height: 112px;
-						overflow-y: auto;
-						padding: 8px;
-						border: 1px solid var(--background-modifier-accent);
-						border-radius: 8px;
-						background: var(--input-background, var(--background-tertiary));
-						box-sizing: border-box;
-					}
-					.translator-token-empty {
-						color: var(--text-muted);
-						font-size: 12px;
-						line-height: 1.5;
-						padding: 2px 0;
-					}
-					.translator-token-badge {
-						display: inline-flex;
-						align-items: center;
-						max-width: 100%;
-						gap: 6px;
-						padding: 4px 8px;
-						border-radius: 6px;
-						background: var(--bdfdb-blurple);
-						color: #fff;
-						font-size: 12px;
-						line-height: 1.3;
-						box-sizing: border-box;
-					}
-					.translator-token-badge-text {
-						max-width: 100%;
-						overflow-wrap: anywhere;
-						word-break: break-word;
-						white-space: normal;
-					}
-					.translator-token-badge-delete {
-						display: inline-flex;
-						align-items: center;
-						justify-content: center;
-						width: 14px;
-						height: 14px;
-						flex: 0 0 auto;
-						cursor: pointer;
-						opacity: 0.92;
-					}
-					.translator-token-badge-delete:hover {
-						opacity: 1;
-					}
-					.translator-token-input-row,
-					.translator-token-input-row > * {
-						width: 100%;
-						min-width: 0;
-						max-width: 100%;
-						box-sizing: border-box;
-					}
-					@media (max-width: 620px) {
-						.translator-prefix-translation-row {
-							grid-template-columns: minmax(76px, 1fr) 34px;
-						}
-						.translator-prefix-language-cell {
-							grid-column: 1 / -1;
-						}
-					}
-
-.translator-settings-inline-actions {
-						display: flex;
-						flex-wrap: wrap;
-						justify-content: flex-end;
-						gap: 8px;
-					}
-					.translator-settings-divider-spacious {
-						margin-top: 14px !important;
-						margin-bottom: 14px !important;
-					}
-					.translator-settings-note {
-						margin-bottom: 8px;
-						font-size: 12px;
-						line-height: 1.45;
-						color: var(--text-muted);
-					}
-					.translator-settings-switch-group {
-						display: flex;
-						flex-direction: column;
-						margin: 6px 0 10px;
-					}
-					.translator-settings-switch-row {
-						margin: 0 !important;
-					}
-					.translator-settings-switch-row + .translator-settings-switch-row {
-						margin-top: 4px !important;
-					}
-					.translator-settings-primary-actions {
-						gap: 10px;
-					}
-					.translator-settings-inline-grid {
-						display: grid;
-						grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-						gap: 12px;
-						align-items: start;
-					}
-					.translator-settings-inline-grid > * {
-						min-width: 0;
-					}
-					.translator-settings-color-option {
-						display: flex;
-						align-items: center;
-						justify-content: space-between;
-						gap: 12px;
-						width: 100%;
-					}
-					.translator-color-palette {
-						display: flex;
-						flex-wrap: wrap;
-						gap: 6px;
-						margin-top: 6px;
-					}
-					.translator-loaded-status-floating {
-						position: fixed;
-						z-index: 999;
-						display: inline-flex;
-						align-items: center;
-						gap: 6px;
-						width: auto !important;
-						min-width: 0 !important;
-						max-width: min(360px, calc(100vw - 32px));
-						padding: 4px 9px;
-						border: 1px solid var(--background-modifier-accent, rgba(255,255,255,0.08)) !important;
-						border-radius: 999px;
-						background: var(--background-floating, #232428) !important;
-						background: color-mix(in srgb, var(--background-floating, #232428) 90%, black 10%) !important;
-						box-shadow: 0 1px 3px rgba(0,0,0,0.32) !important;
-						color: var(--text-muted, #b5bac1);
-						font-size: 12px;
-						font-weight: 500;
-						line-height: 16px;
-						pointer-events: none;
-						backdrop-filter: none;
-						text-shadow: none;
-					}
-					.translator-loaded-status-floating::before,
-					.translator-loaded-status-floating::after {
-						content: none !important;
-						display: none !important;
-					}
-					.translator-loaded-status-floating.translator-loaded-status-retryable {pointer-events: auto;}
-					.translator-loaded-status-dot {
-						width: 6px;
-						height: 6px;
-						border-radius: 50%;
-						background: var(--interactive-normal, #b5bac1);
-						box-shadow: none;
-						flex: 0 0 auto;
-					}
-					.translator-loaded-status-text {white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%;}
-					.translator-loaded-status-retry {
-						appearance: none;
-						margin: 0 0 0 2px;
-						padding: 0 0 0 7px;
-						border: 0;
-						border-left: 1px solid var(--background-modifier-accent, rgba(255,255,255,0.12));
-						background: transparent;
-						color: var(--interactive-active, #f2f3f5);
-						font: inherit;
-						font-weight: 600;
-						line-height: 16px;
-						cursor: pointer;
-					}
-					.translator-loaded-status-retry:hover {color: var(--text-normal, #dbdee1);}
-					.translator-loaded-status-inline {
-						display: inline-flex;
-						align-items: center;
-						gap: 6px;
-						width: fit-content;
-						max-width: 100%;
-						margin: 6px 0 10px;
-						padding: 4px 9px;
-						border: 1px solid var(--background-modifier-accent, rgba(255,255,255,0.08));
-						border-radius: 999px;
-						background: color-mix(in srgb, var(--background-secondary, #2b2d31) 88%, black 12%);
-						color: var(--text-muted, #b5bac1);
-						font-size: 12px;
-						font-weight: 500;
-						line-height: 16px;
-						box-sizing: border-box;
-					}
-					.translator-loaded-status-inline-text {
-						white-space: nowrap;
-						overflow: hidden;
-						text-overflow: ellipsis;
-						min-width: 0;
-					}
-					.translator-native-color-input {
-						width: 34px; height: 32px; padding: 0; border: 1px solid var(--background-modifier-accent);
-						border-radius: 8px; background: transparent; cursor: pointer;
-					}
-					.translator-color-chip {
-						appearance: none;
-						position: relative;
-						display: inline-flex;
-						align-items: center;
-						justify-content: center;
-						width: 32px;
-						height: 32px;
-						padding: 0;
-						border-radius: 8px;
-						border: 1px solid var(--background-modifier-accent);
-						background: var(--background-secondary-alt);
-						box-shadow: none;
-						color: var(--text-normal);
-						cursor: pointer;
-						font: inherit;
-						transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-					}
-					.translator-color-chip:hover {
-						background: var(--background-modifier-hover);
-						border-color: var(--brand-500, var(--text-link));
-						color: var(--header-primary);
-					}
-					.translator-color-chip-active {
-						background: color-mix(in srgb, var(--brand-500, var(--text-link)) 14%, var(--background-secondary-alt));
-						border-color: var(--brand-500, var(--text-link));
-						box-shadow: inset 0 0 0 1px var(--brand-500, var(--text-link));
-						color: var(--header-primary);
-					}
-					.translator-color-chip-add {
-						font-size: 14px;
-						font-weight: 700;
-					}
-					.translator-color-chip-remove {
-						font-size: 16px;
-						font-weight: 700;
-						color: var(--text-muted);
-					}
-					.translator-color-chip-remove:hover {
-						color: var(--status-danger);
-						border-color: var(--status-danger);
-					}
-					.translator-color-chip-delete {
-						position: absolute;
-						top: -5px;
-						right: -5px;
-						width: 15px;
-						height: 15px;
-						border-radius: 50%;
-						display: flex;
-						align-items: center;
-						justify-content: center;
-						background: var(--status-danger);
-						color: white;
-						font-size: 11px;
-						font-weight: 700;
-						line-height: 1;
-						box-shadow: 0 0 0 2px var(--background-secondary-alt);
-					}
-					.translator-color-chip-code {
-						display: none;
-					}
-					.translator-settings-color-swatch {
-						width: 16px;
-						height: 16px;
-						border-radius: 4px;
-						border: 1px solid var(--background-modifier-accent);
-						flex: 0 0 auto;
-					}
-					.translator-color-custom-row {
-						display: flex;
-						align-items: center;
-						gap: 8px;
-						margin-top: 8px;
-						max-width: 360px;
-					}
-					.translator-color-custom-input {
-						flex: 1 1 auto;
-						min-width: 0;
-						height: 32px;
-						box-sizing: border-box;
-						padding: 0 10px;
-						border: 1px solid var(--background-modifier-accent);
-						border-radius: 8px;
-						background: var(--input-background, var(--background-tertiary));
-						color: var(--text-normal);
-						font: inherit;
-					}
-					.translator-color-custom-input:focus {
-						outline: none;
-						border-color: var(--brand-500, var(--text-link));
-					}
-					.translator-secret-input-row {
-						position: relative;
-						margin-bottom: 8px;
-					}
-					.translator-secret-input-row .translator-secret-input {
-						margin-bottom: 0 !important;
-					}
-					.translator-secret-input input {
-						padding-right: 48px !important;
-					}
-					.translator-secret-toggle {
-						position: absolute !important;
-						top: 1px;
-						right: 1px;
-						bottom: 1px;
-						width: 40px !important;
-						padding: 0 !important;
-						margin: 0 !important;
-						display: flex !important;
-						align-items: center !important;
-						justify-content: center !important;
-						border-radius: 0 4px 4px 0 !important;
-						border: 0 !important;
-						border-left: 1px solid var(--background-modifier-accent) !important;
-						background: var(--input-background, var(--background-tertiary)) !important;
-						box-shadow: none !important;
-						color: var(--interactive-normal) !important;
-						cursor: pointer !important;
-						font-size: 16px !important;
-						line-height: 1 !important;
-						z-index: 2;
-					}
-					.translator-secret-toggle:hover {
-						background: var(--background-modifier-hover) !important;
-					}
-					.translator-secret-toggle:focus-visible {
-						outline: none !important;
-						box-shadow: inset 0 0 0 1px var(--button-filled-brand-background, var(--brand-500)) !important;
-					}
-					.translator-secret-toggle svg {
-						display: block;
-					}
-					.translator-settings-field-action {
-						min-width: 92px !important;
-						height: 32px !important;
-						box-shadow: none !important;
-						flex: 0 0 auto;
-					}
-					.translator-detector-panel {
-						margin-bottom: 14px;
-						padding: 12px 14px;
-						border: 1px solid rgba(255, 255, 255, 0.055);
-						border-radius: 8px;
-						background: #202124;
-						background: color-mix(in srgb, var(--background-secondary, #2b2d31) 78%, black 22%);
-						box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-						box-sizing: border-box;
-					}
-					.translator-detector-panel .translator-settings-support-title {
-						margin-bottom: 4px;
-						font-size: 14px;
-						font-weight: 700;
-						line-height: 20px;
-						color: var(--header-primary, #ffffff);
-					}
-					.translator-detector-panel .translator-settings-support-hint {
-						margin-bottom: 10px;
-						font-size: 13px;
-						line-height: 1.45;
-						color: var(--text-muted, #949ba4);
-						opacity: 1;
-					}
-					.translator-detector-input-wrap {
-						position: relative;
-					}
-					.translator-detector-textinput input {
-						min-height: 34px !important;
-						padding-right: 68px !important;
-						border-color: rgba(255, 255, 255, 0.035) !important;
-						background: color-mix(in srgb, var(--background-tertiary, #1e1f22) 86%, black 14%) !important;
-					}
-					.translator-detector-input-button {
-						position: absolute !important;
-						top: 50%;
-						right: 8px;
-						height: 26px !important;
-						min-width: 46px !important;
-						padding: 0 10px !important;
-						transform: translateY(-50%);
-						box-shadow: none !important;
-						z-index: 2;
-					}
-					.translator-detector-input-button:active {
-						transform: translateY(-50%) !important;
-					}
-					.translator-detector-result-row {
-						display: flex;
-						align-items: center;
-						justify-content: space-between;
-						gap: 10px;
-						margin-top: 10px;
-						padding: 8px 10px;
-						border: 1px solid rgba(255, 255, 255, 0.045);
-						border-radius: 7px;
-						background: color-mix(in srgb, var(--background-tertiary, #1e1f22) 86%, black 14%);
-					}
-					.translator-detector-result-text {
-						min-width: 0;
-						color: var(--text-muted, #949ba4);
-						font-size: 12.5px;
-						line-height: 1.4;
-						overflow: hidden;
-						text-overflow: ellipsis;
-						white-space: nowrap;
-					}
-					.translator-detector-apply-button {
-						flex: 0 0 auto;
-						height: 28px !important;
-						box-shadow: none !important;
-					}
-					.translator-settings-support-panel {
-						margin-bottom: 8px;
-						padding: 4px 0 0 0;
-						border: 0;
-						border-radius: 0;
-						background: transparent;
-					}
-					.translator-advanced-protection-section {
-						margin: 0 0 14px;
-						padding: 0 0 2px;
-					}
-					.translator-advanced-protection-section + .translator-advanced-protection-section {
-						margin-top: 16px;
-						padding-top: 16px;
-						border-top: 1px solid var(--background-modifier-accent);
-					}
-					.translator-advanced-protection-section .translator-settings-switch-group {
-						margin-top: 8px;
-						margin-bottom: 8px;
-					}
-					.translator-settings-support-row {
-						display: flex;
-						flex-wrap: wrap;
-						gap: 8px;
-					}
-					.translator-settings-support-block + .translator-settings-support-block {
-						margin-top: 12px;
-						padding-top: 12px;
-						border-top: 1px solid var(--background-modifier-accent);
-					}
-					.translator-settings-support-title {
-						margin-bottom: 4px;
-						font-size: 13px;
-						font-weight: 600;
-					}
-					.translator-settings-support-hint {
-						margin-bottom: 8px;
-						line-height: 1.45;
-						opacity: 0.8;
-					}
-					.translator-settings-meta {
-						margin-top: 6px;
-						font-size: 13px;
-						line-height: 1.4;
-						opacity: 0.75;
-					}
-					.translator-segmented-group {
-						display: flex;
-						flex-wrap: wrap;
-						gap: 4px;
-						margin-bottom: 8px;
-						padding: 3px;
-						border: 1px solid var(--background-modifier-accent);
-						border-radius: 8px;
-						background: var(--background-tertiary, var(--background-secondary));
-					}
-					.translator-segmented-button {
-						appearance: none;
-						display: inline-flex;
-						align-items: center;
-						justify-content: center;
-						min-height: 32px;
-						padding: 0 14px;
-						border-radius: 7px;
-						border: 0;
-						background: transparent;
-						box-shadow: none;
-						color: var(--text-muted);
-						cursor: pointer;
-						font: inherit;
-						font-size: 12px !important;
-						font-weight: 600 !important;
-						line-height: 1;
-						transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
-					}
-					.translator-segmented-button:hover {
-						background: var(--background-modifier-hover);
-						color: var(--text-normal);
-					}
-					.translator-segmented-button-active {
-						background: var(--background-secondary-alt);
-						color: var(--header-primary);
-						box-shadow: inset 0 0 0 1px var(--brand-500, var(--text-link));
-					}
-					.translator-segmented-button-disabled {
-						opacity: 0.45;
-						cursor: not-allowed;
-					}
-					.translator-segmented-button-disabled:hover {
-						background: transparent;
-						color: var(--text-muted);
-					}
-					.translator-decision-mode-grid {
-						display: grid;
-						grid-template-columns: 1fr 1fr;
-						gap: 4px;
-						width: 100%;
-						margin: 8px 0 10px;
-						padding: 3px;
-						border: 1px solid var(--background-modifier-accent);
-						border-radius: 7px;
-						background: var(--background-secondary, #2b2d31);
-					}
-					.translator-decision-mode-grid .translator-segmented-button {
-						width: 100%;
-						min-height: 34px;
-						border-radius: 5px;
-						font-size: 13px !important;
-						font-weight: 700 !important;
-						background: transparent;
-						color: var(--text-muted);
-					}
-					.translator-decision-mode-grid .translator-segmented-button:hover {
-						background: var(--background-modifier-hover);
-						color: var(--text-normal);
-					}
-					.translator-decision-mode-grid .translator-segmented-button-active {
-						background: var(--brand-500, #5865f2);
-						color: var(--white-500, #fff);
-						box-shadow: none;
-					}
-					.translator-decision-mode-grid .translator-segmented-button-disabled {
-						opacity: 0.45;
-					}
-					.translator-ai-prompt-textarea {
-						box-sizing: border-box;
-						width: 100%;
-						min-height: 118px;
-						margin: 8px 0;
-						padding: 10px 12px;
-						border: 1px solid var(--background-modifier-accent);
-						border-radius: 6px;
-						background: var(--input-background, var(--background-secondary, #2b2d31));
-						color: var(--text-normal);
-						font: inherit;
-						font-size: 13px;
-						line-height: 1.45;
-						resize: vertical;
-						outline: none;
-						scrollbar-width: thin;
-						scrollbar-color: var(--scrollbar-auto-thumb, var(--background-modifier-accent)) var(--input-background, var(--background-secondary, #2b2d31));
-					}
-					.translator-ai-prompt-textarea:focus {
-						border-color: var(--brand-500, #5865f2);
-					}
-					.translator-ai-prompt-textarea::-webkit-scrollbar {
-						width: 8px;
-					}
-					.translator-ai-prompt-textarea::-webkit-scrollbar-track {
-						background: var(--input-background, var(--background-secondary, #2b2d31));
-						border-radius: 8px;
-					}
-					.translator-ai-prompt-textarea::-webkit-scrollbar-thumb {
-						background: var(--scrollbar-auto-thumb, var(--background-modifier-accent));
-						border: 2px solid var(--input-background, var(--background-secondary, #2b2d31));
-						border-radius: 8px;
-					}
-					.translator-ai-prompt-textarea::-webkit-scrollbar-thumb:hover {
-						background: var(--scrollbar-auto-scrollbar-color-thumb, var(--interactive-muted));
-					}
-					.translator-preset-grid .translator-segmented-button {
-						min-width: 84px;
-					}
-					.translator-scope-grid .translator-segmented-button {
-						flex: 1 1 180px;
-						min-height: 34px;
-					}
-					.translator-window-grid .translator-segmented-button {
-						flex: 1 1 96px;
-						min-height: 34px;
-					}
-					.translator-scope-switch {
-						display: grid;
-						grid-template-columns: 1fr 1fr;
-						position: relative;
-						padding: 3px;
-						border: 1px solid var(--background-modifier-accent);
-						border-radius: 999px;
-						background: var(--background-tertiary, var(--background-secondary));
-						overflow: hidden;
-					}
-					.translator-scope-switch::before {
-						content: "";
-						position: absolute;
-						top: 3px;
-						bottom: 3px;
-						left: 3px;
-						width: calc(50% - 3px);
-						border-radius: 999px;
-						background: var(--background-secondary-alt);
-						box-shadow: inset 0 0 0 1px var(--brand-500, var(--text-link));
-						transition: transform 160ms ease;
-					}
-					.translator-scope-switch-loaded::before {
-						transform: translateX(100%);
-					}
-					.translator-scope-switch-button {
-						appearance: none;
-						position: relative;
-						z-index: 1;
-						height: 32px;
-						padding: 0 12px;
-						border: 0;
-						border-radius: 999px;
-						background: transparent;
-						box-shadow: none;
-						color: var(--text-muted);
-						cursor: pointer;
-						font: inherit;
-						font-size: 12px !important;
-						font-weight: 700 !important;
-						line-height: 1;
-					}
-					.translator-scope-switch-button-active {
-						color: var(--header-primary);
-					}
-					.translator-loaded-warning {
-						margin: 7px 2px 4px;
-						font-size: 12px;
-						line-height: 1.45;
-						color: var(--text-muted);
-					}
-					.translator-loaded-limit-row {
-						display: grid;
-						grid-template-columns: minmax(160px, 1fr) minmax(210px, 1.2fr);
-						align-items: center;
-						gap: 12px;
-						margin: 10px 2px 4px;
-					}
-					.translator-loaded-limit-title {
-						font-size: 13px;
-						font-weight: 600;
-						color: var(--header-primary);
-					}
-					.translator-loaded-limit-input {
-						width: 100%;
-					}
-					.translator-loaded-window-switch {
-						grid-template-columns: repeat(5, 1fr);
-					}
-					.translator-loaded-window-switch::before {
-						display: none;
-					}
-					.translator-preset-grid {
-						display: flex;
-						flex-wrap: wrap;
-						gap: 8px;
-						margin-bottom: 10px;
-					}
-					.translator-preset-button {
-						height: 30px !important;
-						padding: 0 12px !important;
-						border-radius: 999px !important;
-						border: 1px solid var(--background-modifier-accent) !important;
-						background: transparent !important;
-						box-shadow: none !important;
-						color: var(--text-normal) !important;
-						font-size: 13px !important;
-						font-weight: 600 !important;
-					}
-					.translator-preset-button:hover {
-						background: var(--background-secondary-alt) !important;
-						border-color: var(--brand-500, var(--text-link)) !important;
-					}
-					.translator-preset-button-active {
-						background: color-mix(in srgb, var(--brand-500, var(--text-link)) 18%, transparent) !important;
-						border-color: var(--brand-500, var(--text-link)) !important;
-						color: var(--header-primary) !important;
-					}
-					`;
+            }, this.css = createTranslatorStyles(BDFDB);
           }
           handleEditedMessageSubmit(methodArguments, originalMethod) {
             let args = Array.from(methodArguments || []), channelId = args[0], messageId = args[1], payload = args[2], originalText = typeof payload == "string" ? payload : payload && typeof payload.content == "string" ? payload.content : "", submit = /* @__PURE__ */ __name((nextText) => {
@@ -4623,461 +6131,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             deferredTranslationRerenderPending && this.flushDeferredTranslationRerender(), this.SettingsUpdated && (delete this.SettingsUpdated, this.forceUpdateAll());
           }
           getCustomText(key) {
-            let isChinese = this.isChineseUiLanguage(), isRussian = this.isRussianUiLanguage(), texts = isChinese ? {
-              auth_keys_title: "自定义密钥",
-              custom_section_title: "自定义",
-              api_key_label: "API 密钥：",
-              api_endpoint_label: "接口地址：",
-              model_id_label: "模型名：",
-              paid_version_label: "付费版",
-              microsoft_region_label: "地区：",
-              section_service_title: "翻译服务",
-              section_service_hint: "先选服务商，再填写对应参数。Google 默认可直接用；如果你想用正式接口，推荐选 Azure Translator 或 Google Cloud Translation。",
-              primary_engine_title: "主服务商",
-              backup_engine_title: "备用服务（可选）",
-              backup_engine_select_title: "备用服务商",
-              backup_engine_hint: "主服务失败时，才会尝试备用服务。",
-              backup_engine_none: "不使用备用服务",
-              backup_engine_none_hint: "当前未启用备用服务。",
-              google_default_hint: "当前使用 Google 默认模式，不需要填写 API、接口地址或模型名。",
-              engine_unknown_hint: "当前服务商的设置项暂时无法显示。",
-              engine_no_extra_fields: "当前服务商没有额外的可填写参数。",
-              other_service_title: "其他服务商密钥（高级，可不填）",
-              other_service_hint: "这里保留兼容功能，只有你以后想切换到这些服务商时才需要填写。",
-              section_language_title: "语言设置",
-              section_language_hint: "这里是默认语言规则。发送前翻译会优先按这里的设置处理。",
-              sent_input_title: "发送消息的源语言",
-              sent_output_title: "发送消息的目标语言",
-              received_input_title: "收到消息的源语言",
-              received_output_title: "收到消息的目标语言",
-              source_filter_title: "发送前只翻这些源语言",
-              source_filter_hint: "不添加任何语言时，不限制源语言；添加后，只翻译检测为这些语言的发送内容。",
-              source_filter_empty_state: "当前未限制发送消息源语言。",
-              source_filter_add: "+ 添加源语言",
-              section_display_title: "显示与交互",
-              section_display_hint: "这里控制按钮显示方式，以及原文和译文的展示规则。这里的剧透模式就是 Discord 原生 spoiler，也就是刮刮乐遮盖效果。",
-              section_advanced_title: "高级功能",
-              prefix_section_title: "快捷前缀",
-              disable_prefix_title: "跳过翻译前缀",
-              disable_prefix_hint: "输入以这些前缀开头的消息时，将直接发送原文，不走翻译。",
-              disable_prefix_placeholder: "新增禁用前缀（例如 !）",
-              translate_prefix_title: "指定目标语言前缀",
-              translate_prefix_hint: "例如输入 $fr hello，会把 hello 翻成法语后再发送。",
-              translate_prefix_placeholder: "前缀（例如 $fr）",
-              add_prefix_button: "+ 添加新前缀",
-              validate_button_label: "验证当前配置",
-              validate_hint: "会发送一次最小在线请求，用来检查 API Key、接口地址和模型是否可用。",
-              validate_running: "正在验证",
-              validate_success: "验证成功",
-              validate_failed: "验证失败",
-              validate_saved_endpoint: "已自动修正并保存接口地址",
-              validate_missing_key: "请先填写 API Key。",
-              validate_missing_model: "请先填写模型名。",
-              validate_missing_endpoint: "请先填写接口地址。",
-              support_panel_validate_title: "连接测试",
-              support_panel_links_title: "帮助与开通",
-              model_detect_button: "检测模型",
-              model_fetch_button: "获取模型列表",
-              model_fetch_loading: "正在获取模型列表…",
-              model_catalog_title: "已获取模型列表",
-              model_catalog_loaded: "已获取 {count} 个模型，选择后会自动填回上面的模型输入框。",
-              model_catalog_empty: "没有获取到可用模型。"
-            } : {
-              auth_keys_title: "Own Auth Keys",
-              custom_section_title: "Custom",
-              api_key_label: "API Key:",
-              api_endpoint_label: "API Endpoint:",
-              model_id_label: "Model ID:",
-              paid_version_label: "Paid Version",
-              microsoft_region_label: "Region:",
-              section_service_title: "Translation Provider",
-              section_service_hint: "Choose a provider first, then fill in only the fields that provider needs. For official paid APIs, Azure Translator and Google Cloud Translation are recommended.",
-              primary_engine_title: "Primary Provider",
-              backup_engine_title: "Backup Provider (Optional)",
-              backup_engine_select_title: "Backup Provider",
-              backup_engine_hint: "The backup provider is used only when the primary one fails.",
-              backup_engine_none: "No Backup Provider",
-              backup_engine_none_hint: "No backup provider is enabled right now.",
-              google_default_hint: "Google default mode does not require your own API key, endpoint, or model.",
-              engine_unknown_hint: "This provider does not have a visible settings form right now.",
-              engine_no_extra_fields: "This provider has no extra editable fields.",
-              other_service_title: "Other Provider Keys (Advanced)",
-              other_service_hint: "These are kept for compatibility and only matter if you switch to them later.",
-              section_language_title: "Language Rules",
-              section_language_hint: "These are the default language rules used for sending and receiving messages.",
-              sent_input_title: "Source language for sent messages",
-              sent_output_title: "Target language for sent messages",
-              received_input_title: "Source language for received messages",
-              received_output_title: "Target language for received messages",
-              source_filter_title: "Outgoing source languages for auto-translate",
-              source_filter_hint: "If you do not add any languages here, outgoing source languages are not restricted. After adding languages, only detected outgoing content in those languages is translated.",
-              source_filter_empty_state: "Outgoing source languages are currently unrestricted.",
-              source_filter_add: "+ Add source language",
-              section_display_title: "Display and Interaction",
-              section_display_hint: "Control button visibility and how original text is shown together with translations. Spoiler mode here is the same Discord scratch-off effect.",
-              section_advanced_title: "Advanced Features",
-              prefix_section_title: "Prefix Rules",
-              disable_prefix_title: "Skip-translation prefixes",
-              disable_prefix_hint: "Messages that start with these prefixes are sent without translation.",
-              disable_prefix_placeholder: "New exception prefix (e.g. !)",
-              translate_prefix_title: "Forced target-language prefixes",
-              translate_prefix_hint: "For example, `$fr hello` translates `hello` into French before sending.",
-              translate_prefix_placeholder: "Prefix (e.g. $fr)",
-              add_prefix_button: "+ Add new prefix",
-              validate_button_label: "Validate Current Config",
-              validate_hint: "This sends one minimal live request to verify that the API key, endpoint, and model are usable.",
-              validate_running: "Validating",
-              validate_success: "Validation succeeded",
-              validate_failed: "Validation failed",
-              validate_saved_endpoint: "Endpoint was normalized and saved automatically",
-              validate_missing_key: "Please enter an API key first.",
-              validate_missing_model: "Please enter a model ID first.",
-              validate_missing_endpoint: "Please enter an API endpoint first.",
-              support_panel_validate_title: "Connection Test",
-              support_panel_links_title: "Help and Setup",
-              model_detect_button: "Check Model",
-              model_fetch_button: "Fetch Models",
-              model_fetch_loading: "Loading model list…",
-              model_catalog_title: "Fetched Models",
-              model_catalog_loaded: "{count} models loaded. Selecting one will fill the model field above.",
-              model_catalog_empty: "No models were returned."
-            };
-            return Object.assign(texts, isChinese ? {
-              protected_terms_title: "保护词 / 保护短语",
-              protected_terms_hint: "填入不希望被翻译的固定名词或短语，例如项目名、模型名、品牌名或团队名。翻译前会先保护它们，翻译后再原样放回。",
-              protected_terms_placeholder: "新增保护词或短语",
-              protected_terms_scope_sent: "保护我发送的消息",
-              protected_terms_scope_received: "保护收到的消息",
-              channel_auto_translate_label: "当前频道收到消息自动翻译",
-              channel_auto_translate_on: "当前频道收到消息自动翻译已开启",
-              channel_auto_translate_off: "在设置中单独开启当前频道收到消息自动翻译",
-              language_detector_title: "语言识别助手",
-              language_detector_hint: "把频道里的陌生文本粘贴到这里，插件会识别语言，并可一键填入“您发送的消息中的输出语言”。",
-              language_detector_placeholder: "粘贴一小段待识别文本",
-              language_detector_button: "识别",
-              language_detector_button_loading: "识别中",
-              language_detector_empty: "请先粘贴要识别的文本。",
-              language_detector_failed: "暂时无法识别这段文本，请换一段更长或更典型的内容再试。",
-              language_detector_detected: "识别结果",
-              language_detector_apply_received: "填入收到消息源语言",
-              language_detector_apply_sent: "填入发送消息输入语言"
-            } : {
-              protected_terms_title: "Protected Terms / Phrases",
-              protected_terms_hint: "Add names or phrases that must stay unchanged, such as project names, model names, brand names, or team names. They will be protected before translation and restored afterward.",
-              protected_terms_placeholder: "Add protected term or phrase",
-              protected_terms_scope_sent: "Protect sent messages",
-              protected_terms_scope_received: "Protect received messages",
-              channel_auto_translate_label: "Incoming auto-translate for this channel",
-              channel_auto_translate_on: "Incoming auto-translate is enabled for this channel",
-              channel_auto_translate_off: "Enable incoming auto-translate separately in settings",
-              language_detector_title: "Language Detection Helper",
-              language_detector_hint: "Paste a short sample here. The plugin will detect the language and apply it to the sent-message output language.",
-              language_detector_placeholder: "Paste text to detect",
-              language_detector_button: "Detect",
-              language_detector_button_loading: "Detecting",
-              language_detector_empty: "Please paste some text to detect first.",
-              language_detector_failed: "Could not detect the language from that text. Try a longer or more representative sample.",
-              language_detector_detected: "Detected language",
-              language_detector_apply_received: "Use for received-source language",
-              language_detector_apply_sent: "Use for sent-input language"
-            }), Object.assign(texts, isChinese ? {
-              language_detector_apply_sent_output: "填入发送消息输出语言",
-              context_detect_message_language: "识别这条消息的语言",
-              context_reply_in_detected_language: "以该语言回复",
-              detect_message_empty: "这条消息没有可识别的文本内容。",
-              detect_message_failed: "暂时无法识别这条消息的语言。",
-              detect_message_success: "识别到",
-              reply_language_applied: "已将当前频道的发送目标语言切换为",
-              reply_language_hint: "保持当前频道翻译开启后，直接用你的语言回复即可。",
-              translated_label: "译文"
-            } : {
-              language_detector_apply_sent_output: "Use for sent output language",
-              context_detect_message_language: "Detect this message language",
-              context_reply_in_detected_language: "Reply in this language",
-              detect_message_empty: "This message has no text content to detect.",
-              detect_message_failed: "Could not detect the language of this message.",
-              detect_message_success: "Detected",
-              reply_language_applied: "Sent target language for this channel was switched to",
-              reply_language_hint: "Keep translation enabled for this channel, then reply in your own language.",
-              translated_label: "Translated"
-            }), Object.assign(texts, isChinese ? {
-              wrapper_pairs_title: "自动保护包裹符规则",
-              wrapper_pairs_hint: '按“左包裹符|右包裹符”的格式添加规则，例如 "|"、“|” 、`|`、【|】、「|」。被这些符号包起来的内容会自动跳过翻译，并在译文里高亮显示。',
-              wrapper_pairs_placeholder: "例如 【|】 或 `|`",
-              wrapper_pairs_scope_sent: "保护我发送的消息",
-              wrapper_pairs_scope_received: "保护收到的消息"
-            } : {
-              wrapper_pairs_title: "Protected Wrapper Rules",
-              wrapper_pairs_hint: 'Add rules in the format left|right, for example "|", “|”, `|`, 【|】, or 「|」. Text wrapped by these symbols will be skipped during translation and highlighted in the translated result.',
-              wrapper_pairs_placeholder: "For example 【|】 or `|`",
-              wrapper_pairs_scope_sent: "Protect sent messages",
-              wrapper_pairs_scope_received: "Protect received messages"
-            }), Object.assign(texts, isChinese ? {
-              wrapper_pairs_title: "自动保护包裹符规则",
-              wrapper_pairs_hint: '按“左包裹符|右包裹符”的格式添加规则，例如 "|"、“|” 、`|`、【|】、「|」。被这些符号包起来的内容会自动跳过翻译，并在译文里高亮显示。',
-              wrapper_pairs_placeholder: "例如 【|】 或 `|`"
-            } : {
-              wrapper_pairs_title: "Protected Wrapper Rules",
-              wrapper_pairs_hint: 'Add rules in the format left|right, for example "|", “|”, `|`, 【|】, or 「|」. Text wrapped by these symbols will be skipped during translation and highlighted in the translated result.',
-              wrapper_pairs_placeholder: "For example 【|】 or `|`"
-            }), Object.assign(texts, isChinese ? {
-              received_auto_translate_title: "收到消息自动翻译",
-              received_auto_translate_hint: "设置哪些收到的消息自动翻译。",
-              received_auto_translate_preset_title: "自动翻译策略",
-              received_auto_translate_preset_loose: "宽松",
-              received_auto_translate_preset_balanced: "平衡",
-              received_auto_translate_preset_strict: "严格",
-              received_auto_translate_preset_custom: "自定义",
-              received_source_filter_title: "收到消息源语言过滤",
-              received_source_filter_hint: "不添加任何语言时，收到的任何源语言都可以自动翻译；添加后，只自动翻译检测为这些语言的收到消息。",
-              received_source_filter_empty_state: "当前未限制收到消息源语言。",
-              received_source_filter_add: "+ 添加收到消息源语言",
-              auto_translate_decision_title: "自动翻译判断方式",
-              auto_translate_decision_hint: "基础规则适用于所有服务商；AI 智能判断仅 AI 服务商可用，判断与翻译合并为一次请求。保护词会先本地保护，不参与改写。",
-              auto_translate_decision_basic: "基础规则",
-              auto_translate_decision_ai: "AI 智能判断",
-              auto_translate_decision_ai_disabled: "AI 智能判断（当前服务商不支持）",
-              auto_translate_ai_prompt_hint: "下面是默认 AI 判断提示词，可直接修改；{{INPUT_LANGUAGE}} / {{OUTPUT_LANGUAGE}} 会自动替换为当前语言设置，⟦0⟧ 这类占位符会在翻译后恢复。",
-              auto_translate_ai_prompt_reset: "恢复默认判断提示词",
-              skip_mixed_received_label: "跳过混合语言消息",
-              skip_same_language_received_label: "跳过与目标语言相同的消息",
-              treat_language_variants_label: "将地区/方言变体视为同一种语言",
-              drop_similar_translations_label: "丢弃与原文高度相似的译文",
-              minimum_auto_translate_length_title: "自动翻译最小文本长度",
-              translation_similarity_threshold_title: "译文相似度过滤阈值",
-              plugin_language_title: "插件界面语言",
-              plugin_language_hint: "可跟随 Discord，也可单独固定插件界面语言。",
-              translated_text_color_title: "译文模块颜色",
-              translated_text_color_hint: "直接点击色板切换颜色。点击右侧 + 号后，可手动填写颜色代码并保存。",
-              translated_text_color_save_button: "保存",
-              translated_text_color_invalid: "颜色代码无效，请填写有效的 HEX 或 CSS 颜色。"
-            } : {
-              received_auto_translate_title: "Incoming Auto-Translate",
-              received_auto_translate_hint: "Choose which incoming messages are auto-translated.",
-              received_auto_translate_preset_title: "Auto-translate preset",
-              received_auto_translate_preset_loose: "Loose",
-              received_auto_translate_preset_balanced: "Balanced",
-              received_auto_translate_preset_strict: "Strict",
-              received_auto_translate_preset_custom: "Custom",
-              received_source_filter_title: "Incoming source language filter",
-              received_source_filter_hint: "If you do not add any languages here, incoming source languages are not restricted. After adding languages, only detected incoming messages in those languages are auto-translated.",
-              received_source_filter_empty_state: "Incoming source languages are currently unrestricted.",
-              received_source_filter_add: "+ Add incoming source language",
-              auto_translate_decision_title: "Auto-translate decision mode",
-              auto_translate_decision_hint: "Basic rules work with every provider. AI smart decision is only available for AI providers and is merged into the translation request. Protected terms are protected locally first.",
-              auto_translate_decision_basic: "Basic rules",
-              auto_translate_decision_ai: "AI smart decision",
-              auto_translate_decision_ai_disabled: "AI smart decision (unsupported provider)",
-              auto_translate_ai_prompt_hint: "Default AI decision prompt. You can edit it directly. {{INPUT_LANGUAGE}} / {{OUTPUT_LANGUAGE}} are replaced with the current language settings, and placeholders like ⟦DTA0⟧ are restored after translation.",
-              auto_translate_ai_prompt_reset: "Restore default decision prompt",
-              skip_mixed_received_label: "Skip mixed-language messages",
-              skip_same_language_received_label: "Skip messages already in the target language",
-              treat_language_variants_label: "Treat regional variants as the same language",
-              drop_similar_translations_label: "Drop nearly identical translations",
-              minimum_auto_translate_length_title: "Minimum text length for auto-translate",
-              translation_similarity_threshold_title: "Translation similarity threshold",
-              plugin_language_title: "Plugin UI Language",
-              plugin_language_hint: "You can follow Discord or pin the plugin UI to its own language.",
-              translated_text_color_title: "Translated text color",
-              translated_text_color_hint: "Click a swatch to switch colors. Use the + button to enter and save a custom color code.",
-              translated_text_color_save_button: "Save",
-              translated_text_color_invalid: "Invalid color code. Please enter a valid HEX or CSS color."
-            }), Object.assign(texts, isChinese ? {
-              received_auto_translate_title: "收到消息自动翻译策略",
-              received_auto_translate_hint: "设置收到消息后的自动翻译规则。",
-              received_auto_translate_preset_loose: "多翻一点",
-              received_auto_translate_preset_balanced: "推荐",
-              received_auto_translate_preset_strict: "少翻一点",
-              received_auto_translate_preset_custom: "自定义",
-              received_auto_translate_profile_loose_title: "多翻一点",
-              received_auto_translate_profile_loose_desc: "更积极地自动翻译，适合多语频道，可能会多翻一些短句或混合内容。",
-              received_auto_translate_profile_balanced_title: "推荐",
-              received_auto_translate_profile_balanced_desc: "在准确率和覆盖率之间做平衡，适合大多数日常聊天频道。",
-              received_auto_translate_profile_strict_title: "少翻一点",
-              received_auto_translate_profile_strict_desc: "更谨慎，尽量避免误翻，适合已经有较多中文或双语内容的频道。",
-              received_auto_translate_profile_custom_title: "自定义",
-              received_auto_translate_profile_custom_desc: "你可以自己决定哪些消息跳过，哪些消息继续自动翻译。",
-              received_auto_translate_advanced_title: "高级规则",
-              received_auto_translate_advanced_locked: "当前正在使用预设模式。普通用户不需要改下面这些细项；如果你想手动调整，请切换到“自定义”。",
-              skip_mixed_received_label: "跳过中英混合或多语言混合的消息",
-              skip_same_language_received_label: "跳过本来就已经是目标语言的消息",
-              treat_language_variants_label: "把地区变体当成同一种语言",
-              drop_similar_translations_label: "如果译文和原文几乎一样，就不显示",
-              minimum_auto_translate_length_title: "最短多少字才自动翻译",
-              translation_similarity_threshold_title: "多像才算“几乎没变”"
-            } : {
-              received_auto_translate_title: "Incoming Auto-Translate Rules",
-              received_auto_translate_hint: "Set the auto-translate rules for incoming messages.",
-              received_auto_translate_preset_loose: "Translate More",
-              received_auto_translate_preset_balanced: "Recommended",
-              received_auto_translate_preset_strict: "Translate Less",
-              received_auto_translate_preset_custom: "Custom",
-              received_auto_translate_profile_loose_title: "Translate More",
-              received_auto_translate_profile_loose_desc: "More aggressive auto-translation for multilingual channels. It may translate more short or mixed messages.",
-              received_auto_translate_profile_balanced_title: "Recommended",
-              received_auto_translate_profile_balanced_desc: "Balanced for most channels. Good default between coverage and accuracy.",
-              received_auto_translate_profile_strict_title: "Translate Less",
-              received_auto_translate_profile_strict_desc: "More conservative. Best when the channel already contains lots of bilingual or target-language content.",
-              received_auto_translate_profile_custom_title: "Custom",
-              received_auto_translate_profile_custom_desc: "Manually decide which incoming messages should be skipped or translated.",
-              received_auto_translate_advanced_title: "Advanced Rules",
-              received_auto_translate_advanced_locked: "A preset is active right now. Most users do not need these low-level switches. Switch to Custom if you want manual control.",
-              drop_similar_translations_label: "Hide translations that are almost identical to the source",
-              minimum_auto_translate_length_title: "Minimum text length before auto-translate",
-              translation_similarity_threshold_title: "How similar counts as 'almost unchanged'"
-            }), isRussian && Object.assign(texts, {
-              auth_keys_title: "Ключи доступа",
-              custom_section_title: "Настройка",
-              api_key_label: "API ключ:",
-              api_endpoint_label: "API адрес:",
-              model_id_label: "ID модели:",
-              paid_version_label: "Платная версия",
-              microsoft_region_label: "Регион:",
-              section_service_title: "Провайдер перевода",
-              section_service_hint: "Сначала выберите провайдера, затем заполните только нужные поля.",
-              primary_engine_title: "Основной провайдер",
-              backup_engine_title: "Резервный провайдер",
-              backup_engine_select_title: "Резервный провайдер",
-              backup_engine_hint: "Резервный провайдер используется только при ошибке основного.",
-              backup_engine_none: "Без резервного провайдера",
-              backup_engine_none_hint: "Резервный провайдер сейчас не включен.",
-              google_default_hint: "Режим Google по умолчанию не требует отдельного API ключа.",
-              engine_unknown_hint: "Для этого провайдера сейчас нет отдельной формы настроек.",
-              engine_no_extra_fields: "Для этого провайдера нет дополнительных полей.",
-              other_service_title: "Ключи других провайдеров",
-              other_service_hint: "Эти поля оставлены для совместимости, если вы захотите переключиться позже.",
-              section_language_title: "Языковые правила",
-              section_language_hint: "Базовые языковые правила для отправки и получения сообщений.",
-              sent_input_title: "Исходный язык отправляемых сообщений",
-              sent_output_title: "Целевой язык отправляемых сообщений",
-              received_input_title: "Исходный язык входящих сообщений",
-              received_output_title: "Целевой язык входящих сообщений",
-              source_filter_title: "Автоперевод исходящих только с этих языков",
-              source_filter_hint: "Если языки не добавлены, исходный язык исходящих сообщений не ограничен. После добавления будут переводиться только эти языки.",
-              source_filter_empty_state: "Исходные языки исходящих сообщений сейчас не ограничены.",
-              source_filter_add: "+ Добавить исходный язык",
-              received_auto_translate_title: "Автоперевод входящих сообщений",
-              received_auto_translate_hint: "Здесь задаются правила, какие входящие сообщения переводить автоматически.",
-              received_auto_translate_preset_title: "Профиль автоперевода",
-              received_auto_translate_preset_loose: "Свободный",
-              received_auto_translate_preset_balanced: "Сбалансированный",
-              received_auto_translate_preset_strict: "Строгий",
-              received_auto_translate_preset_custom: "Пользовательский",
-              received_source_filter_title: "Разрешённые исходные языки для входящих",
-              received_source_filter_hint: "Если языки не добавлены, входящие сообщения на любом исходном языке могут переводиться автоматически. После добавления будут переводиться только эти языки.",
-              received_source_filter_empty_state: "Исходные языки входящих сообщений сейчас не ограничены.",
-              received_source_filter_add: "+ Добавить язык входящих",
-              auto_translate_decision_title: "Режим автоопределения перевода",
-              auto_translate_decision_hint: "Базовые правила работают со всеми сервисами. AI-режим доступен только для AI-провайдеров и объединяется с запросом перевода.",
-              auto_translate_decision_basic: "Базовые правила",
-              auto_translate_decision_ai: "AI-решение",
-              auto_translate_decision_ai_disabled: "AI-решение (не поддерживается)",
-              auto_translate_ai_prompt_hint: "Если AI вернёт перевод, он будет показан. Если вернёт __SKIP_TRANSLATION__, блок перевода не показывается.",
-              auto_translate_ai_prompt_reset: "Восстановить стандартную подсказку",
-              skip_mixed_received_label: "Пропускать смешанные сообщения",
-              skip_same_language_received_label: "Пропускать сообщения на том же языке, что и целевой",
-              treat_language_variants_label: "Считать региональные варианты одним языком",
-              drop_similar_translations_label: "Отбрасывать почти одинаковые переводы",
-              minimum_auto_translate_length_title: "Минимальная длина текста для автоперевода",
-              translation_similarity_threshold_title: "Порог схожести перевода",
-              section_display_title: "Отображение и интерфейс",
-              section_display_hint: "Управляет тем, как показываются переводы и элементы интерфейса.",
-              section_advanced_title: "Дополнительные функции",
-              prefix_section_title: "Правила префиксов",
-              disable_prefix_title: "Префиксы пропуска перевода",
-              disable_prefix_hint: "Сообщения с этими префиксами отправляются без перевода.",
-              disable_prefix_placeholder: "Новый префикс исключения",
-              translate_prefix_title: "Префиксы целевого языка",
-              translate_prefix_hint: "Например, `$fr hello` переведёт `hello` на французский перед отправкой.",
-              translate_prefix_placeholder: "Префикс (например, $fr)",
-              add_prefix_button: "+ Добавить префикс",
-              validate_button_label: "Проверить текущую конфигурацию",
-              validate_hint: "Отправляет минимальный запрос, чтобы проверить ключ, адрес и модель.",
-              validate_running: "Проверка",
-              validate_success: "Проверка успешна",
-              validate_failed: "Проверка не удалась",
-              validate_saved_endpoint: "Адрес автоматически исправлен и сохранён",
-              validate_missing_key: "Сначала введите API ключ.",
-              validate_missing_model: "Сначала введите ID модели.",
-              validate_missing_endpoint: "Сначала введите API адрес.",
-              support_panel_validate_title: "Проверка подключения",
-              support_panel_links_title: "Ссылки и помощь",
-              model_detect_button: "Проверить модель",
-              model_fetch_button: "Получить модели",
-              model_fetch_loading: "Загрузка списка моделей…",
-              model_catalog_title: "Полученные модели",
-              model_catalog_loaded: "Загружено моделей: {count}. Выбор заполнит поле модели выше.",
-              model_catalog_empty: "Список моделей пуст.",
-              protected_terms_title: "Защищённые слова / фразы",
-              protected_terms_hint: "Добавьте имена или фразы, которые нельзя переводить.",
-              protected_terms_placeholder: "Добавить защищённый термин",
-              protected_terms_scope_sent: "Защищать исходящие сообщения",
-              protected_terms_scope_received: "Защищать входящие сообщения",
-              channel_auto_translate_label: "Автоперевод этого канала",
-              channel_auto_translate_on: "Автоперевод включён для этого канала",
-              channel_auto_translate_off: "ЛКМ: открыть настройки, ПКМ: включить автоперевод канала",
-              language_detector_title: "Помощник определения языка",
-              language_detector_hint: "Вставьте пример текста из канала, чтобы определить язык и применить его к правилам выше.",
-              language_detector_placeholder: "Вставьте текст для определения",
-              language_detector_button: "Опред.",
-              language_detector_button_loading: "Поиск",
-              language_detector_empty: "Сначала вставьте текст для определения.",
-              language_detector_failed: "Не удалось определить язык этого текста.",
-              language_detector_detected: "Определённый язык",
-              language_detector_apply_received: "Использовать для входящих",
-              language_detector_apply_sent: "Использовать для исходного языка отправки",
-              language_detector_apply_sent_output: "Использовать для целевого языка отправки",
-              context_detect_message_language: "Определить язык сообщения",
-              context_reply_in_detected_language: "Ответить на этом языке",
-              detect_message_empty: "В этом сообщении нет текста для определения языка.",
-              detect_message_failed: "Не удалось определить язык сообщения.",
-              detect_message_success: "Определено",
-              reply_language_applied: "Целевой язык отправки для канала переключён на",
-              reply_language_hint: "Оставьте перевод в канале включённым и отвечайте на своём языке.",
-              translated_label: "Перевод",
-              wrapper_pairs_title: "Защищённые пары обрамления",
-              wrapper_pairs_hint: 'Добавляйте правила в формате левая|правая часть, например "|", `|`, 【|】 или 「|」.',
-              wrapper_pairs_placeholder: "Например 【|】 или `|`",
-              wrapper_pairs_scope_sent: "Защищать исходящие сообщения",
-              wrapper_pairs_scope_received: "Защищать входящие сообщения",
-              plugin_language_title: "Язык интерфейса плагина",
-              plugin_language_hint: "Можно следовать языку Discord или зафиксировать язык интерфейса плагина отдельно.",
-              translated_text_color_title: "Цвет переведённого текста",
-              translated_text_color_hint: "Нажмите на цветовую плашку, чтобы выбрать цвет. Через кнопку + можно ввести и сохранить свой код цвета.",
-              translated_text_color_save_button: "Сохранить",
-              translated_text_color_invalid: "Некорректный код цвета. Укажите корректный HEX- или CSS-цвет."
-            }), Object.assign(texts, {
-              channel_primary_engine_title: texts.channel_primary_engine_title || (isChinese ? "当前频道主服务商" : isRussian ? "Основной сервис текущего канала" : "Current Channel Primary Provider"),
-              channel_primary_engine_restore: texts.channel_primary_engine_restore || (isChinese ? "恢复全局默认" : isRussian ? "Вернуть глобальный" : "Use Global Default"),
-              channel_primary_engine_unconfigured_warning: texts.channel_primary_engine_unconfigured_warning || (isChinese ? "尚未完成 API 配置，翻译时会沿用现有失败处理并尝试备用服务。" : isRussian ? "API ещё не настроен; при ошибке будет использован резервный сервис." : "API setup is incomplete; failures will keep using the existing backup behavior."),
-              language_not_supported_by_channel_engines: texts.language_not_supported_by_channel_engines || (isChinese ? "当前频道主服务和全局备用服务都不支持这个语言组合" : isRussian ? "Текущая основная и глобальная резервная службы не поддерживают эту языковую пару" : "Neither the channel primary nor global backup provider supports this language pair"),
-              primary_engine_section_title: texts.primary_engine_section_title || (isChinese ? "主服务商设置" : isRussian ? "Настройки основного сервиса" : "Primary Provider Settings"),
-              section_message_language_title: texts.section_message_language_title || (isChinese ? "发送与接收语言" : isRussian ? "Языки отправки и получения" : "Sent and Received Languages"),
-              section_sent_language_title: texts.section_sent_language_title || (isChinese ? "发送消息" : isRussian ? "Исходящие сообщения" : "Sent Messages"),
-              section_received_language_title: texts.section_received_language_title || (isChinese ? "收到消息" : isRussian ? "Входящие сообщения" : "Received Messages"),
-              section_display_message_title: texts.section_display_message_title || (isChinese ? "消息显示" : isRussian ? "Отображение сообщений" : "Message Display"),
-              protection_section_title: texts.protection_section_title || (isChinese ? "保护规则" : isRussian ? "Правила защиты" : "Protection Rules"),
-              received_auto_translate_scope_title: texts.received_auto_translate_scope_title || (isChinese ? "自动翻译模式" : isRussian ? "Диапазон автоперевода" : "Auto-translate range"),
-              received_auto_translate_scope_hint: texts.received_auto_translate_scope_hint || (isChinese ? "只翻译新消息，或连当前已加载消息一起翻译。" : isRussian ? "Выберите: переводить только новые сообщения или также уже загруженные на экран." : "Translate only new messages, or include the messages already loaded on screen."),
-              received_auto_translate_scope_new_only: texts.received_auto_translate_scope_new_only || (isChinese ? "只翻译新消息" : isRussian ? "Только новые сообщения (рекомендуется)" : "Only new messages (Recommended)"),
-              received_auto_translate_scope_loaded_messages: texts.received_auto_translate_scope_loaded_messages || (isChinese ? "当前已加载消息" : isRussian ? "Переводить уже загруженные сообщения" : "Translate currently loaded messages"),
-              received_auto_translate_loaded_window_title: texts.received_auto_translate_loaded_window_title || (isChinese ? "已加载消息的时间范围" : isRussian ? "Временной диапазон загруженных сообщений" : "Loaded message time range"),
-              received_auto_translate_loaded_window_hint: texts.received_auto_translate_loaded_window_hint || (isChinese ? "只处理这个时间范围内的已加载消息。" : isRussian ? "Переводить только загруженные сообщения в этом диапазоне времени." : "Only translate loaded messages inside this time range."),
-              received_auto_translate_loaded_window_15m: texts.received_auto_translate_loaded_window_15m || (isChinese ? "15分钟" : isRussian ? "15 мин" : "15 min"),
-              received_auto_translate_loaded_window_1h: texts.received_auto_translate_loaded_window_1h || (isChinese ? "1小时" : isRussian ? "1 час" : "1 hour"),
-              received_auto_translate_loaded_window_6h: texts.received_auto_translate_loaded_window_6h || (isChinese ? "6小时" : isRussian ? "6 часов" : "6 hours"),
-              received_auto_translate_loaded_window_24h: texts.received_auto_translate_loaded_window_24h || (isChinese ? "24小时" : isRussian ? "24 часа" : "24 hours"),
-              received_auto_translate_loaded_window_all: texts.received_auto_translate_loaded_window_all || (isChinese ? "全部已加载（高风险）" : isRussian ? "Все загруженные (риск)" : "All loaded (High risk)"),
-              received_auto_translate_scope_new_only_desc: texts.received_auto_translate_scope_new_only_desc || (isChinese ? "只处理开启后出现的新消息，滚动和历史记录最稳定。" : isRussian ? "Переводит только новые сообщения после включения; самый стабильный режим." : "Only translate messages that appear after enabling; safest for scrolling."),
-              received_auto_translate_scope_loaded_messages_desc: texts.received_auto_translate_scope_loaded_messages_desc || (isChinese ? "会回扫当前屏幕已加载消息，适合临时看历史，但会限制数量并在滚动时暂停。" : isRussian ? "Сканирует уже загруженные сообщения; лимитируется и ставится на паузу при прокрутке." : "Backfills currently loaded messages; capped and paused while scrolling."),
-              received_auto_translate_loaded_range_mode_title: texts.received_auto_translate_loaded_range_mode_title || (isChinese ? "已加载消息范围方式" : isRussian ? "Способ ограничения" : "Loaded message range mode"),
-              received_auto_translate_loaded_range_mode_count: texts.received_auto_translate_loaded_range_mode_count || (isChinese ? "按数量" : isRussian ? "По количеству" : "By count"),
-              received_auto_translate_loaded_range_mode_time: texts.received_auto_translate_loaded_range_mode_time || (isChinese ? "按时间" : isRussian ? "По времени" : "By time"),
-              received_auto_translate_loaded_warning: texts.received_auto_translate_loaded_warning || (isChinese ? "会翻译当前屏幕已加载的消息；每批按数量限制，向上滚动时可继续处理新加载的历史消息。" : isRussian ? "Чем длиннее диапазон, тем больше скачков высоты. Плагин ограничивает очередь, обновляет пакетами и ставит работу на паузу при прокрутке." : "Longer ranges can cause more height changes. The plugin caps the queue, rerenders in batches, and pauses while you scroll."),
-              received_auto_translate_loaded_limit_title: texts.received_auto_translate_loaded_limit_title || (isChinese ? "每批最多翻译已加载消息" : isRussian ? "Максимум уже загруженных сообщений" : "Max loaded messages per pass"),
-              received_auto_translate_loaded_limit_hint: texts.received_auto_translate_loaded_limit_hint || (isChinese ? "建议 25 或 50，最大 100。AI 服务商会优先按该数量批量请求，失败时自动拆包补翻。" : isRussian ? "Рекомендуется 25 или 50. Чем больше, тем выше риск скачков." : "25 or 50 is recommended; max 100. AI providers try this batch size first and split/fallback if needed."),
-              received_auto_translate_loaded_pause_scroll: texts.received_auto_translate_loaded_pause_scroll || (isChinese ? "拖动滚动条/阅读历史时暂停已加载消息翻译" : isRussian ? "Пауза перевода загруженных сообщений при прокрутке" : "Pause loaded-message translation while scrolling")
-            }), texts.show_secret_label || (texts.show_secret_label = isChinese ? "显示密钥" : isRussian ? "Показать ключ" : "Show secret"), texts.hide_secret_label || (texts.hide_secret_label = isChinese ? "隐藏密钥" : isRussian ? "Скрыть ключ" : "Hide secret"), texts[key] || key;
+            return getCustomTextValue(key, this.isChineseUiLanguage(), this.isRussianUiLanguage());
           }
           getGeneralSettingLabel(key) {
             let isChinese = this.isChineseUiLanguage(), isRussian = this.isRussianUiLanguage(), labels = isChinese ? {
@@ -8971,1028 +10025,7 @@ ${sample.text}`
             return `https://translate.google.com/#${BDFDB.LanguageUtils.languages[input] ? input : "auto"}/${output}/${encodeURIComponent(text)}`;
           }
           setLabelsByLanguage() {
-            switch (this.getUiLanguageId()) {
-              case "bg":
-                return {
-                  backup_engine: "Резервен-Преводач",
-                  backup_engine_warning: "Ще използва Резервен-Преводач",
-                  context_messagetranslateoption: "Превод на съобщението",
-                  context_messageuntranslateoption: "Превод на съобщението",
-                  context_translator: "Търсене превод",
-                  detect_language: "Разпознаване на езика",
-                  error_dailylimit: "Дневният лимит на заявките е достигнат.",
-                  error_hourlylimit: "Почасовият лимит на заявките е достигнат.",
-                  error_keyoutdated: "API-ключът е остарял.",
-                  error_monthlylimit: "Месечният лимит на заявките е достигнат.",
-                  error_serverdown: "Сървърът за превод може да е офлайн.",
-                  exception_text: "Думите, започващи с {{var0}}, ще бъдат игнорирани",
-                  general_sendOriginalMessage: "Също така изпраща оригиналното съобщение, когато превежда вашето изпратено съобщение",
-                  general_showOriginalMessage: "Също така показва оригиналното съобщение при превод на получено съобщение",
-                  language_choice_input_received: "Език на въвеждане в получените съобщения",
-                  language_choice_input_sent: "Език на въвеждане в изпратените от вас съобщения",
-                  language_choice_output_received: "Изходен език в получените съобщения",
-                  language_choice_output_sent: "Изходен език в изпратените ви съобщения",
-                  language_selection_channel: "Изборът на език ще бъде променен специално за този канал",
-                  language_selection_global: "Изборът на език ще бъде променен за всички сървъри",
-                  language_selection_server: "Изборът на език ще бъде променен специално за този сървър",
-                  popout_translateoption: "Превод",
-                  popout_untranslateoption: "Непревод",
-                  prefixes_disable_text: "Префикси, които деактивират превода на съобщението",
-                  prefixes_enable_text: "Префикси, които активират превод със специфичен език (напр. $fr, $de, $jp)",
-                  toast_translating: "Превод",
-                  toast_translating_failed: "Преводът не бе успешен",
-                  toast_translating_tryanother: "Опитайте друг преводач",
-                  translate_your_message: "Преведете вашите съобщения преди изпращане",
-                  translated_watermark: "преведено",
-                  translator_engine: "Преводач"
-                };
-              case "cs":
-                return {
-                  backup_engine: "Backup-Překladatel",
-                  backup_engine_warning: "Použije Backup-Překladatel",
-                  context_messagetranslateoption: "Přeložit zprávu",
-                  context_messageuntranslateoption: "Přeložit zprávu",
-                  context_translator: "Hledat Překlad",
-                  detect_language: "Rozpoznat jazyk",
-                  error_dailylimit: "Denní limit požadavků byl dosažen.",
-                  error_hourlylimit: "Bylo dosaženo limitu hodinového požadavku.",
-                  error_keyoutdated: "Klíč API je zastaralý.",
-                  error_monthlylimit: "Byl dosažen limit měsíčních požadavků.",
-                  error_serverdown: "Překladový server může být offline.",
-                  exception_text: "Slova začínající na {{var0}} budou ignorována",
-                  general_sendOriginalMessage: "Při překladu odeslané zprávy také odešle původní zprávu",
-                  general_showOriginalMessage: "Také zobrazuje původní zprávu při překladu přijaté zprávy",
-                  language_choice_input_received: "Vstupní jazyk do přijatých zpráv",
-                  language_choice_input_sent: "Zadejte jazyk do odeslaných zpráv",
-                  language_choice_output_received: "Výstupní jazyk v přijatých zprávách",
-                  language_choice_output_sent: "Jazyk výstupu ve vašich odeslaných zprávách",
-                  language_selection_channel: "Výběr jazyka bude změněn speciálně pro tento kanál",
-                  language_selection_global: "Výběr jazyka se změní pro všechny servery",
-                  language_selection_server: "Výběr jazyka bude změněn speciálně pro tento server",
-                  popout_translateoption: "Přeložit",
-                  popout_untranslateoption: "Nepřeložit",
-                  prefixes_disable_text: "Předpony, které deaktivují překlad zprávy",
-                  prefixes_enable_text: "Předpony, které aktivují překlad s konkrétním jazykem (např. $fr, $de, $jp)",
-                  toast_translating: "Překládání",
-                  toast_translating_failed: "Překlad se nezdařil",
-                  toast_translating_tryanother: "Zkuste jiný překladač",
-                  translate_your_message: "Před odesláním si zprávy přeložte",
-                  translated_watermark: "přeloženo",
-                  translator_engine: "Překladatel"
-                };
-              case "da":
-                return {
-                  backup_engine: "Backup-Oversætter",
-                  backup_engine_warning: "Vil bruge Backup-Oversætter",
-                  context_messagetranslateoption: "Oversæt besked",
-                  context_messageuntranslateoption: "Ikke-oversat besked",
-                  context_translator: "Søg oversættelse",
-                  detect_language: "Find sprog",
-                  error_dailylimit: "Daglig anmodningsgrænse nået.",
-                  error_hourlylimit: "Timegrænsen for anmodning er nået.",
-                  error_keyoutdated: "API-nøgle forældet.",
-                  error_monthlylimit: "Månedlig anmodningsgrænse nået.",
-                  error_serverdown: "Oversættelsesserveren er muligvis offline.",
-                  exception_text: "Ord, der begynder med {{var0}}, ignoreres",
-                  general_sendOriginalMessage: "Sender også den originale besked, når du oversætter din sendte besked",
-                  general_showOriginalMessage: "Viser også den originale besked, når du oversætter modtaget besked",
-                  language_choice_input_received: "Inputsprog i modtagne beskeder",
-                  language_choice_input_sent: "Indtast sprog i dine sendte beskeder",
-                  language_choice_output_received: "Outputsprog i modtagne beskeder",
-                  language_choice_output_sent: "Outputsprog i dine sendte beskeder",
-                  language_selection_channel: "Valg af sprog vil blive ændret specifikt for denne kanal",
-                  language_selection_global: "Valg af sprog vil blive ændret for alle servere",
-                  language_selection_server: "Sprogvalg vil blive ændret specifikt for denne server",
-                  popout_translateoption: "Oversætte",
-                  popout_untranslateoption: "Untranslate",
-                  prefixes_disable_text: "Præfikser, der deaktiverer oversættelse af meddelelse",
-                  prefixes_enable_text: "Præfikser, der aktiverer oversættelse med specifikt sprog (f.eks. $fr, $de, $jp)",
-                  toast_translating: "Oversætter",
-                  toast_translating_failed: "Kunne ikke oversætte",
-                  toast_translating_tryanother: "Prøv en anden oversætter",
-                  translate_your_message: "Oversæt dine beskeder før afsendelse",
-                  translated_watermark: "oversat",
-                  translator_engine: "Oversætter"
-                };
-              case "de":
-                return {
-                  backup_engine: "Backup-Übersetzer",
-                  backup_engine_warning: "Wird Backup-Übersetzer verwenden",
-                  context_messagetranslateoption: "Nachricht übersetzen",
-                  context_messageuntranslateoption: "Nachricht unübersetzen",
-                  context_translator: "Übersetzung suchen",
-                  detect_language: "Sprache erkennen",
-                  error_dailylimit: "Tägliches Anforderungslimit erreicht.",
-                  error_hourlylimit: "Stündliches Anforderungslimit erreicht.",
-                  error_keyoutdated: "API-Schlüssel veraltet.",
-                  error_monthlylimit: "Monatliches Anforderungslimit erreicht.",
-                  error_serverdown: "Der Übersetzungsserver ist möglicherweise offline.",
-                  exception_text: "Wörter, die mit {{var0}} beginnen, werden ignoriert",
-                  general_sendOriginalMessage: "Sendet auch die ursprüngliche Nachricht, wenn die gesendete Nachricht übersetzt wird",
-                  general_showOriginalMessage: "Zeigt auch die ursprüngliche Nachricht an, wenn eine empfangene Nachricht übersetzt wird",
-                  language_choice_input_received: "Eingabesprache in empfangenen Nachrichten",
-                  language_choice_input_sent: "Eingabesprache in gesendeten Nachrichten",
-                  language_choice_output_received: "Ausgabesprache in empfangenen Nachrichten",
-                  language_choice_output_sent: "Ausgabesprache in gesendeten Nachrichten",
-                  language_selection_channel: "Die Sprachauswahl wird speziell für diesen Kanal geändert",
-                  language_selection_global: "Die Sprachauswahl wird für alle Server geändert",
-                  language_selection_server: "Die Sprachauswahl wird speziell für diesen Server geändert",
-                  popout_translateoption: "Übersetzen",
-                  popout_untranslateoption: "Unübersetzen",
-                  prefixes_disable_text: "Präfixe, die die Übersetzung der Nachricht deaktivieren",
-                  prefixes_enable_text: "Präfixe, die die Übersetzung mit einer bestimmten Sprache aktivieren (z.B. $fr, $de, $jp)",
-                  toast_translating: "Übersetzen",
-                  toast_translating_failed: "Übersetzung fehlgeschlagen",
-                  toast_translating_tryanother: "Versuch einen anderen Übersetzer",
-                  translate_your_message: "Übersetzt Nachrichten vor dem Senden",
-                  translated_watermark: "übersetzt",
-                  translator_engine: "Übersetzer"
-                };
-              case "el":
-                return {
-                  backup_engine: "Μεταφράστης-Αντίγραφο ασφαλείας",
-                  backup_engine_warning: "Θα χρησιμοποιηθεί Μεταφράστης-Αντίγραφο ασφαλείας",
-                  context_messagetranslateoption: "Μετάφραση μηνύματος",
-                  context_messageuntranslateoption: "Αναίρεση μετάφρασης μηνύματος",
-                  context_translator: "Αναζήτηση μετάφρασης",
-                  detect_language: "Εντοπισμός γλώσσας",
-                  error_dailylimit: "Συμπληρώθηκε το ημερήσιο όριο αιτημάτων.",
-                  error_hourlylimit: "Συμπληρώθηκε το ωριαίο όριο αιτημάτων.",
-                  error_keyoutdated: "Το κλειδί API δεν είναι ενημερωμένο.",
-                  error_monthlylimit: "Συμπληρώθηκε το μηνιαίο όριο αιτημάτων.",
-                  error_serverdown: "Ο διακομιστής μετάφρασης ενδέχεται να είναι εκτός σύνδεσης.",
-                  exception_text: "Οι λέξεις θα αγνοηθούν που ξεκινούν με {{var0}}",
-                  general_sendOriginalMessage: "Αποστολή αρχικού Μηνύματος με τη μετάφραση απεσταλμένου μηνύματος",
-                  general_showOriginalMessage: "Εμφάνιση αρχικού Μηνύματος με τη μετάφραση ενός ληφθέντος μηνύματος",
-                  language_choice_input_received: "Γλώσσα εισαγωγής στα ληφθέντα μηνύματα",
-                  language_choice_input_sent: "Γλώσσα εισαγωγής στα απεσταλμένα μηνύματά σας",
-                  language_choice_output_received: "Γλώσσα εξαγωγής στα ληφθέντα μηνύματα",
-                  language_choice_output_sent: "Γλώσσα εξαγωγής στα απεσταλμένα μηνύματά σας",
-                  language_selection_channel: "Η επιλογή γλώσσας θα αλλάξει ειδικά για αυτό το κανάλι",
-                  language_selection_global: "Η Επιλογή Γλώσσας θα αλλάξει για όλους τους Διακομιστές",
-                  language_selection_server: "Η επιλογή γλώσσας θα αλλάξει ειδικά για αυτόν τον διακομιστή",
-                  popout_translateoption: "Μετάφραση",
-                  popout_untranslateoption: "Αναίρεση μετάφρασης",
-                  prefixes_disable_text: "Προθέσεις που απενεργοποιούν την μετάφραση του μηνύματος",
-                  prefixes_enable_text: "Προθέσεις που ενεργοποιούν την μετάφραση με συγκεκριμένη γλώσσα (π.χ. $fr, $de, $jp)",
-                  toast_translating: "Μετάφραση",
-                  toast_translating_failed: "Αποτυχία μετάφρασης",
-                  toast_translating_tryanother: "Δοκιμάστε έναν άλλο Μεταφραστή",
-                  translate_your_message: "Μεταφράστε τα Μηνύματά σας πριν την αποστολή",
-                  translated_watermark: "μεταφρασμένο",
-                  translator_engine: "Μεταφράστης"
-                };
-              case "es":
-                return {
-                  backup_engine: "Backup-Traductor",
-                  backup_engine_warning: "Utilizará Backup-Traductor",
-                  context_messagetranslateoption: "Traducir mensaje",
-                  context_messageuntranslateoption: "Mensaje sin traducir",
-                  context_translator: "Buscar traducción",
-                  detect_language: "Detectar idioma",
-                  error_dailylimit: "Se alcanzó el límite de solicitudes diarias.",
-                  error_hourlylimit: "Se alcanzó el límite de solicitudes por hora.",
-                  error_keyoutdated: "API-Key obsoleta.",
-                  error_monthlylimit: "Se alcanzó el límite de solicitudes mensuales.",
-                  error_serverdown: "El servidor de traducción puede estar fuera de línea.",
-                  exception_text: "Las palabras que comienzan con {{var0}} serán ignoradas",
-                  general_sendOriginalMessage: "También envía el mensaje original al traducir su mensaje enviado",
-                  general_showOriginalMessage: "También muestra el mensaje original al traducir un mensaje recibido",
-                  language_choice_input_received: "Idioma de entrada en los mensajes recibidos",
-                  language_choice_input_sent: "Idioma de entrada en sus mensajes enviados",
-                  language_choice_output_received: "Idioma de salida en los mensajes recibidos",
-                  language_choice_output_sent: "Idioma de salida en sus mensajes enviados",
-                  language_selection_channel: "La selección de idioma se cambiará específicamente para este canal",
-                  language_selection_global: "La selección de idioma se cambiará para todos los servidores",
-                  language_selection_server: "La selección de idioma se cambiará específicamente para este servidor",
-                  popout_translateoption: "Traducir",
-                  popout_untranslateoption: "No traducir",
-                  prefixes_disable_text: "Prefijos que desactivan la traducción del mensaje",
-                  prefixes_enable_text: "Prefijos que activan la traducción con un idioma específico (por ejemplo, $fr, $de, $jp)",
-                  toast_translating: "Traductorio",
-                  toast_translating_failed: "No se pudo traducir",
-                  toast_translating_tryanother: "Prueba con otro traductor",
-                  translate_your_message: "Traduce tus mensajes antes de enviarlos",
-                  translated_watermark: "traducido",
-                  translator_engine: "Traductor"
-                };
-              case "es-419":
-                return {
-                  backup_engine: "Traspaso de respaldo",
-                  backup_engine_warning: "Utilizará el traductor de respaldo",
-                  context_messagetranslateoption: "Mensaje de traducir",
-                  context_messageuntranslateoption: "Mensaje no traducido",
-                  context_translator: "Traducción de búsqueda",
-                  detect_language: "Detectar lenguaje",
-                  error_dailylimit: "Límite de solicitud diaria alcanzado.",
-                  error_hourlylimit: "Límite de solicitud por hora alcanzado.",
-                  error_keyoutdated: "Api-key anticuado.",
-                  error_monthlylimit: "Límite de solicitud mensual alcanzado.",
-                  error_serverdown: "El servidor de traducción puede estar fuera de línea.",
-                  exception_text: "Las palabras que comienzan con {{var0}} se ignorarán",
-                  general_sendOriginalMessage: "También envía el mensaje original al traducir su mensaje enviado",
-                  general_showOriginalMessage: "También muestra el mensaje original al traducir un mensaje recibido",
-                  language_choice_input_received: "Idioma de entrada en mensajes recibidos",
-                  language_choice_input_sent: "Idioma de entrada en sus mensajes enviados",
-                  language_choice_output_received: "Lenguaje de salida en mensajes recibidos",
-                  language_choice_output_sent: "Lenguaje de salida en sus mensajes enviados",
-                  language_selection_channel: "La selección del idioma se cambiará específicamente para este canal",
-                  language_selection_global: "La selección del idioma se cambiará para todos los servidores",
-                  language_selection_server: "La selección del idioma se cambiará específicamente para este servidor",
-                  popout_translateoption: "Traducir",
-                  popout_untranslateoption: "No traducido",
-                  prefixes_disable_text: "Prefijos que deshabilitan la traducción del mensaje",
-                  prefixes_enable_text: "Prefijos que habilitan la traducción con un lenguaje específico (por ejemplo, $fr, $de, $jp)",
-                  toast_translating: "Traductorio",
-                  toast_translating_failed: "No se pudo traducir",
-                  toast_translating_tryanother: "Prueba otro traductor",
-                  translate_your_message: "Traducir sus mensajes antes de enviar",
-                  translated_watermark: "traducido",
-                  translator_engine: "Traductor"
-                };
-              case "fi":
-                return {
-                  backup_engine: "Backup-Kääntäjä",
-                  backup_engine_warning: "Käyttää Backup-Kääntäjä",
-                  context_messagetranslateoption: "Käännä viesti",
-                  context_messageuntranslateoption: "Käännä viesti",
-                  context_translator: "Hae käännöstä",
-                  detect_language: "Tunnista kieli",
-                  error_dailylimit: "Päivittäinen pyyntöraja saavutettu.",
-                  error_hourlylimit: "Tuntikohtainen pyyntöraja saavutettu.",
-                  error_keyoutdated: "API-avain vanhentunut.",
-                  error_monthlylimit: "Kuukauden pyyntöraja saavutettu.",
-                  error_serverdown: "Käännöspalvelin saattaa olla offline-tilassa.",
-                  exception_text: "{{var0}} alkavat sanat ohitetaan",
-                  general_sendOriginalMessage: "Lähettää myös alkuperäisen viestin kääntäessään lähettämääsi viestiä",
-                  general_showOriginalMessage: "Näyttää myös alkuperäisen viestin käännettäessä vastaanotettua viestiä",
-                  language_choice_input_received: "Syöttökieli vastaanotetuissa viesteissä",
-                  language_choice_input_sent: "Syötä kieli lähettämiisi viesteihin",
-                  language_choice_output_received: "Tulostuskieli vastaanotetuissa viesteissä",
-                  language_choice_output_sent: "Lähetyskieli lähetetyissä viesteissä",
-                  language_selection_channel: "Kielen valintaa muutetaan erityisesti tätä kanavaa varten",
-                  language_selection_global: "Kielen valintaa muutetaan kaikille palvelimille",
-                  language_selection_server: "Kielen valintaa muutetaan erityisesti tätä palvelinta varten",
-                  popout_translateoption: "Kääntää",
-                  popout_untranslateoption: "Käännä",
-                  prefixes_disable_text: "Etuliitteet, jotka poistavat viestin käännöksen käytöstä",
-                  prefixes_enable_text: "Etuliitteet, jotka mahdollistavat käännöksen tietyllä kielellä (esim. $fr, $de, $jp)",
-                  toast_translating: "Kääntäminen",
-                  toast_translating_failed: "Käännös epäonnistui",
-                  toast_translating_tryanother: "Kokeile toista kääntäjää",
-                  translate_your_message: "Käännä viestisi ennen lähettämistä",
-                  translated_watermark: "käännetty",
-                  translator_engine: "Kääntäjä"
-                };
-              case "fr":
-                return {
-                  backup_engine: "Backup-Traducteur",
-                  backup_engine_warning: "Utilisera Backup-Traducteur",
-                  context_messagetranslateoption: "Traduire le message",
-                  context_messageuntranslateoption: "Message non traduit",
-                  context_translator: "Recherche de traduction",
-                  detect_language: "Détecter la langue",
-                  error_dailylimit: "Limite quotidienne de requêtes atteinte.",
-                  error_hourlylimit: "Limite horaire de demandes atteinte.",
-                  error_keyoutdated: "Clé API obsolète.",
-                  error_monthlylimit: "Limite mensuelle de demandes atteinte.",
-                  error_serverdown: "Le serveur de traduction est peut-être hors ligne.",
-                  exception_text: "Les mots commençant par {{var0}} seront ignorés",
-                  general_sendOriginalMessage: "Envoie également le message d'origine lors de la traduction de votre message envoyé",
-                  general_showOriginalMessage: "Affiche également le message d'origine lors de la traduction d'un message reçu",
-                  language_choice_input_received: "Langue d'entrée dans les messages reçus",
-                  language_choice_input_sent: "Langue d'entrée dans vos messages envoyés",
-                  language_choice_output_received: "Langue de sortie dans les messages reçus",
-                  language_choice_output_sent: "Langue de sortie dans vos messages envoyés",
-                  language_selection_channel: "La sélection de la langue sera modifiée spécifiquement pour ce canal",
-                  language_selection_global: "La sélection de la langue sera modifiée pour tous les serveurs",
-                  language_selection_server: "La sélection de la langue sera modifiée spécifiquement pour ce serveur",
-                  popout_translateoption: "Traduire",
-                  popout_untranslateoption: "Non traduit",
-                  prefixes_disable_text: "Préfixes qui désactivent la traduction du message",
-                  prefixes_enable_text: "Préfixes qui activent la traduction avec un langage spécifique (par exemple, $fr, $de, $jp)",
-                  toast_translating: "Traduction en cours",
-                  toast_translating_failed: "Échec de la traduction",
-                  toast_translating_tryanother: "Essayez un autre traducteur",
-                  translate_your_message: "Traduisez vos messages avant de les envoyer",
-                  translated_watermark: "traduit",
-                  translator_engine: "Traducteur"
-                };
-              case "hi":
-                return {
-                  backup_engine: "बैकअप-अनुवादक",
-                  backup_engine_warning: "बैकअप-अनुवादक का उपयोग करेंगे",
-                  context_messagetranslateoption: "संदेश का अनुवाद करें",
-                  context_messageuntranslateoption: "संदेश का अनुवाद न करें",
-                  context_translator: "अनुवाद खोजें",
-                  detect_language: "भाषा की जांच करो",
-                  error_dailylimit: "दैनिक अनुरोध सीमा पूरी हो गई है।",
-                  error_hourlylimit: "घंटे के अनुरोध की सीमा पूरी हो गई है.",
-                  error_keyoutdated: "एपीआई-कुंजी पुरानी हो चुकी है।",
-                  error_monthlylimit: "मासिक अनुरोध सीमा पूरी हो गई है।",
-                  error_serverdown: "अनुवाद सर्वर ऑफ़लाइन हो सकता है।",
-                  exception_text: "{{var0}} से शुरू होने वाले शब्दों पर ध्यान नहीं दिया जाएगा",
-                  general_sendOriginalMessage: "आपके भेजे गए संदेश का अनुवाद करते समय मूल संदेश भी भेजता है",
-                  general_showOriginalMessage: "प्राप्त संदेश का अनुवाद करते समय मूल संदेश भी दिखाता है",
-                  language_choice_input_received: "प्राप्त संदेशों में इनपुट भाषा",
-                  language_choice_input_sent: "आपके भेजे गए संदेशों में इनपुट भाषा",
-                  language_choice_output_received: "प्राप्त संदेशों में आउटपुट भाषा",
-                  language_choice_output_sent: "आपके भेजे गए संदेशों में आउटपुट भाषा",
-                  language_selection_channel: "इस चैनल के लिए भाषा चयन विशेष रूप से बदला जाएगा",
-                  language_selection_global: "सभी सर्वरों के लिए भाषा चयन बदल दिया जाएगा",
-                  language_selection_server: "इस सर्वर के लिए भाषा चयन विशेष रूप से बदल दिया जाएगा",
-                  popout_translateoption: "अनुवाद करना",
-                  popout_untranslateoption: "अनुवाद न करें",
-                  prefixes_disable_text: "उपसर्ग जो संदेश के अनुवाद को अक्षम करते हैं",
-                  prefixes_enable_text: "उपसर्ग जो विशिष्ट भाषा के साथ अनुवाद को सक्षम करते हैं (जैसे $fr, $de, $jp)",
-                  toast_translating: "अनुवाद",
-                  toast_translating_failed: "अनुवाद करने में विफल",
-                  toast_translating_tryanother: "दूसरे अनुवादक का प्रयास करें",
-                  translate_your_message: "भेजने से पहले अपने संदेशों का अनुवाद करें",
-                  translated_watermark: "अनुवाद",
-                  translator_engine: "अनुवादक"
-                };
-              case "hr":
-                return {
-                  backup_engine: "Rezervni-Prevoditelj",
-                  backup_engine_warning: "Koristit će se Rezervni-Prevoditelj",
-                  context_messagetranslateoption: "Prevedi poruku",
-                  context_messageuntranslateoption: "Prevedi poruku",
-                  context_translator: "Pretraži prijevod",
-                  detect_language: "Prepoznaj jezik",
-                  error_dailylimit: "Dosegnuto je dnevno ograničenje zahtjeva.",
-                  error_hourlylimit: "Dosegnuto je ograničenje zahtjeva po satu.",
-                  error_keyoutdated: "API-ključ zastario.",
-                  error_monthlylimit: "Dosegnuto je mjesečno ograničenje zahtjeva.",
-                  error_serverdown: "Translation Server možda je offline.",
-                  exception_text: "Riječi koje počinju s {{var0}} bit će zanemarene",
-                  general_sendOriginalMessage: "Također šalje izvornu poruku prilikom prijevoda vaše poslane poruke",
-                  general_showOriginalMessage: "Također prikazuje izvornu poruku prilikom prijevoda primljene poruke",
-                  language_choice_input_received: "Jezik unosa u primljenim porukama",
-                  language_choice_input_sent: "Jezik unosa u vaše poslane poruke",
-                  language_choice_output_received: "Izlazni jezik u primljenim porukama",
-                  language_choice_output_sent: "Izlazni jezik u vašim poslanim porukama",
-                  language_selection_channel: "Odabir jezika bit će promijenjen posebno za ovaj kanal",
-                  language_selection_global: "Odabir jezika bit će promijenjen za sve poslužitelje",
-                  language_selection_server: "Odabir jezika bit će promijenjen posebno za ovaj poslužitelj",
-                  popout_translateoption: "Prevedi",
-                  popout_untranslateoption: "Neprevedi",
-                  prefixes_disable_text: "Prefiksi koji onemogućuju prijevod poruke",
-                  prefixes_enable_text: "Prefiksi koji omogućuju prijevod određenim jezikom (npr. $fr, $de, $jp)",
-                  toast_translating: "Prevođenje",
-                  toast_translating_failed: "Prijevod nije uspio",
-                  toast_translating_tryanother: "Pokušajte s drugim prevoditeljem",
-                  translate_your_message: "Prevedite svoje poruke prije slanja",
-                  translated_watermark: "prevedeno",
-                  translator_engine: "Prevoditelj"
-                };
-              case "hu":
-                return {
-                  backup_engine: "Backup-Fordító",
-                  backup_engine_warning: "A Backup-Fordító programot fogja használni",
-                  context_messagetranslateoption: "Üzenet lefordítása",
-                  context_messageuntranslateoption: "Az üzenet lefordítása",
-                  context_translator: "Keresés a fordításban",
-                  detect_language: "Nyelvfelismerés",
-                  error_dailylimit: "Elérte a napi igénylési korlátot.",
-                  error_hourlylimit: "Elérte az óránkénti igénylési korlátot.",
-                  error_keyoutdated: "API-kulcs elavult.",
-                  error_monthlylimit: "Elérte a havi igénylési limitet.",
-                  error_serverdown: "Lehet, hogy a Fordítószerver offline állapotban van.",
-                  exception_text: "A(z) {{var0}} kezdetű szavak figyelmen kívül maradnak",
-                  general_sendOriginalMessage: "Az eredeti üzenetet is elküldi az elküldött üzenet fordítása során",
-                  general_showOriginalMessage: "A fogadott üzenet lefordításakor az eredeti üzenetet is megjeleníti",
-                  language_choice_input_received: "Beviteli nyelv a fogadott üzenetekben",
-                  language_choice_input_sent: "Írja be a nyelvet az elküldött üzenetekben",
-                  language_choice_output_received: "Kimeneti nyelv a fogadott üzenetekben",
-                  language_choice_output_sent: "Kimeneti nyelv az elküldött üzenetekben",
-                  language_selection_channel: "A nyelvválasztás kifejezetten ehhez a csatornához fog módosulni",
-                  language_selection_global: "A nyelv kiválasztása minden szerveren módosul",
-                  language_selection_server: "A nyelvválasztás kifejezetten ehhez a szerverhez módosul",
-                  popout_translateoption: "fordít",
-                  popout_untranslateoption: "Fordítás le",
-                  prefixes_disable_text: "Az üzenet fordítását letiltó előtagok",
-                  prefixes_enable_text: "Előtagok, amelyek lehetővé teszik a fordítás meghatározott nyelvvel (például $fr, $de, $jp)",
-                  toast_translating: "Fordítás",
-                  toast_translating_failed: "Nem sikerült lefordítani",
-                  toast_translating_tryanother: "Próbálkozzon másik fordítóval",
-                  translate_your_message: "Küldés előtt fordítsa le az üzeneteit",
-                  translated_watermark: "lefordított",
-                  translator_engine: "Fordító"
-                };
-              case "it":
-                return {
-                  backup_engine: "Backup-Traduttore",
-                  backup_engine_warning: "Utilizzerà Backup-Traduttore",
-                  context_messagetranslateoption: "Traduci messaggio",
-                  context_messageuntranslateoption: "Annulla traduzione messaggio",
-                  context_translator: "Cerca traduzione",
-                  detect_language: "Rileva lingua",
-                  error_dailylimit: "Limite di richieste giornaliere raggiunto.",
-                  error_hourlylimit: "Limite di richiesta oraria raggiunto.",
-                  error_keyoutdated: "Chiave API obsoleta.",
-                  error_monthlylimit: "Limite di richieste mensili raggiunto.",
-                  error_serverdown: "Il server di traduzione potrebbe essere offline.",
-                  exception_text: "Le parole che iniziano con {{var0}} verranno ignorate",
-                  general_sendOriginalMessage: "Invia anche il messaggio originale durante la traduzione del messaggio inviato",
-                  general_showOriginalMessage: "Mostra anche il messaggio originale durante la traduzione di un messaggio ricevuto",
-                  language_choice_input_received: "Lingua di input nei messaggi ricevuti",
-                  language_choice_input_sent: "Inserisci la lingua nei tuoi messaggi inviati",
-                  language_choice_output_received: "Lingua di output nei messaggi ricevuti",
-                  language_choice_output_sent: "Lingua di output nei messaggi inviati",
-                  language_selection_channel: "La selezione della lingua verrà modificata in modo specifico per questo canale",
-                  language_selection_global: "La selezione della lingua verrà modificata per tutti i server",
-                  language_selection_server: "La selezione della lingua verrà modificata in modo specifico per questo server",
-                  popout_translateoption: "Tradurre",
-                  popout_untranslateoption: "Non tradurre",
-                  prefixes_disable_text: "Parole che iniziano con {{var0}} verranno ignorate",
-                  prefixes_enable_text: "Parole che attivano la traduzione con un linguaggio specifico (ad esempio, $fr, $de, $jp)",
-                  toast_translating: "Tradurre",
-                  toast_translating_failed: "Impossibile tradurre",
-                  toast_translating_tryanother: "Prova un altro traduttore",
-                  translate_your_message: "Traduci i tuoi messaggi prima di inviarli",
-                  translated_watermark: "tradotto",
-                  translator_engine: "Traduttore"
-                };
-              case "ja":
-                return {
-                  backup_engine: "バックアップ翻訳者",
-                  backup_engine_warning: "バックアップ翻訳者 を使用します",
-                  context_messagetranslateoption: "メッセージの翻訳",
-                  context_messageuntranslateoption: "メッセージの翻訳解除",
-                  context_translator: "翻訳を検索",
-                  detect_language: "言語を検出",
-                  error_dailylimit: "1 日のリクエスト上限に達しました。",
-                  error_hourlylimit: "1 時間あたりのリクエスト制限に達しました。",
-                  error_keyoutdated: "API キーが古くなっています。",
-                  error_monthlylimit: "月間リクエスト制限に達しました。",
-                  error_serverdown: "翻訳サーバーがオフラインになっている可能性があります。",
-                  exception_text: "{{var0}} で始まる単語は無視されます",
-                  general_sendOriginalMessage: "送信したメッセージを翻訳するときに元のメッセージも送信します",
-                  general_showOriginalMessage: "受信したメッセージを翻訳するときに元のメッセージも表示します",
-                  language_choice_input_received: "受信メッセージの入力言語",
-                  language_choice_input_sent: "送信メッセージの入力言語",
-                  language_choice_output_received: "受信メッセージの出力言語",
-                  language_choice_output_sent: "送信メッセージの出力言語",
-                  language_selection_channel: "言語の選択は、このチャンネル専用に変更されます",
-                  language_selection_global: "すべてのサーバーの言語選択が変更されます",
-                  language_selection_server: "言語の選択は、このサーバー専用に変更されます",
-                  popout_translateoption: "翻訳する",
-                  popout_untranslateoption: "翻訳しない",
-                  prefixes_disable_text: "メッセージの翻訳を無効にするプレフィックス",
-                  prefixes_enable_text: "特定の言語で翻訳を可能にするプレフィックス（例：$fr, $de, $jp）",
-                  toast_translating: "翻訳",
-                  toast_translating_failed: "翻訳に失敗しました",
-                  toast_translating_tryanother: "別の翻訳者を試す",
-                  translate_your_message: "送信する前にメッセージを翻訳する",
-                  translated_watermark: "翻訳済み",
-                  translator_engine: "翻訳者"
-                };
-              case "ko":
-                return {
-                  backup_engine: "백업 번역기",
-                  backup_engine_warning: "백업 번역기를 사용합니다",
-                  context_messagetranslateoption: "메시지 번역",
-                  context_messageuntranslateoption: "메시지 번역 취소",
-                  context_translator: "번역 검색",
-                  detect_language: "언어를 감지",
-                  error_dailylimit: "일일 요청 한도에 도달했습니다.",
-                  error_hourlylimit: "시간당 요청 한도에 도달했습니다.",
-                  error_keyoutdated: "API 키가 오래되었습니다.",
-                  error_monthlylimit: "월간 요청 한도에 도달했습니다.",
-                  error_serverdown: "번역 서버가 오프라인일 수 있습니다.",
-                  exception_text: "{{var0}}로 시작하는 단어는 무시됩니다.",
-                  general_sendOriginalMessage: "또한 보낸 메시지를 번역할 때 원본 메시지를 보냅니다.",
-                  general_showOriginalMessage: "또한 수신된 메시지를 번역할 때 원본 메시지를 표시합니다.",
-                  language_choice_input_received: "수신된 메시지의 입력 언어",
-                  language_choice_input_sent: "보낸 메시지의 입력 언어",
-                  language_choice_output_received: "수신된 메시지의 출력 언어",
-                  language_choice_output_sent: "보낸 메시지의 출력 언어",
-                  language_selection_channel: "이 채널에 대해 특별히 언어 선택이 변경됩니다.",
-                  language_selection_global: "모든 서버에 대해 언어 선택이 변경됩니다.",
-                  language_selection_server: "이 서버에 대해 특별히 언어 선택이 변경됩니다.",
-                  popout_translateoption: "옮기다",
-                  popout_untranslateoption: "번역 취소",
-                  prefixes_disable_text: "메시지 변환을 비활성화하는 접두사",
-                  prefixes_enable_text: "특정 언어로 변환을 가능하게하는 접두사 (예: $fr, $de, $jp)",
-                  toast_translating: "번역 중",
-                  toast_translating_failed: "번역하지 못했습니다.",
-                  toast_translating_tryanother: "다른 번역기 시도",
-                  translate_your_message: "보내기 전에 메시지 번역",
-                  translated_watermark: "번역",
-                  translator_engine: "역자"
-                };
-              case "lt":
-                return {
-                  backup_engine: "Backup-Vertėjas",
-                  backup_engine_warning: "Naudos Backup-Vertėjas",
-                  context_messagetranslateoption: "Versti pranešimą",
-                  context_messageuntranslateoption: "Išversti pranešimą",
-                  context_translator: "Paieškos vertimas",
-                  detect_language: "Aptikti kalbą",
-                  error_dailylimit: "Pasiektas dienos užklausų limitas.",
-                  error_hourlylimit: "Pasiektas valandinių užklausų limitas.",
-                  error_keyoutdated: "API raktas pasenęs.",
-                  error_monthlylimit: "Pasiektas mėnesio užklausų limitas.",
-                  error_serverdown: "Vertimo serveris gali būti neprisijungęs.",
-                  exception_text: "Žodžiai, prasidedantys {{var0}}, bus ignoruojami",
-                  general_sendOriginalMessage: "Taip pat siunčia originalų pranešimą verčiant jūsų išsiųstą žinutę",
-                  general_showOriginalMessage: "Taip pat rodomas pradinis pranešimas, kai verčiamas gautas pranešimas",
-                  language_choice_input_received: "Įvesties kalba gautuose pranešimuose",
-                  language_choice_input_sent: "Įveskite kalbą siunčiamuose pranešimuose",
-                  language_choice_output_received: "Išvesties kalba gautuose pranešimuose",
-                  language_choice_output_sent: "Išvesties kalba jūsų išsiųstuose pranešimuose",
-                  language_selection_channel: "Kalbos pasirinkimas bus pakeistas specialiai šiam kanalui",
-                  language_selection_global: "Kalbos pasirinkimas bus pakeistas visiems serveriams",
-                  language_selection_server: "Kalbos pasirinkimas bus pakeistas specialiai šiam serveriui",
-                  popout_translateoption: "Išversti",
-                  popout_untranslateoption: "Neišversti",
-                  prefixes_disable_text: "Priešdėliai, kurie išjungia pranešimo vertimą",
-                  prefixes_enable_text: "Priešdėliai, įgalinantys vertimą su konkrečia kalba (pvz., $fr, $de, $jp)",
-                  toast_translating: "Vertimas",
-                  toast_translating_failed: "Nepavyko išversti",
-                  toast_translating_tryanother: "Išbandykite kitą vertėją",
-                  translate_your_message: "Prieš siųsdami išverskite savo pranešimus",
-                  translated_watermark: "išverstas",
-                  translator_engine: "Vertėjas"
-                };
-              case "nl":
-                return {
-                  backup_engine: "Backup-Vertaler",
-                  backup_engine_warning: "Zal Backup-Vertaler gebruiken",
-                  context_messagetranslateoption: "Bericht vertalen",
-                  context_messageuntranslateoption: "Bericht onvertalen",
-                  context_translator: "Zoek vertaling",
-                  detect_language: "Taal detecteren",
-                  error_dailylimit: "Dagelijkse verzoeklimiet bereikt.",
-                  error_hourlylimit: "Verzoeklimiet per uur bereikt.",
-                  error_keyoutdated: "API-sleutel verouderd.",
-                  error_monthlylimit: "Maandelijkse aanvraaglimiet bereikt.",
-                  error_serverdown: "Vertaalserver is mogelijk offline.",
-                  exception_text: "Woorden die beginnen met {{var0}} worden genegeerd",
-                  general_sendOriginalMessage: "Verzendt ook het originele bericht bij het vertalen van uw verzonden bericht",
-                  general_showOriginalMessage: "Toont ook het originele bericht bij het vertalen van een ontvangen bericht",
-                  language_choice_input_received: "Invoertaal in ontvangen berichten",
-                  language_choice_input_sent: "Invoertaal in uw verzonden berichten",
-                  language_choice_output_received: "Uitvoertaal in ontvangen berichten",
-                  language_choice_output_sent: "Uitvoertaal in uw verzonden berichten",
-                  language_selection_channel: "De taalselectie wordt specifiek voor dit kanaal gewijzigd",
-                  language_selection_global: "Taalkeuze wordt voor alle servers gewijzigd",
-                  language_selection_server: "Taalselectie wordt specifiek voor deze server gewijzigd",
-                  popout_translateoption: "Vertalen",
-                  popout_untranslateoption: "Onvertalen",
-                  prefixes_disable_text: "Voorvoegsels die de vertaling van het bericht uitschakelen",
-                  prefixes_enable_text: "Voorvoegsels die vertaling mogelijk maken met specifieke taal (bijv. $fr, $de, $jp)",
-                  toast_translating: "Vertalen",
-                  toast_translating_failed: "Kan niet vertalen",
-                  toast_translating_tryanother: "Probeer een andere vertaler",
-                  translate_your_message: "Vertaal uw berichten voordat u ze verzendt",
-                  translated_watermark: "vertaald",
-                  translator_engine: "Vertaler"
-                };
-              case "no":
-                return {
-                  backup_engine: "Backup-Oversetter",
-                  backup_engine_warning: "Vil bruke Backup-Oversetter",
-                  context_messagetranslateoption: "Oversett melding",
-                  context_messageuntranslateoption: "Ikke oversett melding",
-                  context_translator: "Søk i oversettelse",
-                  detect_language: "Oppdage språk",
-                  error_dailylimit: "Daglig forespørselsgrense nådd.",
-                  error_hourlylimit: "Forespørselsgrensen for time nådd.",
-                  error_keyoutdated: "API-nøkkel utdatert.",
-                  error_monthlylimit: "Månedlig forespørselsgrense nådd.",
-                  error_serverdown: "Oversettelsesserveren kan være frakoblet.",
-                  exception_text: "Ord som begynner med {{var0}} vil bli ignorert",
-                  general_sendOriginalMessage: "Sender også den originale meldingen når du oversetter den sendte meldingen",
-                  general_showOriginalMessage: "Viser også den originale meldingen når du oversetter en mottatt melding",
-                  language_choice_input_received: "Inndataspråk i mottatte meldinger",
-                  language_choice_input_sent: "Inntastingsspråk i sendte meldinger",
-                  language_choice_output_received: "Utdataspråk i mottatte meldinger",
-                  language_choice_output_sent: "Utdataspråk i dine sendte meldinger",
-                  language_selection_channel: "Språkvalg vil bli endret spesifikt for denne kanalen",
-                  language_selection_global: "Språkvalg vil bli endret for alle servere",
-                  language_selection_server: "Språkvalg vil bli endret spesifikt for denne serveren",
-                  popout_translateoption: "Oversette",
-                  popout_untranslateoption: "Ikke oversett",
-                  prefixes_disable_text: "Prefikser som deaktiverer oversettelse av meldingen",
-                  prefixes_enable_text: "Prefikser som muliggjør oversettelse med spesifikt språk (f.eks. $fr, $de, $jp)",
-                  toast_translating: "Oversetter",
-                  toast_translating_failed: "Kunne ikke oversette",
-                  toast_translating_tryanother: "Prøv en annen oversetter",
-                  translate_your_message: "Oversett meldingene dine før sending",
-                  translated_watermark: "oversatt",
-                  translator_engine: "Oversetter"
-                };
-              case "pl":
-                return {
-                  backup_engine: "Backup-Tłumacz",
-                  backup_engine_warning: "Użyje Backup-Tłumacz",
-                  context_messagetranslateoption: "Przetłumacz wiadomość",
-                  context_messageuntranslateoption: "Nieprzetłumacz wiadomość",
-                  context_translator: "Wyszukaj tłumaczenie",
-                  detect_language: "Wykryj język",
-                  error_dailylimit: "Osiągnięto dzienny limit żądań.",
-                  error_hourlylimit: "Osiągnięto godzinowy limit żądań.",
-                  error_keyoutdated: "Klucz API jest nieaktualny.",
-                  error_monthlylimit: "Osiągnięto miesięczny limit żądań.",
-                  error_serverdown: "Serwer tłumaczeń może być w trybie offline.",
-                  exception_text: "Słowa zaczynające się od {{var0}} będą ignorowane",
-                  general_sendOriginalMessage: "Wysyła również oryginalną wiadomość podczas tłumaczenia wysłanej wiadomości",
-                  general_showOriginalMessage: "Pokazuje również oryginalną wiadomość podczas tłumaczenia otrzymanej wiadomości",
-                  language_choice_input_received: "Język wprowadzania w odebranych wiadomościach",
-                  language_choice_input_sent: "Język wprowadzania w wysyłanych wiadomościach",
-                  language_choice_output_received: "Język wyjściowy w odebranych wiadomościach",
-                  language_choice_output_sent: "Język wyjściowy w wysłanych wiadomościach",
-                  language_selection_channel: "Wybór języka zostanie zmieniony specjalnie dla tego kanału",
-                  language_selection_global: "Wybór języka zostanie zmieniony dla wszystkich serwerów",
-                  language_selection_server: "Wybór języka zostanie zmieniony specjalnie dla tego serwera",
-                  popout_translateoption: "Tłumaczyć",
-                  popout_untranslateoption: "Nie przetłumacz",
-                  prefixes_disable_text: "Słowa zaczynające się od {{var0}} będą ignorowane",
-                  prefixes_enable_text: "Słowa, które aktywują tłumaczenie na określony język (np. $fr, $de, $jp)",
-                  toast_translating: "Tłumaczenie",
-                  toast_translating_failed: "Nie udało się przetłumaczyć",
-                  toast_translating_tryanother: "Wypróbuj innego tłumacza",
-                  translate_your_message: "Przetłumacz swoje wiadomości przed wysłaniem",
-                  translated_watermark: "przetłumaczony",
-                  translator_engine: "Tłumacz"
-                };
-              case "pt-BR":
-                return {
-                  backup_engine: "Backup-Tradutor",
-                  backup_engine_warning: "Usará o Backup-Tradutor",
-                  context_messagetranslateoption: "Traduzir mensagem",
-                  context_messageuntranslateoption: "Mensagem não traduzida",
-                  context_translator: "Tradução de pesquisa",
-                  detect_language: "Detectar idioma",
-                  error_dailylimit: "Limite de solicitações diárias atingido.",
-                  error_hourlylimit: "Limite de solicitação por hora atingido.",
-                  error_keyoutdated: "Chave de API desatualizada.",
-                  error_monthlylimit: "Limite de solicitação mensal atingido.",
-                  error_serverdown: "O servidor de tradução pode estar offline.",
-                  exception_text: "Palavras que começam com {{var0}} serão ignoradas",
-                  general_sendOriginalMessage: "Também envia a Mensagem original ao traduzir sua Mensagem enviada",
-                  general_showOriginalMessage: "Também mostra a Mensagem original ao traduzir uma Mensagem recebida",
-                  language_choice_input_received: "Idioma de entrada nas mensagens recebidas",
-                  language_choice_input_sent: "Idioma de entrada em suas mensagens enviadas",
-                  language_choice_output_received: "Idioma de saída nas mensagens recebidas",
-                  language_choice_output_sent: "Idioma de saída em suas mensagens enviadas",
-                  language_selection_channel: "A seleção de idioma será alterada especificamente para este canal",
-                  language_selection_global: "A seleção de idioma será alterada para todos os servidores",
-                  language_selection_server: "A seleção de idioma será alterada especificamente para este servidor",
-                  popout_translateoption: "Traduzir",
-                  popout_untranslateoption: "Não traduzido",
-                  prefixes_disable_text: "Prefixos que desativam a tradução da mensagem",
-                  prefixes_enable_text: "Prefixos que permitem a tradução com linguagem específica (por exemplo, $fr, $de, $jp)",
-                  toast_translating: "Traduzindo",
-                  toast_translating_failed: "Falha ao traduzir",
-                  toast_translating_tryanother: "Tente outro tradutor",
-                  translate_your_message: "Traduza suas mensagens antes de enviar",
-                  translated_watermark: "traduzido",
-                  translator_engine: "Tradutor"
-                };
-              case "ro":
-                return {
-                  backup_engine: "Backup-Traducător",
-                  backup_engine_warning: "Va folosi Backup-Traducător",
-                  context_messagetranslateoption: "Traduceți mesajul",
-                  context_messageuntranslateoption: "Untraduceți mesajul",
-                  context_translator: "Căutare traducere",
-                  detect_language: "Detecteaza limba",
-                  error_dailylimit: "Limita zilnică de solicitare a fost atinsă.",
-                  error_hourlylimit: "Limita orară de solicitare a fost atinsă.",
-                  error_keyoutdated: "API-Key este învechită.",
-                  error_monthlylimit: "Limita lunară de solicitare a fost atinsă.",
-                  error_serverdown: "Serverul de traducere ar putea fi offline.",
-                  exception_text: "Cuvintele care încep cu {{var0}} vor fi ignorate",
-                  general_sendOriginalMessage: "De asemenea, trimite mesajul original atunci când traduceți mesajul trimis",
-                  general_showOriginalMessage: "Afișează, de asemenea, mesajul original atunci când traduceți un mesaj primit",
-                  language_choice_input_received: "Limba de intrare în mesajele primite",
-                  language_choice_input_sent: "Introduceți limba în mesajele trimise",
-                  language_choice_output_received: "Limba de ieșire în mesajele primite",
-                  language_choice_output_sent: "Limba de ieșire în mesajele trimise",
-                  language_selection_channel: "Selectarea limbii va fi modificată special pentru acest canal",
-                  language_selection_global: "Selectarea limbii va fi modificată pentru toate serverele",
-                  language_selection_server: "Selectarea limbii va fi modificată special pentru acest Server",
-                  popout_translateoption: "Traduceți",
-                  popout_untranslateoption: "Netradus",
-                  prefixes_disable_text: "Prefixele care dezactivează traducerea mesajului",
-                  prefixes_enable_text: "Prefixele care permit traducerea cu un limbaj specific (de exemplu, $fr, $de, $jp)",
-                  toast_translating: "Traducere",
-                  toast_translating_failed: "Nu s-a putut traduce",
-                  toast_translating_tryanother: "Încercați un alt traducător",
-                  translate_your_message: "Traduceți mesajele înainte de a le trimite",
-                  translated_watermark: "tradus",
-                  translator_engine: "Traducător"
-                };
-              case "ru":
-                return {
-                  backup_engine: "Резервный-Переводчик",
-                  backup_engine_warning: "Буду использовать Резервный-Переводчик",
-                  context_messagetranslateoption: "Перевести сообщение",
-                  context_messageuntranslateoption: "Непереведенное сообщение",
-                  context_translator: "Искать перевод",
-                  detect_language: "Определить язык",
-                  error_dailylimit: "Достигнут дневной лимит запросов.",
-                  error_hourlylimit: "Достигнут лимит почасовых запросов.",
-                  error_keyoutdated: "API-ключ устарел.",
-                  error_monthlylimit: "Достигнут месячный лимит запросов.",
-                  error_serverdown: "Сервер переводов может быть отключен.",
-                  exception_text: "Слова, начинающиеся с {{var0}}, будут игнорироваться.",
-                  general_sendOriginalMessage: "Также отправляет исходное сообщение при переводе отправленного сообщения.",
-                  general_showOriginalMessage: "Также показывает исходное сообщение при переводе полученного сообщения.",
-                  language_choice_input_received: "Язык ввода в полученных сообщениях",
-                  language_choice_input_sent: "Язык ввода в ваших отправленных сообщениях",
-                  language_choice_output_received: "Язык вывода в полученных сообщениях",
-                  language_choice_output_sent: "Язык вывода в ваших отправленных сообщениях",
-                  language_selection_channel: "Выбор языка будет изменен специально для этого канала.",
-                  language_selection_global: "Выбор языка будет изменен для всех серверов.",
-                  language_selection_server: "Выбор языка будет изменен специально для этого сервера",
-                  popout_translateoption: "Переведите",
-                  popout_untranslateoption: "Неперевести",
-                  prefixes_disable_text: "Префиксы, которые отключают перевод сообщения",
-                  prefixes_enable_text: "Префиксы, которые обеспечивают перевод с конкретным языком (например, $fr, $de, $jp)",
-                  toast_translating: "Идет перевод",
-                  toast_translating_failed: "Не удалось перевести",
-                  toast_translating_tryanother: "Попробуйте другой переводчик",
-                  translate_your_message: "Переводите свои сообщения перед отправкой",
-                  translated_watermark: "переведено",
-                  translator_engine: "Переводчик"
-                };
-              case "sv":
-                return {
-                  backup_engine: "Backup-Översättare",
-                  backup_engine_warning: "Kommer att använda Backup-Översättare",
-                  context_messagetranslateoption: "Översätt meddelande",
-                  context_messageuntranslateoption: "Untranslate meddelande",
-                  context_translator: "Sök översättning",
-                  detect_language: "Upptäck språk",
-                  error_dailylimit: "Daglig förfrågningsgräns nådd.",
-                  error_hourlylimit: "Begäran per timme nådd.",
-                  error_keyoutdated: "API-nyckel föråldrad.",
-                  error_monthlylimit: "Gränsen för månatlig begäran har nåtts.",
-                  error_serverdown: "Översättningsservern kan vara offline.",
-                  exception_text: "Ord som börjar med {{var0}} kommer att ignoreras",
-                  general_sendOriginalMessage: "Skickar också det ursprungliga meddelandet när du översätter ditt skickade meddelande",
-                  general_showOriginalMessage: "Visar även det ursprungliga meddelandet när ett mottaget meddelande översätts",
-                  language_choice_input_received: "Inmatningsspråk i mottagna meddelanden",
-                  language_choice_input_sent: "Inmatningsspråk i dina skickade meddelanden",
-                  language_choice_output_received: "Utmatningsspråk i mottagna meddelanden",
-                  language_choice_output_sent: "Utmatningsspråk i dina skickade meddelanden",
-                  language_selection_channel: "Språkval kommer att ändras specifikt för denna kanal",
-                  language_selection_global: "Språkval kommer att ändras för alla servrar",
-                  language_selection_server: "Språkval kommer att ändras specifikt för denna server",
-                  popout_translateoption: "Översätt",
-                  popout_untranslateoption: "Untranslate",
-                  prefixes_disable_text: "Prefix som inaktiverar översättning av meddelandet",
-                  prefixes_enable_text: "Prefix som möjliggör översättning med specifikt språk (t.ex. $fr, $de, $jp)",
-                  toast_translating: "Översätter",
-                  toast_translating_failed: "Det gick inte att översätta",
-                  toast_translating_tryanother: "Prova en annan översättare",
-                  translate_your_message: "Översätt dina meddelanden innan du skickar",
-                  translated_watermark: "översatt",
-                  translator_engine: "Översättare"
-                };
-              case "th":
-                return {
-                  backup_engine: "สำรอง-นักแปล",
-                  backup_engine_warning: "จะใช้การสำรองข้อมูล-นักแปล",
-                  context_messagetranslateoption: "แปลข้อความ",
-                  context_messageuntranslateoption: "ยกเลิกการแปลข้อความ",
-                  context_translator: "ค้นหาคำแปล",
-                  detect_language: "ตรวจจับภาษา",
-                  error_dailylimit: "ถึงขีดจำกัดคำขอรายวันแล้ว",
-                  error_hourlylimit: "ถึงขีดจำกัดคำขอรายชั่วโมงแล้ว",
-                  error_keyoutdated: "API-Key ล้าสมัยแล้ว",
-                  error_monthlylimit: "ถึงขีดจำกัดคำขอรายเดือนแล้ว",
-                  error_serverdown: "เซิร์ฟเวอร์การแปลอาจออฟไลน์อยู่",
-                  exception_text: "คำที่ขึ้นต้นด้วย {{var0}} จะถูกละเว้น",
-                  general_sendOriginalMessage: "ส่งข้อความต้นฉบับเมื่อแปลข้อความที่ส่งของคุณ",
-                  general_showOriginalMessage: "ยังแสดงข้อความต้นฉบับเมื่อแปลข้อความที่ได้รับ",
-                  language_choice_input_received: "ป้อนภาษาในข้อความที่ได้รับ",
-                  language_choice_input_sent: "ป้อนภาษาในข้อความที่คุณส่ง",
-                  language_choice_output_received: "ภาษาเอาต์พุตในข้อความที่ได้รับ",
-                  language_choice_output_sent: "ภาษาที่ส่งออกในข้อความที่ส่งของคุณ",
-                  language_selection_channel: "การเลือกภาษาจะมีการเปลี่ยนแปลงเฉพาะสำหรับช่องนี้",
-                  language_selection_global: "การเลือกภาษาจะมีการเปลี่ยนแปลงสำหรับเซิร์ฟเวอร์ทั้งหมด",
-                  language_selection_server: "การเลือกภาษาจะมีการเปลี่ยนแปลงโดยเฉพาะสำหรับเซิร์ฟเวอร์นี้",
-                  popout_translateoption: "แปลภาษา",
-                  popout_untranslateoption: "ไม่แปล",
-                  prefixes_disable_text: "คำนำหน้าการปิดใช้งานการแปลข้อความ",
-                  prefixes_enable_text: "คำนำหน้าที่เปิดใช้งานการแปลด้วยภาษาที่เฉพาะเจาะจง (เช่น $fr, $de, $jp)",
-                  toast_translating: "กำลังแปล",
-                  toast_translating_failed: "แปลไม่สำเร็จ",
-                  toast_translating_tryanother: "ลองใช้นักแปลคนอื่น",
-                  translate_your_message: "แปลข้อความของคุณก่อนส่ง",
-                  translated_watermark: "แปล",
-                  translator_engine: "นักแปล"
-                };
-              case "tr":
-                return {
-                  backup_engine: "Yedekleme-Çevirmen",
-                  backup_engine_warning: "Yedekleme-Çevirmen kullanacak",
-                  context_messagetranslateoption: "Mesajı Çevir",
-                  context_messageuntranslateoption: "Çeviriyi Kaldır Mesajı",
-                  context_translator: "Çeviri ara",
-                  detect_language: "Dili Algıla",
-                  error_dailylimit: "Günlük İstek Sınırına ulaşıldı.",
-                  error_hourlylimit: "Saatlik İstek Sınırına ulaşıldı.",
-                  error_keyoutdated: "API Anahtarı güncel değil.",
-                  error_monthlylimit: "Aylık İstek Sınırına ulaşıldı.",
-                  error_serverdown: "Çeviri Sunucusu çevrimdışı olabilir.",
-                  exception_text: "{{var0}} ile başlayan kelimeler yok sayılacak",
-                  general_sendOriginalMessage: "Gönderilen Mesajınızı çevirirken orijinal Mesajı da gönderir",
-                  general_showOriginalMessage: "Alınan bir Mesajı tercüme ederken orijinal Mesajı da gösterir.",
-                  language_choice_input_received: "Alınan Mesajlarda Giriş Dili",
-                  language_choice_input_sent: "Gönderilen Mesajlarınızda Dil Girin",
-                  language_choice_output_received: "Alınan Mesajlarda Çıktı Dili",
-                  language_choice_output_sent: "Gönderilen Mesajlarınızda Çıktı Dili",
-                  language_selection_channel: "Dil Seçimi bu Kanal için özel olarak değiştirilecektir.",
-                  language_selection_global: "Tüm Sunucular için Dil Seçimi değiştirilecek",
-                  language_selection_server: "Dil Seçimi bu Sunucuya özel olarak değiştirilecektir.",
-                  popout_translateoption: "Çevirmek",
-                  popout_untranslateoption: "Çevirmeyi kaldır",
-                  prefixes_disable_text: "Mesajın çevirisini devre dışı bırakan önekler",
-                  prefixes_enable_text: "Belirli bir dille çeviriyi etkinleştiren önekler (örn. $fr, $de, $jp)",
-                  toast_translating: "Çeviri",
-                  toast_translating_failed: "Tercüme edilemedi",
-                  toast_translating_tryanother: "Başka bir Çevirmen deneyin",
-                  translate_your_message: "Göndermeden önce Mesajlarınızı çevirin",
-                  translated_watermark: "tercüme",
-                  translator_engine: "Çevirmen"
-                };
-              case "uk":
-                return {
-                  backup_engine: "Резервний-перекладач",
-                  backup_engine_warning: "Використовуватиме Резервний-Перекладач",
-                  context_messagetranslateoption: "Перекласти повідомлення",
-                  context_messageuntranslateoption: "Неперекладене повідомлення",
-                  context_translator: "Пошук перекладу",
-                  detect_language: "Визначити мову",
-                  error_dailylimit: "Денний ліміт запитів досягнуто.",
-                  error_hourlylimit: "Досягнуто погодинного ліміту запитів.",
-                  error_keyoutdated: "API-ключ застарів.",
-                  error_monthlylimit: "Досягнуто місячного ліміту запитів.",
-                  error_serverdown: "Сервер перекладу може бути офлайн.",
-                  exception_text: "Слова, що починаються з {{var0}}, ігноруватимуться",
-                  general_sendOriginalMessage: "Також надсилає оригінальне повідомлення під час перекладу вашого надісланого повідомлення",
-                  general_showOriginalMessage: "Також показує оригінальне повідомлення під час перекладу отриманого повідомлення",
-                  language_choice_input_received: "Мова введення в отриманих повідомленнях",
-                  language_choice_input_sent: "Мова введення у ваших надісланих повідомленнях",
-                  language_choice_output_received: "Мова виводу в отриманих повідомленнях",
-                  language_choice_output_sent: "Мова виведення у ваших надісланих повідомленнях",
-                  language_selection_channel: "Вибір мови буде змінено спеціально для цього каналу",
-                  language_selection_global: "Вибір мови буде змінено для всіх серверів",
-                  language_selection_server: "Вибір мови буде змінено спеціально для цього сервера",
-                  popout_translateoption: "Перекласти",
-                  popout_untranslateoption: "Неперекласти",
-                  prefixes_disable_text: "Префікси, що відключають переклад повідомлення",
-                  prefixes_enable_text: "Префікси, що дозволяють перекладати з конкретною мовою (наприклад, $fr, $de, $jp)",
-                  toast_translating: "Переклад",
-                  toast_translating_failed: "Не вдалося перекласти",
-                  toast_translating_tryanother: "Спробуйте іншого перекладача",
-                  translate_your_message: "Перекладіть свої повідомлення перед надсиланням",
-                  translated_watermark: "переклав",
-                  translator_engine: "Перекладач"
-                };
-              case "vi":
-                return {
-                  backup_engine: "Backup-Gười phiên dịch",
-                  backup_engine_warning: "Sẽ sử dụng Backup-Gười phiên dịch",
-                  context_messagetranslateoption: "Dịch tin nhắn",
-                  context_messageuntranslateoption: "Thư chưa dịch",
-                  context_translator: "Tìm kiếm bản dịch",
-                  detect_language: "Phát hiện ngôn ngữ",
-                  error_dailylimit: "Đã đạt đến Giới hạn Yêu cầu Hàng ngày.",
-                  error_hourlylimit: "Đã đạt đến Giới hạn Yêu cầu Hàng giờ.",
-                  error_keyoutdated: "API-Key đã lỗi thời.",
-                  error_monthlylimit: "Đã đạt đến Giới hạn Yêu cầu Hàng tháng.",
-                  error_serverdown: "Máy chủ dịch có thể ngoại tuyến.",
-                  exception_text: "Các từ bắt đầu bằng {{var0}} sẽ bị bỏ qua",
-                  general_sendOriginalMessage: "Đồng thời gửi Tin nhắn gốc khi dịch Tin nhắn đã gửi của bạn",
-                  general_showOriginalMessage: "Đồng thời hiển thị Tin nhắn gốc khi dịch một Tin nhắn đã nhận",
-                  language_choice_input_received: "Nhập Ngôn ngữ trong Tin nhắn đã nhận",
-                  language_choice_input_sent: "Nhập Ngôn ngữ trong Tin nhắn đã gửi của bạn",
-                  language_choice_output_received: "Ngôn ngữ đầu ra trong Tin nhắn đã nhận",
-                  language_choice_output_sent: "Ngôn ngữ đầu ra trong Tin nhắn đã gửi của bạn",
-                  language_selection_channel: "Lựa chọn ngôn ngữ sẽ được thay đổi cụ thể cho Kênh này",
-                  language_selection_global: "Lựa chọn ngôn ngữ sẽ được thay đổi cho tất cả các Máy chủ",
-                  language_selection_server: "Lựa chọn ngôn ngữ sẽ được thay đổi cụ thể cho Máy chủ này",
-                  popout_translateoption: "Phiên dịch",
-                  popout_untranslateoption: "Chưa dịch",
-                  prefixes_disable_text: "Tiền tố vô hiệu hóa dịch tin nhắn",
-                  prefixes_enable_text: "Tiền tố cho phép dịch với ngôn ngữ cụ thể (ví dụ: $fr, $de, $jp)",
-                  toast_translating: "Phiên dịch",
-                  toast_translating_failed: "Không dịch được",
-                  toast_translating_tryanother: "Thử một Trình dịch khác",
-                  translate_your_message: "Dịch Tin nhắn của bạn trước khi gửi",
-                  translated_watermark: "đã dịch",
-                  translator_engine: "Người phiên dịch"
-                };
-              case "zh-CN":
-                return {
-                  backup_engine: "备份翻译器",
-                  backup_engine_warning: "将使用备份翻译器",
-                  context_messagetranslateoption: "翻译消息",
-                  context_messageuntranslateoption: "取消翻译消息",
-                  context_translator: "搜索翻译",
-                  detect_language: "检测语言",
-                  error_dailylimit: "已达到每日请求限制。",
-                  error_hourlylimit: "已达到每小时请求限制。",
-                  error_keyoutdated: "API 密钥已过时。",
-                  error_monthlylimit: "已达到每月请求限制。",
-                  error_serverdown: "翻译服务器可能离线。",
-                  exception_text: "以 {{var0}} 开头的单词将被忽略",
-                  general_sendOriginalMessage: "翻译您发送的消息时也会发送原始消息",
-                  general_showOriginalMessage: "翻译收到的消息时还显示原始消息",
-                  language_choice_input_received: "收到消息中的输入语言",
-                  language_choice_input_sent: "在您发送的消息中输入语言",
-                  language_choice_output_received: "接收消息中的输出语言",
-                  language_choice_output_sent: "您发送的消息中的输出语言",
-                  language_selection_channel: "将专门为此频道更改语言选择",
-                  language_selection_global: "将更改所有服务器的语言选择",
-                  language_selection_server: "语言选择将专门为此服务器更改",
-                  popout_translateoption: "翻译",
-                  popout_untranslateoption: "取消翻译",
-                  prefixes_disable_text: "禁用消息翻译的前缀",
-                  prefixes_enable_text: "用特定语言启用翻译的前缀（例如 $fr, $de, $jp）",
-                  toast_translating: "正在翻译",
-                  toast_translating_failed: "翻译失败",
-                  toast_translating_tryanother: "尝试其它翻译器",
-                  translate_your_message: "发送前翻译您的消息",
-                  translated_watermark: "已翻译",
-                  translator_engine: "译者"
-                };
-              case "zh-TW":
-                return {
-                  backup_engine: "備份翻譯器",
-                  backup_engine_warning: "將使用備份翻譯器",
-                  context_messagetranslateoption: "翻譯訊息",
-                  context_messageuntranslateoption: "取消翻譯訊息",
-                  context_translator: "搜尋翻譯",
-                  detect_language: "檢測語言",
-                  error_dailylimit: "已達到每日請求限制。",
-                  error_hourlylimit: "已達到每小時請求限制。",
-                  error_keyoutdated: "API 密鑰已過時。",
-                  error_monthlylimit: "已達到每月請求限制。",
-                  error_serverdown: "翻譯服務器可能離線。",
-                  exception_text: "以 {{var0}} 開頭的單詞將被忽略",
-                  general_sendOriginalMessage: "翻譯您發送的消息時也會發送原始消息",
-                  general_showOriginalMessage: "翻譯收到的消息時還顯示原始消息",
-                  language_choice_input_received: "收到消息中的輸入語言",
-                  language_choice_input_sent: "在您發送的消息中輸入語言",
-                  language_choice_output_received: "接收消息中的輸出語言",
-                  language_choice_output_sent: "您發送的消息中的輸出語言",
-                  language_selection_channel: "將專門為此頻道更改語言選擇",
-                  language_selection_global: "將更改所有服務器的語言選擇",
-                  language_selection_server: "語言選擇將專門為此服務器更改",
-                  popout_translateoption: "翻譯",
-                  popout_untranslateoption: "取消翻譯",
-                  prefixes_disable_text: "禁用消息翻译的前缀",
-                  prefixes_enable_text: "用特定语言启用翻译的前缀（例如 $fr, $de, $jp）",
-                  toast_translating: "正在翻譯",
-                  toast_translating_failed: "無法翻譯",
-                  toast_translating_tryanother: "嘗試其它翻譯器",
-                  translate_your_message: "發送前翻譯您的消息",
-                  translated_watermark: "已翻譯",
-                  translator_engine: "譯者"
-                };
-              default:
-                return {
-                  backup_engine: "Backup-Translator",
-                  backup_engine_warning: "Will use Backup-Translator",
-                  context_messagetranslateoption: "Translate Message",
-                  context_messageuntranslateoption: "Untranslate Message",
-                  context_translator: "Search Translation",
-                  detect_language: "Detect Language",
-                  error_dailylimit: "Daily Request Limit reached.",
-                  error_hourlylimit: "Hourly Request Limit reached.",
-                  error_keyoutdated: "API-Key outdated.",
-                  error_monthlylimit: "Monthly Request Limit reached.",
-                  error_serverdown: "Translation Server might be offline.",
-                  exception_text: "Words starting with {{var0}} will be ignored",
-                  general_sendOriginalMessage: "Also sends the original Message when translating your sent Message",
-                  general_showOriginalMessage: "Also shows the original Message when translating a received Message",
-                  language_choice_input_received: "Input Language in received Messages",
-                  language_choice_input_sent: "Input Language in your sent Messages",
-                  language_choice_output_received: "Output Language in received Messages",
-                  language_choice_output_sent: "Output Language in your sent Messages",
-                  language_selection_channel: "Language Selection will be changed specifically for this Channel",
-                  language_selection_global: "Language Selection will be changed for all Servers",
-                  language_selection_server: "Language Selection will be changed specifically for this Server",
-                  popout_translateoption: "Translate",
-                  popout_untranslateoption: "Untranslate",
-                  prefixes_disable_text: "Prefixes that disable translation of message",
-                  prefixes_enable_text: "Prefixes that enable translation with specific language (e.g. $fr, $de, $jp)",
-                  toast_translating: "Translating",
-                  toast_translating_failed: "Failed to translate",
-                  toast_translating_tryanother: "Try another Translator",
-                  translate_your_message: "Translate your Messages before sending",
-                  translated_watermark: "translated",
-                  translator_engine: "Translator"
-                };
-            }
+            return getLabelsForUiLanguage(this.getUiLanguageId());
           }
         }, __name(_c, "Translator"), _c;
       })(window.BDFDB_Global.PluginUtils.buildPlugin(changeLog));
