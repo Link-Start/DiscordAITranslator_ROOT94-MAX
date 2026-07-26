@@ -1028,3 +1028,54 @@ test("the catalog is refused for engines that cannot list models or lack credent
 	assert.equal(placeholder.toasts[0].message, "LABEL:oaicompat: TEXT:validate_missing_endpoint");
 	assert.equal(placeholder.calls.length, 0);
 });
+
+test("every adapter settles with an empty translation when the network fails outright", async () => {
+	// A DNS failure or socket reset calls back with error set and response null.
+	// Dereferencing response.statusCode there throws inside the callback, so the
+	// translation never settles and the caller waits out its whole timeout.
+	const client = createProviderClient({
+		request: (_url, _options, callback) => callback(new Error("ENOTFOUND"), null, null),
+		setTimeout: (callback, delay) => setTimeout(callback, delay),
+		clearTimeout: timer => clearTimeout(timer),
+		now: () => Date.now(),
+		getAuthKeys: () => ({
+			googlecloud: {key: "k"}, microsoft: {key: "k"}, deepl: {key: "k", paid: false},
+			yandex: {key: "k"}, papago: {key: "k", secret: "s"}, baidu: {key: "k", secret: "s"},
+			deepseek: {key: "k"}, openai: {key: "k"}, gemini: {key: "k"}, oaicompat: {key: "k", endpoint: "https://e.test/v1/chat/completions", model: "m"}
+		}),
+		saveAuthKeys: () => {},
+		getLanguages: () => ({en: {id: "en", name: "English"}, "zh-CN": {id: "zh-CN", name: "Chinese"}}),
+		notify: () => null,
+		getLabels: () => ({toast_translating_failed: "failed", toast_translating_tryanother: "try another", error_hourlylimit: "hourly", error_dailylimit: "daily", error_keyoutdated: "outdated"}),
+		getCustomText: key => key,
+		getEngineLabel: key => key,
+		shouldUseAiAutoTranslateDecision: () => false,
+		getAiAutoTranslatePrompt: () => "rules"
+	});
+	const data = {
+		engine: translationEngines.googleapi,
+		input: {id: "en", name: "English"},
+		output: {id: "zh-CN", name: "Chinese"},
+		text: "hello",
+		autoDecision: false
+	};
+
+	const adapters = ["googleApiTranslate", "microsoftTranslate", "deepLTranslate", "iTranslateTranslate", "papagoTranslate", "baiduTranslate", "yandexTranslate", "googleCloudTranslate"];
+	for (const adapter of adapters) {
+		if (typeof client[adapter] != "function") continue;
+		const settled = await new Promise(resolve => {
+			const timer = setTimeout(() => resolve("NEVER SETTLED"), 500);
+			try {
+				client[adapter](Object.assign({}, data, {engine: translationEngines[adapter.replace(/Translate$/, "").toLowerCase()] || translationEngines.googleapi}), value => {
+					clearTimeout(timer);
+					resolve(value);
+				});
+			}
+			catch (error) {
+				clearTimeout(timer);
+				resolve("THREW: " + error.message);
+			}
+		});
+		assert.equal(settled, "", `${adapter} must settle with an empty translation on a network failure, got ${JSON.stringify(settled)}`);
+	}
+});

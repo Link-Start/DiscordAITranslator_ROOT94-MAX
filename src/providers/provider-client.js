@@ -617,7 +617,7 @@ function createProviderClient({
 				method: "get",
 				headers: requestHeaders
 			}, (error, response, body) => {
-				if (!error && body && response && response.statusCode == 200) {
+				if (!error && body && response && response && response.statusCode == 200) {
 					try {
 						body = JSON.parse(body);
 						const rawItems = engineKey == "gemini" ? ((body && body.models) || []).filter(item => !item || !Array.isArray(item.supportedGenerationMethods) || item.supportedGenerationMethods.includes("generateContent")) : ((body && body.data) || []);
@@ -722,11 +722,11 @@ function createProviderClient({
 						method: "post",
 						form
 					}, (error, response, body) => {
-						if (!error && body && response && response.statusCode == 200) {
+						if (!error && body && response && response && response.statusCode == 200) {
 							try {
 								body = JSON.parse(body);
 								const translation = body && body.data && body.data.translations && body.data.translations[0] && body.data.translations[0].translatedText;
-								return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+								return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
 							}
 							catch (err) {}
 						}
@@ -750,11 +750,11 @@ function createProviderClient({
 							"to": mapLanguageCodeForEngine("microsoft", sample.target)
 						}
 					}, (error, response, body) => {
-						if (!error && body && response && response.statusCode == 200) {
+						if (!error && body && response && response && response.statusCode == 200) {
 							try {
 								body = JSON.parse(body);
 								const translation = body && body[0] && body[0].translations && body[0].translations[0] && body[0].translations[0].text;
-								return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+								return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
 							}
 							catch (err) {}
 						}
@@ -775,11 +775,11 @@ function createProviderClient({
 							target_lang: mapLanguageCodeForEngine("deepl", sample.target)
 						})
 					}, (error, response, body) => {
-						if (!error && body && response && response.statusCode == 200) {
+						if (!error && body && response && response && response.statusCode == 200) {
 							try {
 								body = JSON.parse(body);
 								const translation = body && body.translations && body.translations[0] && body.translations[0].text;
-								return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+								return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
 							}
 							catch (err) {}
 						}
@@ -797,7 +797,7 @@ function createProviderClient({
 							store: false
 						})
 					}, (error, response, body) => {
-						const translation = !error && response && response.statusCode == 200 ? parseOpenAiResponseText(body) : "";
+						const translation = !error && response && response && response.statusCode == 200 ? parseOpenAiResponseText(body) : "";
 						return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
 					});
 				}
@@ -812,7 +812,7 @@ function createProviderClient({
 							contents: [{role: "user", parts: [{text: `Translate the following text from English to German.\n\n${sample.text}`}]}]
 						})
 					}, (error, response, body) => {
-						const translation = !error && response && response.statusCode == 200 ? parseGeminiResponseText(body) : "";
+						const translation = !error && response && response && response.statusCode == 200 ? parseGeminiResponseText(body) : "";
 						return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
 					});
 				}
@@ -837,11 +837,11 @@ function createProviderClient({
 							max_tokens: 32
 						})
 					}, (error, response, body) => {
-						if (!error && body && response && response.statusCode == 200) {
+						if (!error && body && response && response && response.statusCode == 200) {
 							try {
 								body = JSON.parse(body);
 								const translation = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
-								return finish(!!translation, translation ? successMessage(translation.trim()) : failMessage(response.statusCode, body), normalized);
+								return finish(!!translation, translation ? successMessage(translation.trim()) : failMessage(response && response.statusCode, body), normalized);
 							}
 							catch (err) {}
 						}
@@ -869,7 +869,7 @@ function createProviderClient({
 		}, (error, response, body) => {
 			const labels = getLabels();
 			const languages = getLanguages();
-			if (!error && body && response.statusCode == 200) {
+			if (!error && body && response && response && response.statusCode == 200) {
 				try {
 					body = JSON.parse(body);
 					if (!data.specialCase && body.src && body.src && languages[body.src]) {
@@ -882,7 +882,7 @@ function createProviderClient({
 				catch (err) {callback("");}
 			}
 			else {
-				if (response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`);
+				if (response && response && response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`);
 				else dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`);
 				callback("");
 			}
@@ -907,7 +907,7 @@ function createProviderClient({
 		}, (error, response, body) => {
 			const labels = getLabels();
 			const languages = getLanguages();
-			if (!error && body && response.statusCode == 200) {
+			if (!error && body && response && response && response.statusCode == 200) {
 				try {
 					body = JSON.parse(body);
 					const translations = body && body.data && body.data.translations || [];
@@ -921,8 +921,8 @@ function createProviderClient({
 				catch (err) {callback("");}
 			}
 			else {
-				if (response && (response.statusCode == 401 || response.statusCode == 403)) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
-				else if (response && response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`);
+				if (response && (response.statusCode == 401 || response && response && response.statusCode == 403)) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
+				else if (response && response && response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`);
 				else dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`);
 				callback("");
 			}
@@ -950,7 +950,7 @@ function createProviderClient({
 		}, (error, response, body) => {
 			const labels = getLabels();
 			const languages = getLanguages();
-			if (!error && body && response.statusCode == 200) {
+			if (!error && body && response && response && response.statusCode == 200) {
 				try {
 					body = JSON.parse(body)[0];
 					if (!data.specialCase && body.detectedLanguage && body.detectedLanguage.language && languages[body.detectedLanguage.language.toLowerCase()]) {
@@ -962,8 +962,8 @@ function createProviderClient({
 				catch (err) {callback("");}
 			}
 			else {
-				if (response.statusCode == 403 || response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`);
-				else if (response.statusCode == 401) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
+				if (response && response && response.statusCode == 403 || response && response && response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`);
+				else if (response && response && response.statusCode == 401) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
 				else dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`);
 				callback("");
 			}
@@ -985,7 +985,7 @@ function createProviderClient({
 		}, (error, response, body) => {
 			const labels = getLabels();
 			const languages = getLanguages();
-			if (!error && body && response.statusCode == 200) {
+			if (!error && body && response && response && response.statusCode == 200) {
 				try {
 					body = JSON.parse(body);
 					if (!data.specialCase && body.translations[0] && body.translations[0].detected_source_language && languages[body.translations[0].detected_source_language.toLowerCase()]) {
@@ -997,8 +997,8 @@ function createProviderClient({
 				catch (err) {callback("");}
 			}
 			else {
-				if (response.statusCode == 429 || response.statusCode == 456) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`);
-				else if (response.statusCode == 403) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
+				if (response && response && response.statusCode == 429 || response && response && response.statusCode == 456) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`);
+				else if (response && response && response.statusCode == 403) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
 				else dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`);
 				callback("");
 			}
@@ -1009,7 +1009,7 @@ function createProviderClient({
 	// and they are the ones the queue backs off from.
 	function requestAiProviderTranslation(engineKey, url, options, parseResponse, callback) {
 		requestWithTimeout(url, options, (error, response, body) => {
-			if (!error && body && response && response.statusCode == 200) {
+			if (!error && body && response && response && response.statusCode == 200) {
 				const translatedText = parseResponse(body);
 				if (translatedText) return callback(translatedText);
 			}
@@ -1111,7 +1111,7 @@ function createProviderClient({
 			}, (error, response, body) => {
 				const labels = getLabels();
 				const languages = getLanguages();
-				if (!error && response && response.statusCode == 200) {
+				if (!error && response && response && response.statusCode == 200) {
 					try {
 						body = JSON.parse(body);
 						if (!data.specialCase && body.source && body.source.dialect && languages[body.source.dialect]) {
@@ -1124,8 +1124,8 @@ function createProviderClient({
 					catch (err) {callback("");}
 				}
 				else {
-					if (response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`);
-					else if (response.statusCode == 403) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
+					if (response && response && response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`);
+					else if (response && response && response.statusCode == 403) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
 					else dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`);
 					callback("");
 				}
@@ -1158,7 +1158,7 @@ function createProviderClient({
 		}, (error, response, body) => {
 			const labels = getLabels();
 			const languages = getLanguages();
-			if (!error && body && response.statusCode == 200) {
+			if (!error && body && response && response && response.statusCode == 200) {
 				try {
 					const parsed = createElementFromHtml(body);
 					const translation = parsed && parsed.querySelector("text");
@@ -1203,7 +1203,7 @@ function createProviderClient({
 				}
 			}, (error, response, body) => {
 				const labels = getLabels();
-				if (!error && body && response.statusCode == 200) {
+				if (!error && body && response && response && response.statusCode == 200) {
 					try {
 						const message = (JSON.parse(body) || {}).message;
 						const result = message && (message.body || message.result);
@@ -1213,7 +1213,7 @@ function createProviderClient({
 					catch (err) {callback("");}
 				}
 				else {
-					if (response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`);
+					if (response && response && response.statusCode == 429) dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`);
 					else dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}/${labels.error_keyoutdated}`);
 					callback("");
 				}
@@ -1234,7 +1234,7 @@ function createProviderClient({
 			}, (error, response, body) => {
 				const languages = getLanguages();
 				let langCode = "en";
-				if (!error && body && response.statusCode == 200) {
+				if (!error && body && response && response && response.statusCode == 200) {
 					try {
 						langCode = JSON.parse(body)["langCode"];
 					}
@@ -1266,7 +1266,7 @@ function createProviderClient({
 			}
 		}, (error, response, result) => {
 			const labels = getLabels();
-			if (!error && result && response.statusCode == 200) {
+			if (!error && result && response && response && response.statusCode == 200) {
 				try {
 					result = JSON.parse(result) || {};
 					if (!result.error_code) {
@@ -1345,7 +1345,7 @@ function createProviderClient({
 					method: "post",
 					headers: {"Content-Type": "application/json", "Authorization": `Bearer ${apiKey}`},
 					body: JSON.stringify({model: modelId, instructions: systemPrompt, input: batchPrompt, store: false})
-				}, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+				}, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
 			}
 			if (engineKey == "gemini") {
 				const geminiModelId = String(modelId || "").replace(/^models\//, "");
@@ -1354,13 +1354,13 @@ function createProviderClient({
 					method: "post",
 					headers: {"Content-Type": "application/json"},
 					body: JSON.stringify({system_instruction: {parts: [{text: systemPrompt}]}, contents: [{role: "user", parts: [{text: batchPrompt}]}], generationConfig: {temperature: 0.1, topP: 0.8}})
-				}, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseGeminiResponseText(body)) : resolve(null));
+				}, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseGeminiResponseText(body)) : resolve(null));
 			}
 			requestWithTimeout(apiEndpoint, {
 				method: "post",
 				headers: {"Content-Type": "application/json", "Authorization": `Bearer ${apiKey}`},
 				body: JSON.stringify({model: modelId, messages: [{role: "system", content: systemPrompt}, {role: "user", content: batchPrompt}], temperature: 0.1, top_p: 0.8})
-			}, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+			}, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
 		});
 	}
 
