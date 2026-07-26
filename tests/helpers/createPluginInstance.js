@@ -74,10 +74,15 @@ function createPluginInstance(options = {}) {
 			filter: (object, predicate) => Object.fromEntries(Object.entries(object || {}).filter(([, value]) => predicate(value))),
 			sort: object => object
 		},
+		// Real BDFDB schedules and hands back a cancellable handle. Stubbing timeout as a
+		// no-op meant anything routed through BDFDB timers silently never ran, which made
+		// the managed-timer wiring untestable and hid it from every timing test.
 		TimeUtils: {
-			clear: () => {},
-			interval: () => 0,
-			timeout: () => 0
+			clear: handle => {
+				if (handle) clearTimeout(handle);
+			},
+			interval: (callback, delay) => setInterval(callback, delay),
+			timeout: (callback, delay) => setTimeout(callback, delay)
 		},
 		NotificationUtils: {
 			toast: () => null

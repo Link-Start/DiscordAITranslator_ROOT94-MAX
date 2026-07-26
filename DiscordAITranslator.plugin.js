@@ -1060,6 +1060,11 @@ var require_repaint_scheduler = __commonJS({
       isTextAreaFocused = /* @__PURE__ */ __name(() => !1, "isTextAreaFocused"),
       repaintAll = /* @__PURE__ */ __name(() => {
       }, "repaintAll"),
+      // Pass BDFDB.TimeUtils.timeout/clear here, never the globals these default to.
+      // Every timer below ends in a full-list repaint, and a raw timer outlives the plugin
+      // instance that armed it, so after a reload a dead instance keeps repainting
+      // alongside the live one. The defaults exist only so a unit test can drive the
+      // scheduler without BDFDB; the managed-timer contract test pins the real wiring.
       setTimeout: scheduleTimer = setTimeout,
       clearTimeout: cancelTimer = clearTimeout
     }) {
@@ -11035,8 +11040,8 @@ __________________ __________________ __________________
           ensureTranslationCacheStore() {
             return this.translationCacheStoreInstance || (this.translationCacheStoreInstance = createTranslationCacheStore({
               now: /* @__PURE__ */ __name(() => Date.now(), "now"),
-              setTimeout: /* @__PURE__ */ __name((callback, delay) => setTimeout(callback, delay), "setTimeout"),
-              clearTimeout: /* @__PURE__ */ __name((timer) => clearTimeout(timer), "clearTimeout"),
+              setTimeout: /* @__PURE__ */ __name((callback, delay) => BDFDB.TimeUtils.timeout(callback, delay), "setTimeout"),
+              clearTimeout: /* @__PURE__ */ __name((timer) => BDFDB.TimeUtils.clear(timer), "clearTimeout"),
               loadCache: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "translationCache"), "loadCache"),
               saveCache: /* @__PURE__ */ __name((cache) => BDFDB.DataUtils.save(cache, this, "translationCache"), "saveCache"),
               extractOriginalContentData: /* @__PURE__ */ __name((message) => this.extractOriginalContentData(message), "extractOriginalContentData"),
@@ -11055,8 +11060,8 @@ __________________ __________________ __________________
           ensureMessageViewportStore() {
             return this.messageViewportStoreInstance || (this.messageViewportStoreInstance = createMessageViewportStore({
               getDocument: /* @__PURE__ */ __name(() => typeof document > "u" ? null : document, "getDocument"),
-              setTimeout: /* @__PURE__ */ __name((callback, delay) => setTimeout(callback, delay), "setTimeout"),
-              clearTimeout: /* @__PURE__ */ __name((timer) => clearTimeout(timer), "clearTimeout"),
+              setTimeout: /* @__PURE__ */ __name((callback, delay) => BDFDB.TimeUtils.timeout(callback, delay), "setTimeout"),
+              clearTimeout: /* @__PURE__ */ __name((timer) => BDFDB.TimeUtils.clear(timer), "clearTimeout"),
               requestAnimationFrame: /* @__PURE__ */ __name((callback) => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0), "requestAnimationFrame"),
               now: /* @__PURE__ */ __name(() => Date.now(), "now"),
               getSelectedChannelId: /* @__PURE__ */ __name(() => BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), "getSelectedChannelId"),
@@ -11153,7 +11158,9 @@ __________________ __________________ __________________
               lastRenderUsedFallback: /* @__PURE__ */ __name(() => this.ensureReceivedDisplayRuntime().lastRenderUsedFallback(), "lastRenderUsedFallback"),
               isSettingsSurfaceOpen: /* @__PURE__ */ __name(() => this.isTranslatorSettingsSurfaceOpen(), "isSettingsSurfaceOpen"),
               isTextAreaFocused: /* @__PURE__ */ __name(() => this.isChannelTextAreaFocused(), "isTextAreaFocused"),
-              repaintAll: /* @__PURE__ */ __name(() => this.rerenderMessagesWithScrollPreserved(), "repaintAll")
+              repaintAll: /* @__PURE__ */ __name(() => this.rerenderMessagesWithScrollPreserved(), "repaintAll"),
+              setTimeout: /* @__PURE__ */ __name((callback, delay) => BDFDB.TimeUtils.timeout(callback, delay), "setTimeout"),
+              clearTimeout: /* @__PURE__ */ __name((timer) => BDFDB.TimeUtils.clear(timer), "clearTimeout")
             })), this.receivedDisplayRepaintSchedulerInstance;
           }
           getReceivedDisplayFlushDelay() {

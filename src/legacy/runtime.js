@@ -121,9 +121,6 @@ module.exports = (_ => {
 			"0":"−−−−−", "1":"·−−−−", "2":"··−−−", "3":"···−−", "4":"····−", "5":"·····", "6":"−····", "7":"−−···", "8":"−−−··", "9":"−−−−·", "!":"−·−·−−", "\"":"·−··−·", "$":"···−··−", "&":"·−···", "'":"·−−−−·", "(":"−·−−·", ")":"−·−−·−", "+":"·−·−·", ",":"−−··−−", "-":"−····−", ".":"·−·−·−", "/":"−··−·", ":":"−−−···", ";":"−·−·−·", "=":"−···−", "?":"··−−··", "@":"·−−·−·", "a":"·−", "b":"−···", "c":"−·−·", "d":"−··", "e":"·", "f":"··−·", "g":"−−·", "h":"····", "i":"··", "j":"·−−−", "k":"−·−", "l":"·−··", "m":"−−", "n":"−·", "o":"−−−", "p":"·−−·", "q":"−−·−", "r":"·−·", "s":"···", "t":"−", "u":"··−", "v":"···−", "w":"·−−", "x":"−··−", "y":"−·−−", "z":"−−··", "·":"e", "··":"i", "···":"s", "····":"h", "·····":"5", "····−":"4", "···−":"v", "···−··−":"$", "···−−":"3", "··−":"u", "··−·":"f", "··−−··":"?", "··−−·−":"_", "··−−−":"2", "·−":"a", "·−·":"r", "·−··":"l", "·−···":"&", "·−··−·":"\"", "·−·−·":"+", "·−·−·−":".", "·−−":"w", "·−−·":"p", "·−−·−·":"@", "·−−−":"j", "·−−−−":"1", "·−−−−·":"'", "−":"t", "−·":"n", "−··":"d", "−···":"b", "−····":"6", "−····−":"-", "−···−":"=", "−··−":"x", "−··−·":"/", "−·−":"k", "−·−·":"c", "−·−·−·":";", "−·−·−−":"!", "−·−−":"y", "−·−−·":"(", "−·−−·−":")", "−−":"m", "−−·":"g", "−−··":"z", "−−···":"7", "−−··−−":",", "−−·−":"q", "−−−":"o", "−−−··":"8", "−−−···":":", "−−−−·":"9", "−−−−−":"0", "_":"··−−·−"
 		};
 		
-		
-		// Backoff window set when the translation provider returns 429/5xx; the queue
-		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		const channelTitleStore = createChannelTitleStore();
 		const loadedTranslationStatusStore = createLoadedTranslationStatusStore({isChineseUiLanguage: () => _this && _this.isChineseUiLanguage()});
 		var pluginRuntimeActive = true;
@@ -159,7 +156,6 @@ module.exports = (_ => {
 		const {receivedTranslationRuntime} = createReceivedTranslationRuntime({BDFDB, loadedTranslationStatusStore});
 
 		const translationDisplayLogic = createTranslationDisplayLogic({BDFDB});
-
 
 		return class Translator extends Plugin {
 			getVersion () {
@@ -3094,8 +3090,8 @@ module.exports = (_ => {
 			ensureTranslationCacheStore () {
 				if (!this.translationCacheStoreInstance) this.translationCacheStoreInstance = createTranslationCacheStore({
 					now: () => Date.now(),
-					setTimeout: (callback, delay) => setTimeout(callback, delay),
-					clearTimeout: timer => clearTimeout(timer),
+					setTimeout: (callback, delay) => BDFDB.TimeUtils.timeout(callback, delay),
+					clearTimeout: timer => BDFDB.TimeUtils.clear(timer),
 					loadCache: () => BDFDB.DataUtils.load(this, "translationCache"),
 					saveCache: cache => BDFDB.DataUtils.save(cache, this, "translationCache"),
 					extractOriginalContentData: message => this.extractOriginalContentData(message),
@@ -3116,8 +3112,8 @@ module.exports = (_ => {
 			ensureMessageViewportStore () {
 				if (!this.messageViewportStoreInstance) this.messageViewportStoreInstance = createMessageViewportStore({
 					getDocument: () => typeof document == "undefined" ? null : document,
-					setTimeout: (callback, delay) => setTimeout(callback, delay),
-					clearTimeout: timer => clearTimeout(timer),
+					setTimeout: (callback, delay) => BDFDB.TimeUtils.timeout(callback, delay),
+					clearTimeout: timer => BDFDB.TimeUtils.clear(timer),
 					requestAnimationFrame: callback => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0),
 					now: () => Date.now(),
 					getSelectedChannelId: () => BDFDB.LibraryStores.SelectedChannelStore.getChannelId(),
@@ -3227,7 +3223,9 @@ module.exports = (_ => {
 					lastRenderUsedFallback: () => this.ensureReceivedDisplayRuntime().lastRenderUsedFallback(),
 					isSettingsSurfaceOpen: () => this.isTranslatorSettingsSurfaceOpen(),
 					isTextAreaFocused: () => this.isChannelTextAreaFocused(),
-					repaintAll: () => this.rerenderMessagesWithScrollPreserved()
+					repaintAll: () => this.rerenderMessagesWithScrollPreserved(),
+					setTimeout: (callback, delay) => BDFDB.TimeUtils.timeout(callback, delay),
+					clearTimeout: timer => BDFDB.TimeUtils.clear(timer)
 				});
 				return this.receivedDisplayRepaintSchedulerInstance;
 			}
