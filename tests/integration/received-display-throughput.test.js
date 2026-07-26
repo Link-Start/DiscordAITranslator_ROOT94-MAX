@@ -71,6 +71,7 @@ test("live automatic commits coalesce into one acknowledged display flush", asyn
 	try {
 		const {plugin, calls} = harness;
 		const channelId = "channel-1";
+		plugin.isViewingMessageHistory = () => false;
 		const messageIds = [];
 		for (let index = 0; index < 5; index++) {
 			const messageId = `message-${index + 1}`;
@@ -459,4 +460,75 @@ test("a burst interrupted by a channel clear does not resurrect provider work", 
 		}), true, "cancelled work must not leave loading indicators behind");
 	}
 	finally {harness.restore();}
+});
+
+test("a translation arriving while you type does not repaint the chat list", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin, calls} = harness;
+		const channelId = "channel-typing";
+		let typing = true;
+		plugin.isChannelTextAreaFocused = () => typing;
+		plugin.isViewingMessageHistory = () => false;
+		plugin.captureReceivedMessageSource({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", source: {content: "hello", embeds: []}});
+		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
+		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
+
+		await new Promise(resolve => setTimeout(resolve, 300));
+		assert.equal(calls.forceUpdate, 0, "typing must not be interrupted by a repaint");
+
+		typing = false;
+		await new Promise(resolve => setTimeout(resolve, 700));
+		assert.equal(calls.forceUpdate, 1, "the repaint must still happen once typing stops");
+		assert.equal(plugin.getReceivedDisplayRuntimeView("m1").translated, true);
+	}
+	finally {
+		harness.plugin.clearReceivedDisplayFlushQueue();
+		harness.restore();
+	}
+});
+
+test("a translation arriving while the settings panel is open does not repaint the chat list", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin, calls} = harness;
+		const channelId = "channel-settings-open";
+		let settingsOpen = true;
+		plugin.isTranslatorSettingsSurfaceOpen = () => settingsOpen;
+		plugin.isViewingMessageHistory = () => false;
+		plugin.captureReceivedMessageSource({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", source: {content: "hello", embeds: []}});
+		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
+		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
+
+		await new Promise(resolve => setTimeout(resolve, 300));
+		assert.equal(calls.forceUpdate, 0, "an open settings surface must not be disturbed by a chat repaint");
+
+		settingsOpen = false;
+		await new Promise(resolve => setTimeout(resolve, 700));
+		assert.equal(calls.forceUpdate, 1, "the repaint must still happen once the panel closes");
+	}
+	finally {
+		harness.plugin.clearReceivedDisplayFlushQueue();
+		harness.restore();
+	}
+});
+
+test("repaint waits longer while you are reading back through history", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin, calls} = harness;
+		const channelId = "channel-history-delay";
+		plugin.isViewingMessageHistory = () => true;
+		plugin.captureReceivedMessageSource({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", source: {content: "hello", embeds: []}});
+		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
+		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
+
+		// The live delay is 120ms; reading history must use the calmer legacy delay.
+		await new Promise(resolve => setTimeout(resolve, 400));
+		assert.equal(calls.forceUpdate, 0, "reading history must not be interrupted at the live cadence");
+	}
+	finally {
+		harness.plugin.clearReceivedDisplayFlushQueue();
+		harness.restore();
+	}
 });
