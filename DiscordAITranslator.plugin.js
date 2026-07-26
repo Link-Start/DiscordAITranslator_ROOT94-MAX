@@ -204,8 +204,9 @@ var require_message_state_store = __commonJS({
           return validatesTerminalResult(result) ? applyResult(result) : null;
         },
         commitBatch(results) {
-          let rejected = new Set(results.map((result) => normalizeIdentity(result && result.channelId))).size === 1 ? results.filter((result) => !validatesTerminalResult(result)) : results.slice();
-          return rejected.length ? { committed: [], rejected } : { committed: results.map(applyResult), rejected: [] };
+          if (new Set(results.map((result) => normalizeIdentity(result && result.channelId))).size !== 1) return { committed: [], rejected: results.slice() };
+          let recordless = results.filter((result) => !result || typeof result != "object" || !records.has(normalizeIdentity(result.messageId))), recorded = results.filter((result) => !recordless.includes(result)), rejected = recorded.filter((result) => !validatesTerminalResult(result));
+          return rejected.length ? { committed: [], rejected: rejected.concat(recordless) } : { committed: recorded.map(applyResult), rejected: recordless };
         },
         releasePending(request) {
           if (!request || typeof request != "object") return null;
@@ -336,7 +337,10 @@ var require_translation_display_controller = __commonJS({
         },
         async commitHistoricalBatch(results) {
           let outcome = store.commitBatch(results);
-          return outcome.committed.length ? refreshRecords(outcome.committed) : outcome.rejected.length ? createEmptyOutcome({ rejectedIds: outcome.rejected.map((result) => String(result.messageId)) }) : createEmptyOutcome();
+          if (!outcome.committed.length)
+            return outcome.rejected.length ? createEmptyOutcome({ rejectedIds: outcome.rejected.map((result) => String(result.messageId)) }) : createEmptyOutcome();
+          let refreshOutcome = await refreshRecords(outcome.committed);
+          return outcome.rejected.length && (refreshOutcome.rejectedIds = outcome.rejected.map((result) => String(result.messageId))), refreshOutcome;
         },
         async restoreMessage(messageId, { refresh = !0 } = {}) {
           let records = store.restoreMessage(messageId);
@@ -1807,7 +1811,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             };
           },
           captureReceivedDisplaySource(plugin, message, context) {
-            if (!context.channelId || plugin.isOwnMessage(message)) return null;
+            if (!context.channelId || plugin.isOwnMessage(message) || !plugin.isTranslationEnabled(context.channelId)) return null;
             let previousView = plugin.getReceivedDisplayRuntimeView(message.id), generation = plugin.getReceivedDisplayGeneration(context.channelId), record = plugin.captureReceivedMessageSource({
               messageId: message.id,
               channelId: context.channelId,
@@ -6795,7 +6799,7 @@ __________________ __________________ __________________
               } catch {
                 batchOutcome = null;
               }
-            let batchRejected = !!(results.length && (!batchOutcome || Array.isArray(batchOutcome.rejectedIds) && batchOutcome.rejectedIds.length)), failedCount = this.updateFailedHistoricalTranslationSnapshots(summary, job.channelId);
+            let batchCommitted = !!(batchOutcome && (batchOutcome.confirmedIds && batchOutcome.confirmedIds.length || batchOutcome.missingIds && batchOutcome.missingIds.length || batchOutcome.staleIds && batchOutcome.staleIds.length || batchOutcome.deferredIds && batchOutcome.deferredIds.length)), batchRejected = !!(results.length && !batchCommitted), failedCount = this.updateFailedHistoricalTranslationSnapshots(summary, job.channelId);
             this.updateLoadedAutoTranslationStatus({ active: !1, collecting: !1, done: !0, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed: batchRejected ? 0 : summary.translated.length, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length });
           }
           rerenderHistoricalTranslationJob(_job) {
@@ -6903,13 +6907,10 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
           }
           onMessageContextMenu(e) {
             if (e.instance.props.message && e.instance.props.channel) {
-              let translated = !!translatedMessages[e.instance.props.message.id], hint = BDFDB.BDUtils.isPluginEnabled("MessageUtilities") ? BDFDB.BDUtils.getPlugin("MessageUtilities").getActiveShortcutString("__Translate_Message") : null, [children, index] = BDFDB.ContextMenuUtils.findItem(e.returnvalue, { id: ["copy-text", "pin", "unpin"] });
+              let translated = this.isMessageDisplayTranslated(e.instance.props.message, e.instance.props.channel.id), hint = BDFDB.BDUtils.isPluginEnabled("MessageUtilities") ? BDFDB.BDUtils.getPlugin("MessageUtilities").getActiveShortcutString("__Translate_Message") : null, [children, index] = BDFDB.ContextMenuUtils.findItem(e.returnvalue, { id: ["copy-text", "pin", "unpin"] });
               index == -1 && ([children, index] = BDFDB.ContextMenuUtils.findItem(e.returnvalue, { id: ["edit", "add-reaction", "add-reaction-1", "quote"] })), children.splice(index > -1 ? index + 1 : 0, 0, BDFDB.ContextMenuUtils.createItem(BDFDB.LibraryComponents.MenuItems.MenuItem, {
                 label: translated ? this.labels.context_messageuntranslateoption : this.labels.context_messagetranslateoption,
                 id: BDFDB.ContextMenuUtils.createItemId(this.name, translated ? "untranslate-message" : "translate-message"),
-                icon: hint && ((_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuHint, {
-                  hint
-                })),
                 icon: /* @__PURE__ */ __name((_2) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.MenuItems.MenuIcon, {
                   icon: translated ? translateIconUntranslate : translateIcon
                 }), "icon"),
@@ -7154,9 +7155,20 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
               requestIdentity: null
             }, overrides);
           }
+          // Display composition happens at render time so Display settings changed after a
+          // commit still shape the painted content; the frozen store record keeps only the
+          // translation facts.
+          getReceivedDisplayViewRenderContent(view) {
+            if (!view) return "";
+            if (view.translated && view.translation) {
+              let translatedContent = view.translation.translatedContent != null && view.translation.translatedContent !== "" ? view.translation.translatedContent : view.translation.content;
+              return this.buildReceivedDisplayContent(String(translatedContent ?? ""), view.translation.originalContent || "");
+            }
+            return String(view.content == null ? "" : view.content);
+          }
           applyReceivedDisplayViewToStream(stream, view) {
             if (!stream || !stream.content || !view) return;
-            let displayContent = String(view.content == null ? "" : view.content);
+            let displayContent = this.getReceivedDisplayViewRenderContent(view);
             if (stream.content.content === displayContent) return;
             let clonedMessage = new BDFDB.DiscordObjects.Message(stream.content);
             clonedMessage.content = displayContent, stream.content = clonedMessage;
@@ -7173,7 +7185,7 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
                   "--translator-text-color": this.getTranslatedTextColor()
                 });
                 let watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(this, view.translation, "translator-translated-watermark");
-                watermarkNode && this.ensureElementChildrenArray(e.returnvalue).push(watermarkNode), view.translation.originalContent && this.settings.general.showOriginalMessage && this.settings.general.showOriginalDirectly && !view.translation.contentIncludesOriginal && this.ensureElementChildrenArray(e.returnvalue).push(this.createOriginalMessageBlock(view.translation.originalContent));
+                watermarkNode && this.ensureElementChildrenArray(e.returnvalue).push(watermarkNode), view.translation.originalContent && this.settings.general.showOriginalMessage && this.settings.general.showOriginalDirectly && this.ensureElementChildrenArray(e.returnvalue).push(this.createOriginalMessageBlock(view.translation.originalContent));
                 return;
               }
               view.showLoading && this.ensureElementChildrenArray(e.returnvalue).push(BDFDB.ReactUtils.createElement("span", {

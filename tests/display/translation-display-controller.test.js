@@ -463,3 +463,19 @@ test("restoreMessage cancels one automatic record through an acknowledged refres
 	assert.deepEqual(await controller.restoreMessage("m1"), emptyOutcome());
 	assert.deepEqual(await controller.restoreMessage("missing"), emptyOutcome());
 });
+
+test("commitHistoricalBatch commits recorded results and surfaces unrecorded rejections", async () => {
+	const {store, refreshes, controller} = createHarness();
+	capture(store, "m1");
+
+	const outcome = await controller.commitHistoricalBatch([
+		result("m1"),
+		{messageId: "never-captured", channelId: "c1", generation: 1, sourceSignature: "c1:never-captured", origin: "automatic", status: "translated", translation: {content: "孤儿"}}
+	]);
+
+	assert.deepEqual(outcome.confirmedIds, ["m1"]);
+	assert.deepEqual(outcome.rejectedIds, ["never-captured"]);
+	assert.equal(refreshes.length, 1);
+	assert.deepEqual(refreshes[0].messageIds, ["m1"]);
+	assert.equal(store.getDisplayState("m1").status, "translated");
+});

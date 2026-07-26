@@ -96,7 +96,7 @@ test("checkMessage captures the received source into the display store", () => {
 		const message = {id: "message-1", channel_id: "channel-1", content: "Original", embeds: [], attachments: [], author: {id: "other-user"}};
 		const stream = {content: message};
 		plugin.captureSentOriginalMessage = () => {};
-		plugin.isTranslationEnabled = () => false;
+		plugin.queueAutoTranslateMessage = () => false;
 
 		plugin.checkMessage(stream, message, {id: "channel-1"});
 
@@ -168,6 +168,27 @@ test("a store-translated message does not requeue in loaded scope", async () => 
 		assert.equal(queueCalls, 0);
 		assert.match(event.returnvalue.props.className, /translator-translated-message/);
 		assert.equal(event.returnvalue.props["data-translator-revision"], String(plugin.getReceivedDisplayView("message-1").revision));
+	}
+	finally {harness.restore();}
+});
+
+test("display settings changed after a store commit recompose the rendered content", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		plugin.captureReceivedMessageSource(sourceSnapshot());
+		const result = translatedResult();
+		result.translation = Object.assign({}, result.translation, {translatedContent: "译文", originalContent: "Original"});
+		await plugin.commitReceivedDisplayResult(result);
+
+		plugin.settings.general.showOriginalMessage = true;
+		plugin.settings.general.showOriginalDirectly = false;
+		const view = plugin.getReceivedDisplayView("message-1");
+		const stream = {content: {id: "message-1", channel_id: "channel-1", content: "Original", embeds: []}};
+		plugin.applyReceivedDisplayViewToStream(stream, view);
+
+		assert.match(stream.content.content, /译文/);
+		assert.match(stream.content.content, /Original/);
 	}
 	finally {harness.restore();}
 });

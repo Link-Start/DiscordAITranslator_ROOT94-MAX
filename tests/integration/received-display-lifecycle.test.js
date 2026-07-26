@@ -144,3 +144,28 @@ test("plugin start replaces the stopped display runtime", async () => {
 	}
 	finally {harness.restore();}
 });
+
+test("a disabled channel repaint render keeps restored records confirmable", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		delete plugin.isTranslationEnabled;
+		plugin.setChannelEnablementStateValue("channel-a", true);
+		plugin.captureReceivedMessageSource(snapshot("message-1", "channel-a"));
+		await plugin.commitReceivedDisplayResult(result("message-1", "channel-a"));
+
+		await plugin.toggleTranslation("channel-a");
+		const restoredView = plugin.getReceivedDisplayView("message-1");
+		assert.equal(restoredView.status, "cancelled");
+
+		const message = {id: "message-1", channel_id: "channel-a", content: "message-1 original", embeds: [], attachments: [], author: {id: "other-user"}};
+		plugin.captureSentOriginalMessage = () => {};
+		plugin.checkMessage({content: message}, message, {id: "channel-a"});
+
+		const viewAfterRender = plugin.getReceivedDisplayView("message-1");
+		assert.equal(viewAfterRender.status, "cancelled");
+		assert.equal(viewAfterRender.reason, "channel-disabled");
+		assert.equal(viewAfterRender.revision, restoredView.revision);
+	}
+	finally {harness.restore();}
+});
