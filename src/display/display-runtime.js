@@ -34,7 +34,38 @@ function createDisplayRuntime(dependencies) {
 		renderMessages: messageIds => controller.renderMessages(messageIds).then(trackFallback),
 		restoreMessage: (messageId, options) => controller.restoreMessage(messageId, options),
 		restoreChannel: channelId => controller.restoreChannel(channelId),
-		restoreAll: options => controller.restoreAll(options)
+		restoreAll: options => controller.restoreAll(options),
+		// The surface the legacy display maps are being retired onto. These are plain
+		// store passthroughs rather than controller operations because none of them
+		// paints anything - they are state the render paths read on their next pass.
+		getDisplayState: messageId => store.getDisplayState(messageId),
+		commitManualTranslation: request => store.commitManualTranslation(request),
+		clearDisplayedTranslation: (messageId, options) => store.clearDisplayedTranslation(messageId, options),
+		consumeSourceArchive: messageId => store.consumeSourceArchive(messageId),
+		peekSourceArchive: messageId => store.peekSourceArchive(messageId),
+		dropSourceArchive: messageId => store.dropSourceArchive(messageId),
+		hasSourceArchive: messageId => store.hasSourceArchive(messageId),
+		suppress: messageId => store.suppress(messageId),
+		isSuppressed: messageId => store.isSuppressed(messageId),
+		clearSuppression: messageId => store.clearSuppression(messageId),
+		clearAllSuppression: () => store.clearAllSuppression(),
+		resolveChannelId: (messageId, options) => store.resolveChannelId(messageId, options),
+		listTranslated: () => store.listTranslated(),
+		capturePreviewSource: snapshot => store.capturePreviewSource(snapshot),
+		commitPreviewResult: result => store.commitPreviewResult(result),
+		markPreviewPending: request => store.markPreviewPending(request),
+		isPreviewPending: messageId => store.isPreviewPending(messageId),
+		getPreviewPending: messageId => store.getPreviewPending(messageId),
+		releasePreviewPending: request => store.releasePreviewPending(request),
+		getPreviewTranslation: (messageId, options) => store.getPreviewTranslation(messageId, options),
+		getPreviewCandidates: messageId => store.getPreviewCandidates(messageId),
+		getReplyPreviewProjection: (messageId, options) => store.getReplyPreviewProjection(messageId, options),
+		clearPreview: messageId => store.clearPreview(messageId),
+		clearPreviews: channelId => store.clearPreviews(channelId),
+		listPreviewed: () => store.listPreviewed(),
+		markPreviewEligible: (channelId, messageId) => store.markPreviewEligible(channelId, messageId),
+		isPreviewEligible: (channelId, messageId) => store.isPreviewEligible(channelId, messageId),
+		clearPreviewEligibility: channelId => store.clearPreviewEligibility(channelId)
 	});
 }
 

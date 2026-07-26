@@ -1360,7 +1360,7 @@ test("a manual translation is restorable and clearable like any other record", (
 	assert.equal(store.peekSourceArchive("m1").message.content, "Hello");
 });
 
-test("a manual translation never freezes out the automatic pipeline that follows it", () => {
+test("a manual translation survives the source capture that follows it", () => {
 	const store = createMessageStateStore();
 	store.commitManualTranslation({messageId: "m1", channelId: "c1", translation: {content: "你好"}});
 
@@ -1368,8 +1368,15 @@ test("a manual translation never freezes out the automatic pipeline that follows
 	// the channel stream captures a real source for it.
 	assert.equal(store.commitResult(translated("m1", "c1", "Hello", "auto")), null);
 
+	// Capturing must not discard it. A manual translation is standing user intent: the
+	// legacy path kept it across every render and refused to auto-translate over it, and
+	// only an explicit untranslate ends one.
 	store.captureSource(snapshot("m1", "c1", "Hello"));
+	assert.equal(store.getDisplayState("m1").translation.content, "你好");
+	assert.equal(store.getDisplayState("m1").origin, "manual");
 
+	store.clearDisplayedTranslation("m1");
 	assert.equal(store.getDisplayState("m1").translation, null);
 	assert.equal(store.commitResult(translated("m1", "c1", "Hello", "auto")).status, "translated");
 });
+
