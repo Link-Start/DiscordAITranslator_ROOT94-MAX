@@ -2253,12 +2253,15 @@ module.exports = (_ => {
 				return this.ensureLiveTranslationQueue().scheduleQueueRetry();
 			}
 
+			// The 429/5xx backoff window belongs to the provider client, which is what
+			// opens it. These two delegated to receivedTranslationRuntime, which never
+			// defined them, so every call threw.
 			scheduleAutoTranslationBackoff (ms) {
-				return receivedTranslationRuntime.scheduleAutoTranslationBackoff(this, ms);
+				return this.ensureProviderClient().scheduleBackoff(ms);
 			}
 
 			awaitProviderBackoff () {
-				return receivedTranslationRuntime.awaitProviderBackoff(this);
+				return this.ensureProviderClient().awaitBackoff();
 			}
 
 			requestWithTimeout (url, options, callback, timeoutMs = 30000) {
