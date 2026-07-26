@@ -392,8 +392,6 @@ module.exports = (_ => {
 		var authKeys = {};
 		var channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {};
 		var translationEnabledStates = {globalDefault: false, channelOverrides: {}};
-		var translatedMessages = {}, oldMessages = {};
-		var suppressedAutoTranslations = {};
 		var replyPreviewTranslations = {};
 		var queuedReplyPreviewTranslations = {};
 		var autoTranslationEligibleReplyPreviewMessages = {};
@@ -1103,10 +1101,10 @@ module.exports = (_ => {
 				return !!(committedView && committedView.translated);
 			},
 			resolveCheckMessageDisplay(plugin, stream, message, context) {
-				const hadDisplayedTranslation = !!translatedMessages[message.id];
+				const hadDisplayedTranslation = !!plugin.ensureReceivedDisplayRuntime().getDisplayView(message.id);
 				let translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature);
 				let messageChanged = hadDisplayedTranslation && !translation;
-				const canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !suppressedAutoTranslations[message.id];
+				const canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id);
 				const canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary);
 				let cachedTranslation = null;
 				let storeCommitted = false;
@@ -1126,9 +1124,8 @@ module.exports = (_ => {
 				else if (storeView && storeView.translated) {
 					plugin.applyReceivedDisplayViewToStream(stream, storeView);
 				}
-				else if (oldMessages[message.id]) {
-					stream.content.content = oldMessages[message.id].content;
-					delete oldMessages[message.id];
+				else if (plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id)) {
+					stream.content.content = plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message.content;
 					messageChanged = true;
 				}
 				return {translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage};
@@ -1191,7 +1188,7 @@ module.exports = (_ => {
 			getStableReplyPreviewOriginalContent(plugin, message) {
 				if (!message) return "";
 				const currentContent = (message.content || "").trim();
-				const storedTranslations = [replyPreviewTranslations[message.id], translatedMessages[message.id]].filter(Boolean);
+				const storedTranslations = plugin.ensureReceivedDisplayRuntime().getPreviewCandidates(message.id).filter(Boolean);
 				for (const storedTranslation of storedTranslations) {
 					const normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation);
 					const originalContent = (normalizedTranslation.originalContent || "").trim();
@@ -1215,7 +1212,10 @@ module.exports = (_ => {
 			getReplyPreviewDisplayContentForMessage(plugin, message, channelId = null) {
 				if (!message) return "";
 				const originalContent = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message) || (message.content || "").trim();
-				const storedTranslation = translatedMessages[message.id] || replyPreviewTranslations[message.id];
+				// The projection wraps the winning translation with its provenance; the callers
+				// below only need the translation itself.
+				const previewProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(message.id, {channelId});
+				const storedTranslation = previewProjection && previewProjection.translation;
 				if (storedTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedTranslation, channelId || translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id))) {
 					const normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation);
 					const translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
@@ -1229,36 +1229,41 @@ module.exports = (_ => {
 					channelId: translation.channelId || message.channel_id || null,
 					auto: !!translation.auto
 				}, translation));
-				delete suppressedAutoTranslations[message.id];
-				oldMessages[message.id] = new BDFDB.DiscordObjects.Message(message);
-				oldMessages[message.id].originalContentData = originalContentData || plugin.extractOriginalContentData(message);
-				translatedMessages[message.id] = storedTranslation;
+				plugin.ensureReceivedDisplayRuntime().clearSuppression(message.id);
+				plugin.ensureReceivedDisplayRuntime().commitManualTranslation({
+					messageId: message.id,
+					channelId: storedTranslation.channelId,
+					translation: storedTranslation,
+					manualOptions: {independentOfTextAreaSwitch: !!storedTranslation.independentOfTextAreaSwitch},
+					archive: {message: new BDFDB.DiscordObjects.Message(message), originalContentData: originalContentData || plugin.extractOriginalContentData(message)}
+				});
 				return storedTranslation;
 			},
-			clearDisplayedTranslationState(_plugin, messageId, options = {}) {
+			clearDisplayedTranslationState(plugin, messageId, options = {}) {
 				if (!messageId) return;
 				const config = Object.assign({
 					clearReplyPreview: false,
 					preserveSuppressed: false
 				}, options);
-				delete translatedMessages[messageId];
+				plugin.ensureReceivedDisplayRuntime().clearDisplayedTranslation(messageId, {preserveArchive: true, preserveSuppressed: config.preserveSuppressed, clearPreview: config.clearReplyPreview});
 				// oldMessages[messageId] intentionally survives this clear: a rendered message
 				// whose props still carry translated text needs the clone on its next render
 				// to restore the original; the render path deletes the clone after consuming it.
-				if (!config.preserveSuppressed) delete suppressedAutoTranslations[messageId];
+				if (!config.preserveSuppressed) plugin.ensureReceivedDisplayRuntime().clearSuppression(messageId);
 				if (config.clearReplyPreview) {
 					delete replyPreviewTranslations[messageId];
 					delete queuedReplyPreviewTranslations[messageId];
 				}
 			},
-			getStoredTranslationChannelId(_plugin, messageId, fallbackChannelId = null, translation = null) {
+			getStoredTranslationChannelId(plugin, messageId, fallbackChannelId = null, translation = null) {
 				if (fallbackChannelId) return fallbackChannelId;
 				if (translation && translation.channelId) return translation.channelId;
-				const displayedTranslation = translatedMessages[messageId];
+				const displayedTranslation = plugin.ensureReceivedDisplayRuntime().getDisplayState(messageId);
 				if (displayedTranslation && displayedTranslation.channelId) return displayedTranslation.channelId;
 				const replyPreviewTranslation = replyPreviewTranslations[messageId];
 				if (replyPreviewTranslation && replyPreviewTranslation.channelId) return replyPreviewTranslation.channelId;
-				return oldMessages[messageId] && oldMessages[messageId].channel_id || null;
+				const archive = plugin.ensureReceivedDisplayRuntime().peekSourceArchive(messageId);
+				return archive && archive.message.channel_id || null;
 			},
 			shouldDisplayStoredTranslation(plugin, translation, channelId = null) {
 				if (!translation) return false;
@@ -1275,7 +1280,10 @@ module.exports = (_ => {
 			},
 			getActiveMessageTranslation(plugin, message, channelId = null, expectedSignature = null) {
 				if (!message || !message.id) return null;
-				let translation = translatedMessages[message.id];
+				const displayRecord = plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id);
+				// Store records are frozen, and refreshTranslationDisplay recomposes in place,
+				// so every read that reaches it works on a detached copy.
+				let translation = displayRecord && displayRecord.status == "translated" && displayRecord.translation ? Object.assign({}, displayRecord.translation) : null;
 				if (!translation) return null;
 				const resolvedChannelId = translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id, channelId, translation);
 				if (!translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, resolvedChannelId)) {
@@ -1292,7 +1300,7 @@ module.exports = (_ => {
 					plugin.clearCachedTranslation(message.id);
 					return null;
 				}
-				translatedMessages[message.id] = translation;
+				// The refreshed projection is display-only; the record itself is unchanged.
 				return translation;
 			},
 			getActiveReplyPreviewTranslation(plugin, message, channelId) {
@@ -1312,7 +1320,8 @@ module.exports = (_ => {
 				const stableReferencedMessage = translationDisplayLogic.getStableReplyPreviewMessage(plugin, referencedMessage);
 				const baseMessage = e.instance.props.baseMessage || null;
 				const channelId = plugin.getMessageChannelId(baseMessage || stableReferencedMessage);
-				const storedMessageTranslation = translatedMessages[stableReferencedMessage.id];
+				const baseProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(stableReferencedMessage.id, {channelId});
+				const storedMessageTranslation = baseProjection && baseProjection.translation;
 				const hasVisibleStoredTranslation = storedMessageTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedMessageTranslation, channelId) || translationDisplayLogic.getActiveReplyPreviewTranslation(plugin, stableReferencedMessage, channelId);
 				if (!hasVisibleStoredTranslation && plugin.shouldAutoTranslateReplyPreview(baseMessage, stableReferencedMessage, channelId)) plugin.queueReplyPreviewTranslation(stableReferencedMessage, channelId, {baseMessage});
 				const fallbackContent = translationDisplayLogic.getReplyPreviewDisplayContentForMessage(plugin, stableReferencedMessage, channelId) || translationDisplayLogic.getReplyPreviewFallbackContent(plugin, stableReferencedMessage) || (stableReferencedMessage.content || "").trim();
@@ -1326,7 +1335,7 @@ module.exports = (_ => {
 				}
 			},
 			resolveLoadedMessageContentTranslation(plugin, message, channelId) {
-				if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return null;
+				if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id) || plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return null;
 				// A store record that is already translated or has an active request must not
 				// re-enter the queue on every render; that would loop commit -> repaint -> requeue.
 				const storeView = plugin.getReceivedDisplayRuntimeView(message.id);
@@ -1349,9 +1358,8 @@ module.exports = (_ => {
 				let message = e.instance.props.message;
 				const channelId = plugin.getMessageChannelId(message);
 				let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, message, channelId);
-				if (!translation && oldMessages[message.id]) {
-					message = e.instance.props.message = new BDFDB.DiscordObjects.Message(oldMessages[message.id]);
-					delete oldMessages[message.id];
+				if (!translation && plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id)) {
+					message = e.instance.props.message = new BDFDB.DiscordObjects.Message(plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message);
 				}
 				if (!translation) translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId);
 				return {message, channelId, translation};
@@ -1946,7 +1954,7 @@ module.exports = (_ => {
 			shouldAutoTranslateReceivedMessage(plugin, message, channel, originalContentData = null, ignoreQueued = false) {
 				if (!channel || !channel.id || !message || !message.id) return false;
 				if (!plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message)) return false;
-				if (suppressedAutoTranslations[message.id]) return false;
+				if (plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id)) return false;
 				if (plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return false;
 				const sourceData = originalContentData || plugin.extractOriginalContentData(message);
 				if (plugin.getCachedReceivedSkipDecision(message, channel.id, sourceData)) return false;
@@ -2071,7 +2079,7 @@ module.exports = (_ => {
 					return Promise.resolve(originalMethod(...nextArgs));
 				};
 				this.clearDisplayedTranslationState(messageId, {clearReplyPreview: true});
-				delete oldMessages[messageId];
+				this.ensureReceivedDisplayRuntime().dropSourceArchive(messageId);
 				this.clearCachedTranslation(messageId);
 				if (!originalText || !channelId || !this.isTranslationEnabled(channelId)) return submit(originalText);
 				const sentRequest = this.createSentAutomaticTranslationRequest(channelId, originalText, messageId);
@@ -2094,7 +2102,8 @@ module.exports = (_ => {
 				this.ensureHistoricalJobRegistry().advanceRuntimeGeneration();
 				this.attachAutoTranslationInputActivityWatcher();
 				BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", {before: e => {
-					if (e.methodArguments[1] && oldMessages[e.methodArguments[1]] && oldMessages[e.methodArguments[1]].content) e.methodArguments[2] = oldMessages[e.methodArguments[1]].content;
+					const editArchive = e.methodArguments[1] && this.ensureReceivedDisplayRuntime().peekSourceArchive(e.methodArguments[1]);
+						if (editArchive && editArchive.message.content) e.methodArguments[2] = editArchive.message.content;
 					else if (e.methodArguments[1]) e.methodArguments[2] = this.getEditableSentMessageText(e.methodArguments[1], e.methodArguments[2]);
 				}});
 				BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "editMessage", {instead: e => this.handleEditedMessageSubmit(e.methodArguments, (...args) => e.originalMethod(...args))});
@@ -2140,7 +2149,7 @@ module.exports = (_ => {
 				this.clearDisplayedTranslations();
 				this.ensureHistoricalJobRegistry().clearFailedSnapshots();
 				this.ensureSentTranslationStore().clearManualRequests();
-				suppressedAutoTranslations = {};
+				this.ensureReceivedDisplayRuntime().clearAllSuppression();
 				this.ensureLiveTranslationQueue().clearAllQueuedMessages();
 				queuedReplyPreviewTranslations = {};
 				autoTranslationEligibleReplyPreviewMessages = {};
@@ -3629,9 +3638,11 @@ module.exports = (_ => {
 
 			getMessageDetectionSourceText (message) {
 				if (!message) return "";
-				const translation = translatedMessages[message.id];
+				const detectionRecord = this.ensureReceivedDisplayRuntime().getDisplayState(message.id);
+				const translation = detectionRecord && detectionRecord.translation;
 				if (translation && translation.originalContent) return translation.originalContent;
-				const originalContentData = oldMessages[message.id] && oldMessages[message.id].originalContentData;
+				const detectionArchive = this.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
+				const originalContentData = detectionArchive && detectionArchive.originalContentData;
 				if (originalContentData && originalContentData.content) return originalContentData.content;
 				return message.content || "";
 			}
@@ -3804,12 +3815,13 @@ module.exports = (_ => {
 			}
 
 			refreshReceivedMessageSourceState (message, channelId = null) {
-				if (!message || !message.id || !oldMessages[message.id]) return false;
+				if (!message || !message.id || !this.ensureReceivedDisplayRuntime().hasSourceArchive(message.id)) return false;
 				const currentContent = this.normalizeExtractedMessageText(message.content).trim();
 				if (!currentContent) return false;
-				const storedOriginal = oldMessages[message.id];
+				const storedOriginal = this.ensureReceivedDisplayRuntime().peekSourceArchive(message.id).message;
 				const storedOriginalData = storedOriginal.originalContentData || {};
-				const translation = translatedMessages[message.id] || {};
+				const editRecord = this.ensureReceivedDisplayRuntime().getDisplayState(message.id);
+				const translation = editRecord && editRecord.translation || {};
 				const knownContents = [
 					storedOriginal.content,
 					storedOriginalData.content,
@@ -3818,14 +3830,15 @@ module.exports = (_ => {
 					translation.content
 				].map(value => this.normalizeExtractedMessageText(value).trim()).filter(Boolean);
 				if (knownContents.includes(currentContent)) return false;
-				delete oldMessages[message.id];
+				this.ensureReceivedDisplayRuntime().dropSourceArchive(message.id);
 				this.clearDisplayedTranslationState(message.id, {clearReplyPreview: true});
 				this.clearCachedTranslation(message.id);
 				return true;
 			}
 
 			extractOriginalContentData (message, options = {}) {
-				const storedOriginalContentData = message && message.id && oldMessages[message.id] && oldMessages[message.id].originalContentData;
+				const extractArchive = message && message.id && this.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
+				const storedOriginalContentData = extractArchive && extractArchive.originalContentData;
 				if (storedOriginalContentData) return this.cloneOriginalContentData(storedOriginalContentData);
 				let messageContent = this.normalizeExtractedMessageText(message && message.content || "");
 				if (options && options.ignoreReferencedPreview) messageContent = this.stripReferencedPreviewFromContent(message, messageContent);
@@ -4113,7 +4126,7 @@ module.exports = (_ => {
 			}
 
 			hasStoredOriginalMessageClone (messageId) {
-				return !!(messageId && oldMessages[messageId]);
+				return !!(messageId && this.ensureReceivedDisplayRuntime().hasSourceArchive(messageId));
 			}
 
 			persistReceivedSkipDecision (messageId, signature, reason, preview = "") {
@@ -4217,7 +4230,7 @@ module.exports = (_ => {
 				if (!message || !message.id || !channelId || queuedReplyPreviewTranslations[message.id]) return;
 				const baseMessage = contextOptions.baseMessage || null;
 				if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId)) return;
-				if (suppressedAutoTranslations[message.id]) return;
+				if (this.ensureReceivedDisplayRuntime().isSuppressed(message.id)) return;
 				if (!this.isTranslationEnabled(channelId) || this.isOwnMessage(message)) return;
 				const originalContent = (message.content || "").trim();
 				if (!originalContent) return;
@@ -4391,7 +4404,7 @@ module.exports = (_ => {
 				if (!channelId || !baseMessage || !baseMessage.id || !referencedMessage || !referencedMessage.id) return false;
 				if (!this.isTranslationEnabled(channelId)) return false;
 				if (this.isOwnMessage(baseMessage) || this.isOwnMessage(referencedMessage)) return false;
-				if (suppressedAutoTranslations[referencedMessage.id]) return false;
+				if (this.ensureReceivedDisplayRuntime().isSuppressed(referencedMessage.id)) return false;
 				if (this.getReceivedAutoTranslateScope() == "loaded_messages") return this.isMessageWithinLoadedRange(baseMessage);
 				return this.isAutoTranslationEligibleReplyPreviewMessage(channelId, baseMessage.id);
 			}
@@ -4742,9 +4755,11 @@ module.exports = (_ => {
 
 			getDisplayedTranslationChannelId (messageId) {
 				if (!messageId) return null;
-				const translation = translatedMessages[messageId];
+				const channelRecord = this.ensureReceivedDisplayRuntime().getDisplayState(messageId);
+				const translation = channelRecord && channelRecord.translation;
 				if (translation && translation.channelId) return translation.channelId;
-				if (oldMessages[messageId] && oldMessages[messageId].channel_id) return oldMessages[messageId].channel_id;
+				const channelArchive = this.ensureReceivedDisplayRuntime().peekSourceArchive(messageId);
+				if (channelArchive && channelArchive.message.channel_id) return channelArchive.message.channel_id;
 				const displayView = this.getReceivedDisplayRuntimeView(messageId);
 				return displayView && displayView.channelId || null;
 			}
@@ -4797,9 +4812,9 @@ module.exports = (_ => {
 			}
 
 			clearDisplayedTranslations (channelId = null) {
-				for (const messageId of Object.keys(translatedMessages)) {
-					if (channelId && this.getDisplayedTranslationChannelId(messageId) != channelId) continue;
-					this.clearDisplayedTranslationState(messageId);
+				for (const record of this.ensureReceivedDisplayRuntime().listTranslated()) {
+					if (channelId && this.getDisplayedTranslationChannelId(record.messageId) != channelId) continue;
+					this.clearDisplayedTranslationState(record.messageId);
 				}
 				for (const messageId of Object.keys(replyPreviewTranslations)) {
 					if (channelId && replyPreviewTranslations[messageId].channelId != channelId) continue;
@@ -4809,11 +4824,12 @@ module.exports = (_ => {
 			}
 
 			clearDisplayedAutoTranslations (channelId = null) {
-				for (const messageId of Object.keys(translatedMessages)) {
-					const translation = translatedMessages[messageId];
-					if (!translation || !translation.auto) continue;
-					if (channelId && this.getDisplayedTranslationChannelId(messageId) != channelId) continue;
-					this.clearDisplayedTranslationState(messageId);
+				for (const record of this.ensureReceivedDisplayRuntime().listTranslated()) {
+					// auto lives inside the stored translation payload and is not the same
+					// predicate as the record origin, so it stays the filter here.
+					if (!record.translation || !record.translation.auto) continue;
+					if (channelId && this.getDisplayedTranslationChannelId(record.messageId) != channelId) continue;
+					this.clearDisplayedTranslationState(record.messageId);
 				}
 				for (const messageId of Object.keys(replyPreviewTranslations)) {
 					const translation = replyPreviewTranslations[messageId];
@@ -5790,7 +5806,7 @@ module.exports = (_ => {
 				const normalizedStoredReceivedAutoTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedReceivedAutoTranslationEnabledStates);
 				translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates);
 				if (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) this.saveChannelEnablementState(translationEnabledStates);
-				suppressedAutoTranslations = {};
+				this.ensureReceivedDisplayRuntime().clearAllSuppression();
 				this.clearAutoTranslationQueue();
 				this.resetAutoTranslationTracking();
 				this.clearLoadedAutoTranslationStatus();
@@ -6997,26 +7013,17 @@ module.exports = (_ => {
 					const storeTranslated = !!(storeDisplayView && storeDisplayView.translated && storeDisplayView.origin === "automatic");
 					if (isManualTranslation && !activeTranslation && !storeTranslated && this.ensureSentTranslationStore().hasManualRequest(manualRequestKey)) return finish(false);
 					if (isManualTranslation) this.lockManualTranslationScroll(message.id);
-					if (activeTranslation) {
+					if (activeTranslation || storeTranslated) {
+						// Untranslate. The display store owns the translation, so the restore is what
+						// produces the cancelled terminal state with its reason and repaints the
+						// original; clearing first would return the record to idle and leave the
+						// restore with nothing to do.
 						if (options.auto) return finish(false);
-						suppressedAutoTranslations[message.id] = true;
-						this.clearDisplayedTranslationState(message.id, {
-							clearReplyPreview: true,
-							preserveSuppressed: true
-						});
-						this.scheduleTranslationRerender();
-						finish(false);
-					}
-					else if (storeTranslated) {
-						// Manual untranslate of a store-owned automatic translation restores the
-						// original through one acknowledged display transaction.
-						if (options.auto) return finish(false);
-						suppressedAutoTranslations[message.id] = true;
-						this.clearDisplayedTranslationState(message.id, {
-							clearReplyPreview: true,
-							preserveSuppressed: true
-						});
-						this.restoreReceivedDisplayMessage(message.id).then(_ => finish(false), _ => finish(false));
+						this.ensureReceivedDisplayRuntime().suppress(message.id);
+						this.restoreReceivedDisplayMessage(message.id).then(_ => {
+							this.ensureReceivedDisplayRuntime().clearPreview(message.id);
+							finish(false);
+						}, _ => finish(false));
 					}
 					else {
 						if (options.auto && !this.isTranslationEnabled(channelId)) return finish(false);

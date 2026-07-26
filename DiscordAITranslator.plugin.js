@@ -235,13 +235,17 @@ var require_message_state_store = __commonJS({
           if (current && current.channelId && current.channelId !== channelId || channelGenerations.has(channelId) && channelGenerations.get(channelId) !== snapshot.generation) return null;
           let sourceSignature = normalizeIdentity(snapshot.sourceSignature);
           if (current && current.generation === snapshot.generation && current.sourceSignature === sourceSignature) return current;
-          let record = Object.freeze({
+          let keepsManualTranslation = !!(current && current.origin === MESSAGE_ORIGINS.MANUAL && current.status === MESSAGE_STATUSES.TRANSLATED && !current.sourceSignature), record = Object.freeze({
             ...createBaseRecord(messageId, channelId),
             archive: current ? current.archive : null,
             suppressed: !!(current && current.suppressed),
             preview: current ? current.preview : null,
             previewSignature: current ? current.previewSignature : null,
             previewPending: current ? current.previewPending : null,
+            status: keepsManualTranslation ? current.status : MESSAGE_STATUSES.IDLE,
+            translation: keepsManualTranslation ? current.translation : null,
+            origin: keepsManualTranslation ? current.origin : null,
+            manualOptions: keepsManualTranslation ? current.manualOptions : null,
             generation: snapshot.generation,
             sourceSignature,
             source: freezeValue(snapshot.source || {}),
@@ -781,7 +785,38 @@ var require_display_runtime = __commonJS({
         renderMessages: /* @__PURE__ */ __name((messageIds) => controller.renderMessages(messageIds).then(trackFallback), "renderMessages"),
         restoreMessage: /* @__PURE__ */ __name((messageId, options) => controller.restoreMessage(messageId, options), "restoreMessage"),
         restoreChannel: /* @__PURE__ */ __name((channelId) => controller.restoreChannel(channelId), "restoreChannel"),
-        restoreAll: /* @__PURE__ */ __name((options) => controller.restoreAll(options), "restoreAll")
+        restoreAll: /* @__PURE__ */ __name((options) => controller.restoreAll(options), "restoreAll"),
+        // The surface the legacy display maps are being retired onto. These are plain
+        // store passthroughs rather than controller operations because none of them
+        // paints anything - they are state the render paths read on their next pass.
+        getDisplayState: /* @__PURE__ */ __name((messageId) => store.getDisplayState(messageId), "getDisplayState"),
+        commitManualTranslation: /* @__PURE__ */ __name((request) => store.commitManualTranslation(request), "commitManualTranslation"),
+        clearDisplayedTranslation: /* @__PURE__ */ __name((messageId, options) => store.clearDisplayedTranslation(messageId, options), "clearDisplayedTranslation"),
+        consumeSourceArchive: /* @__PURE__ */ __name((messageId) => store.consumeSourceArchive(messageId), "consumeSourceArchive"),
+        peekSourceArchive: /* @__PURE__ */ __name((messageId) => store.peekSourceArchive(messageId), "peekSourceArchive"),
+        dropSourceArchive: /* @__PURE__ */ __name((messageId) => store.dropSourceArchive(messageId), "dropSourceArchive"),
+        hasSourceArchive: /* @__PURE__ */ __name((messageId) => store.hasSourceArchive(messageId), "hasSourceArchive"),
+        suppress: /* @__PURE__ */ __name((messageId) => store.suppress(messageId), "suppress"),
+        isSuppressed: /* @__PURE__ */ __name((messageId) => store.isSuppressed(messageId), "isSuppressed"),
+        clearSuppression: /* @__PURE__ */ __name((messageId) => store.clearSuppression(messageId), "clearSuppression"),
+        clearAllSuppression: /* @__PURE__ */ __name(() => store.clearAllSuppression(), "clearAllSuppression"),
+        resolveChannelId: /* @__PURE__ */ __name((messageId, options) => store.resolveChannelId(messageId, options), "resolveChannelId"),
+        listTranslated: /* @__PURE__ */ __name(() => store.listTranslated(), "listTranslated"),
+        capturePreviewSource: /* @__PURE__ */ __name((snapshot) => store.capturePreviewSource(snapshot), "capturePreviewSource"),
+        commitPreviewResult: /* @__PURE__ */ __name((result) => store.commitPreviewResult(result), "commitPreviewResult"),
+        markPreviewPending: /* @__PURE__ */ __name((request) => store.markPreviewPending(request), "markPreviewPending"),
+        isPreviewPending: /* @__PURE__ */ __name((messageId) => store.isPreviewPending(messageId), "isPreviewPending"),
+        getPreviewPending: /* @__PURE__ */ __name((messageId) => store.getPreviewPending(messageId), "getPreviewPending"),
+        releasePreviewPending: /* @__PURE__ */ __name((request) => store.releasePreviewPending(request), "releasePreviewPending"),
+        getPreviewTranslation: /* @__PURE__ */ __name((messageId, options) => store.getPreviewTranslation(messageId, options), "getPreviewTranslation"),
+        getPreviewCandidates: /* @__PURE__ */ __name((messageId) => store.getPreviewCandidates(messageId), "getPreviewCandidates"),
+        getReplyPreviewProjection: /* @__PURE__ */ __name((messageId, options) => store.getReplyPreviewProjection(messageId, options), "getReplyPreviewProjection"),
+        clearPreview: /* @__PURE__ */ __name((messageId) => store.clearPreview(messageId), "clearPreview"),
+        clearPreviews: /* @__PURE__ */ __name((channelId) => store.clearPreviews(channelId), "clearPreviews"),
+        listPreviewed: /* @__PURE__ */ __name(() => store.listPreviewed(), "listPreviewed"),
+        markPreviewEligible: /* @__PURE__ */ __name((channelId, messageId) => store.markPreviewEligible(channelId, messageId), "markPreviewEligible"),
+        isPreviewEligible: /* @__PURE__ */ __name((channelId, messageId) => store.isPreviewEligible(channelId, messageId), "isPreviewEligible"),
+        clearPreviewEligibility: /* @__PURE__ */ __name((channelId) => store.clearPreviewEligibility(channelId), "clearPreviewEligibility")
       });
     }
     __name(createDisplayRuntime, "createDisplayRuntime");
@@ -6312,7 +6347,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           "−−−−−": "0",
           _: "··−−·−"
         };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, translatedMessages = {}, oldMessages = {}, suppressedAutoTranslations = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {};
+        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {};
         let channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
         var pluginRuntimeActive = !0;
         let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
@@ -6761,10 +6796,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             return !!(committedView && committedView.translated);
           },
           resolveCheckMessageDisplay(plugin, stream, message, context) {
-            let hadDisplayedTranslation = !!translatedMessages[message.id], translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature), messageChanged = hadDisplayedTranslation && !translation, canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !suppressedAutoTranslations[message.id], canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary), cachedTranslation = null, storeCommitted = !1;
+            let hadDisplayedTranslation = !!plugin.ensureReceivedDisplayRuntime().getDisplayView(message.id), translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature), messageChanged = hadDisplayedTranslation && !translation, canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id), canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary), cachedTranslation = null, storeCommitted = !1;
             canAutoTranslateReplyPreviewForBase && plugin.markAutoTranslationEligibleReplyPreviewMessage(context.channelId, message.id), !translation && canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad || context.forceQueue || messageChanged || context.isNewerThanBoundary) && (cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData), cachedTranslation && !context.historicalLoad && (storeCommitted = receivedTranslationRuntime.commitCachedDisplayResult(plugin, message, context, cachedTranslation)));
             let storeView = !translation && plugin.getReceivedDisplayRuntimeView(message.id);
-            return translation ? (plugin.refreshTranslationDisplay(translation), stream.content.content = translation.content) : storeView && storeView.translated ? plugin.applyReceivedDisplayViewToStream(stream, storeView) : oldMessages[message.id] && (stream.content.content = oldMessages[message.id].content, delete oldMessages[message.id], messageChanged = !0), { translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage };
+            return translation ? (plugin.refreshTranslationDisplay(translation), stream.content.content = translation.content) : storeView && storeView.translated ? plugin.applyReceivedDisplayViewToStream(stream, storeView) : plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (stream.content.content = plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message.content, messageChanged = !0), { translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage };
           },
           queueCheckMessageTranslation(plugin, message, channel, context, outcome) {
             if (!(outcome.translation || outcome.storeCommitted || context.skipAutoQueue || !outcome.canAutoTranslateMessage) && (context.channelState && (context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, message.id)), context.forceQueue || outcome.messageChanged || context.isNewerThanBoundary || context.historicalLoad)) {
@@ -6813,7 +6848,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           getStableReplyPreviewOriginalContent(plugin, message) {
             if (!message) return "";
-            let currentContent = (message.content || "").trim(), storedTranslations = [replyPreviewTranslations[message.id], translatedMessages[message.id]].filter(Boolean);
+            let currentContent = (message.content || "").trim(), storedTranslations = plugin.ensureReceivedDisplayRuntime().getPreviewCandidates(message.id).filter(Boolean);
             for (let storedTranslation of storedTranslations) {
               let normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation), originalContent = (normalizedTranslation.originalContent || "").trim(), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim(), displayContent = translationDisplayLogic.getReplyPreviewDisplayContent(plugin, normalizedTranslation).trim();
               if (originalContent && (!currentContent || currentContent == originalContent || currentContent == translatedContent || currentContent == displayContent || currentContent == translationDisplayLogic.stripReplyPreviewOriginalSuffix(plugin, displayContent)))
@@ -6831,7 +6866,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           getReplyPreviewDisplayContentForMessage(plugin, message, channelId = null) {
             if (!message) return "";
-            let originalContent = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message) || (message.content || "").trim(), storedTranslation = translatedMessages[message.id] || replyPreviewTranslations[message.id];
+            let originalContent = translationDisplayLogic.getStableReplyPreviewOriginalContent(plugin, message) || (message.content || "").trim(), previewProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(message.id, { channelId }), storedTranslation = previewProjection && previewProjection.translation;
             if (storedTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedTranslation, channelId || translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id))) {
               let normalizedTranslation = plugin.normalizeStoredTranslationData(storedTranslation), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
               if (!normalizedTranslation.auto || plugin.settings.general.showOriginalInReplyPreview) return translatedContent || originalContent;
@@ -6844,23 +6879,31 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               channelId: translation.channelId || message.channel_id || null,
               auto: !!translation.auto
             }, translation));
-            return delete suppressedAutoTranslations[message.id], oldMessages[message.id] = new BDFDB.DiscordObjects.Message(message), oldMessages[message.id].originalContentData = originalContentData || plugin.extractOriginalContentData(message), translatedMessages[message.id] = storedTranslation, storedTranslation;
+            return plugin.ensureReceivedDisplayRuntime().clearSuppression(message.id), plugin.ensureReceivedDisplayRuntime().commitManualTranslation({
+              messageId: message.id,
+              channelId: storedTranslation.channelId,
+              translation: storedTranslation,
+              manualOptions: { independentOfTextAreaSwitch: !!storedTranslation.independentOfTextAreaSwitch },
+              archive: { message: new BDFDB.DiscordObjects.Message(message), originalContentData: originalContentData || plugin.extractOriginalContentData(message) }
+            }), storedTranslation;
           },
-          clearDisplayedTranslationState(_plugin, messageId, options = {}) {
+          clearDisplayedTranslationState(plugin, messageId, options = {}) {
             if (!messageId) return;
             let config = Object.assign({
               clearReplyPreview: !1,
               preserveSuppressed: !1
             }, options);
-            delete translatedMessages[messageId], config.preserveSuppressed || delete suppressedAutoTranslations[messageId], config.clearReplyPreview && (delete replyPreviewTranslations[messageId], delete queuedReplyPreviewTranslations[messageId]);
+            plugin.ensureReceivedDisplayRuntime().clearDisplayedTranslation(messageId, { preserveArchive: !0, preserveSuppressed: config.preserveSuppressed, clearPreview: config.clearReplyPreview }), config.preserveSuppressed || plugin.ensureReceivedDisplayRuntime().clearSuppression(messageId), config.clearReplyPreview && (delete replyPreviewTranslations[messageId], delete queuedReplyPreviewTranslations[messageId]);
           },
-          getStoredTranslationChannelId(_plugin, messageId, fallbackChannelId = null, translation = null) {
+          getStoredTranslationChannelId(plugin, messageId, fallbackChannelId = null, translation = null) {
             if (fallbackChannelId) return fallbackChannelId;
             if (translation && translation.channelId) return translation.channelId;
-            let displayedTranslation = translatedMessages[messageId];
+            let displayedTranslation = plugin.ensureReceivedDisplayRuntime().getDisplayState(messageId);
             if (displayedTranslation && displayedTranslation.channelId) return displayedTranslation.channelId;
             let replyPreviewTranslation = replyPreviewTranslations[messageId];
-            return replyPreviewTranslation && replyPreviewTranslation.channelId ? replyPreviewTranslation.channelId : oldMessages[messageId] && oldMessages[messageId].channel_id || null;
+            if (replyPreviewTranslation && replyPreviewTranslation.channelId) return replyPreviewTranslation.channelId;
+            let archive = plugin.ensureReceivedDisplayRuntime().peekSourceArchive(messageId);
+            return archive && archive.message.channel_id || null;
           },
           shouldDisplayStoredTranslation(plugin, translation, channelId = null) {
             if (!translation) return !1;
@@ -6876,10 +6919,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           getActiveMessageTranslation(plugin, message, channelId = null, expectedSignature = null) {
             if (!message || !message.id) return null;
-            let translation = translatedMessages[message.id];
+            let displayRecord = plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id), translation = displayRecord && displayRecord.status == "translated" && displayRecord.translation ? Object.assign({}, displayRecord.translation) : null;
             if (!translation) return null;
             let resolvedChannelId = translationDisplayLogic.getStoredTranslationChannelId(plugin, message.id, channelId, translation);
-            return !translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, resolvedChannelId) || expectedSignature && translation.signature && translation.signature != expectedSignature ? (translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id), null) : (translation = translationDisplayLogic.refreshTranslationDisplay(plugin, translation), translation.auto && plugin.isTranslationResultTooSimilar(translation) ? (translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id), plugin.clearCachedTranslation(message.id), null) : (translatedMessages[message.id] = translation, translation));
+            return !translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, resolvedChannelId) || expectedSignature && translation.signature && translation.signature != expectedSignature ? (translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id), null) : (translation = translationDisplayLogic.refreshTranslationDisplay(plugin, translation), translation.auto && plugin.isTranslationResultTooSimilar(translation) ? (translationDisplayLogic.clearDisplayedTranslationState(plugin, message.id), plugin.clearCachedTranslation(message.id), null) : translation);
           },
           getActiveReplyPreviewTranslation(plugin, message, channelId) {
             if (!message || !message.id) return null;
@@ -6888,7 +6931,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           processMessageReply(plugin, e) {
             if (!e.instance.props.referencedMessage || !e.instance.props.referencedMessage.message) return;
-            let referencedMessage = e.instance.props.referencedMessage.message, stableReferencedMessage = translationDisplayLogic.getStableReplyPreviewMessage(plugin, referencedMessage), baseMessage = e.instance.props.baseMessage || null, channelId = plugin.getMessageChannelId(baseMessage || stableReferencedMessage), storedMessageTranslation = translatedMessages[stableReferencedMessage.id];
+            let referencedMessage = e.instance.props.referencedMessage.message, stableReferencedMessage = translationDisplayLogic.getStableReplyPreviewMessage(plugin, referencedMessage), baseMessage = e.instance.props.baseMessage || null, channelId = plugin.getMessageChannelId(baseMessage || stableReferencedMessage), baseProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(stableReferencedMessage.id, { channelId }), storedMessageTranslation = baseProjection && baseProjection.translation;
             !(storedMessageTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedMessageTranslation, channelId) || translationDisplayLogic.getActiveReplyPreviewTranslation(plugin, stableReferencedMessage, channelId)) && plugin.shouldAutoTranslateReplyPreview(baseMessage, stableReferencedMessage, channelId) && plugin.queueReplyPreviewTranslation(stableReferencedMessage, channelId, { baseMessage });
             let fallbackContent = translationDisplayLogic.getReplyPreviewDisplayContentForMessage(plugin, stableReferencedMessage, channelId) || translationDisplayLogic.getReplyPreviewFallbackContent(plugin, stableReferencedMessage) || (stableReferencedMessage.content || "").trim();
             e.instance.props.referencedMessage = Object.assign({}, e.instance.props.referencedMessage);
@@ -6896,7 +6939,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             previewMessage.content = fallbackContent, plugin.markReplyPreviewRenderMessage(previewMessage), e.instance.props.referencedMessage.message = previewMessage, e.returnvalue && e.returnvalue.props && (e.returnvalue = plugin.wrapReplyPreviewJumpPause(plugin.stripTranslatorStylingFromReplyPreviewNode(e.returnvalue)));
           },
           resolveLoadedMessageContentTranslation(plugin, message, channelId) {
-            if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return null;
+            if (plugin.getReceivedAutoTranslateScope() != "loaded_messages" || !plugin.isTranslationEnabled(channelId) || plugin.isOwnMessage(message) || plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id) || plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return null;
             let storeView = plugin.getReceivedDisplayRuntimeView(message.id);
             if (storeView && (storeView.translated || storeView.showLoading)) return null;
             let originalContentData = plugin.extractOriginalContentData(message), cachedTranslation = plugin.getCachedReceivedTranslation(message, channelId, originalContentData), liveMessage = plugin.isLikelyLiveAutoTranslateMessage(message, channelId);
@@ -6908,7 +6951,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           prepareMessageContentDisplay(plugin, e) {
             let message = e.instance.props.message, channelId = plugin.getMessageChannelId(message), translation = translationDisplayLogic.getActiveMessageTranslation(plugin, message, channelId);
-            return !translation && oldMessages[message.id] && (message = e.instance.props.message = new BDFDB.DiscordObjects.Message(oldMessages[message.id]), delete oldMessages[message.id]), translation || (translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId)), { message, channelId, translation };
+            return !translation && plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (message = e.instance.props.message = new BDFDB.DiscordObjects.Message(plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message)), translation || (translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId)), { message, channelId, translation };
           },
           createTranslationWatermarkNode(plugin, translation, key) {
             return !translation || !translation.content ? null : BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
@@ -7365,7 +7408,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             return sourceLanguages.length && !plugin.matchesConfiguredSourceLanguage(localDetection.languageId, sourceLanguages);
           },
           shouldAutoTranslateReceivedMessage(plugin, message, channel, originalContentData = null, ignoreQueued = !1) {
-            if (!channel || !channel.id || !message || !message.id || !plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return !1;
+            if (!channel || !channel.id || !message || !message.id || !plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message) || plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id) || plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return !1;
             let sourceData = originalContentData || plugin.extractOriginalContentData(message);
             if (plugin.getCachedReceivedSkipDecision(message, channel.id, sourceData) || receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, sourceData) || !plugin.hasTranslatableMessageContent(sourceData)) return !1;
             let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, sourceData, channel.id);
@@ -7468,7 +7511,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               let nextArgs = args.slice();
               return nextArgs[2] = typeof payload == "string" ? nextText : Object.assign({}, payload || {}, { content: nextText }), Promise.resolve(originalMethod(...nextArgs));
             }, "submit");
-            if (this.clearDisplayedTranslationState(messageId, { clearReplyPreview: !0 }), delete oldMessages[messageId], this.clearCachedTranslation(messageId), !originalText || !channelId || !this.isTranslationEnabled(channelId)) return submit(originalText);
+            if (this.clearDisplayedTranslationState(messageId, { clearReplyPreview: !0 }), this.ensureReceivedDisplayRuntime().dropSourceArchive(messageId), this.clearCachedTranslation(messageId), !originalText || !channelId || !this.isTranslationEnabled(channelId)) return submit(originalText);
             let sentRequest = this.createSentAutomaticTranslationRequest(channelId, originalText, messageId);
             return new Promise((resolve, reject) => {
               let finishSubmit = /* @__PURE__ */ __name((nextText) => this.completeSentAutomaticTranslationRequest(sentRequest, nextText, submit).then(resolve, reject), "finishSubmit");
@@ -7482,7 +7525,8 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           }
           onStart() {
             pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), this.ensureLiveTranslationQueue().restartRequestGeneration(), this.ensureSentTranslationStore().resetForStart(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
-              e.methodArguments[1] && oldMessages[e.methodArguments[1]] && oldMessages[e.methodArguments[1]].content ? e.methodArguments[2] = oldMessages[e.methodArguments[1]].content : e.methodArguments[1] && (e.methodArguments[2] = this.getEditableSentMessageText(e.methodArguments[1], e.methodArguments[2]));
+              let editArchive = e.methodArguments[1] && this.ensureReceivedDisplayRuntime().peekSourceArchive(e.methodArguments[1]);
+              editArchive && editArchive.message.content ? e.methodArguments[2] = editArchive.message.content : e.methodArguments[1] && (e.methodArguments[2] = this.getEditableSentMessageText(e.methodArguments[1], e.methodArguments[2]));
             }, "before") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "editMessage", { instead: /* @__PURE__ */ __name((e) => this.handleEditedMessageSubmit(e.methodArguments, (...args) => e.originalMethod(...args)), "instead") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageToolbarUtils, "useMessageMenu", { after: /* @__PURE__ */ __name((e) => {
               if (e.instance.props.message && e.instance.props.channel) {
                 let channelId = e.instance.props.channel && e.instance.props.channel.id || null, translated = this.isMessageDisplayTranslated(e.instance.props.message, channelId), [children, index] = BDFDB.ContextMenuUtils.findItem(e.returnValue, { id: ["copy-text", "pin", "unpin"] });
@@ -7498,7 +7542,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "after") }), this.forceUpdateAll();
           }
           onStop() {
-            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), this.ensureSentTranslationStore().clearPendingOriginals(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.ensureLiveTranslationQueue().cancelQueueRetry(), this.ensureMessageViewportStore().clearManualScrollLock(), this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), this.ensureHistoricalJobRegistry().clearFailedSnapshots(), this.ensureSentTranslationStore().clearManualRequests(), suppressedAutoTranslations = {}, this.ensureLiveTranslationQueue().clearAllQueuedMessages(), queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, this.ensureLiveTranslationQueue().setBusyTranslating(!1), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
+            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), this.ensureSentTranslationStore().clearPendingOriginals(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.ensureLiveTranslationQueue().cancelQueueRetry(), this.ensureMessageViewportStore().clearManualScrollLock(), this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), this.ensureHistoricalJobRegistry().clearFailedSnapshots(), this.ensureSentTranslationStore().clearManualRequests(), this.ensureReceivedDisplayRuntime().clearAllSuppression(), this.ensureLiveTranslationQueue().clearAllQueuedMessages(), queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, this.ensureLiveTranslationQueue().setBusyTranslating(!1), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
             let settingsPanel;
@@ -8623,9 +8667,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           }
           getMessageDetectionSourceText(message) {
             if (!message) return "";
-            let translation = translatedMessages[message.id];
+            let detectionRecord = this.ensureReceivedDisplayRuntime().getDisplayState(message.id), translation = detectionRecord && detectionRecord.translation;
             if (translation && translation.originalContent) return translation.originalContent;
-            let originalContentData = oldMessages[message.id] && oldMessages[message.id].originalContentData;
+            let detectionArchive = this.ensureReceivedDisplayRuntime().peekSourceArchive(message.id), originalContentData = detectionArchive && detectionArchive.originalContentData;
             return originalContentData && originalContentData.content ? originalContentData.content : message.content || "";
           }
           ensureChannelLanguageChoiceScope(channelId, place) {
@@ -8762,20 +8806,20 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             return content;
           }
           refreshReceivedMessageSourceState(message, channelId = null) {
-            if (!message || !message.id || !oldMessages[message.id]) return !1;
+            if (!message || !message.id || !this.ensureReceivedDisplayRuntime().hasSourceArchive(message.id)) return !1;
             let currentContent = this.normalizeExtractedMessageText(message.content).trim();
             if (!currentContent) return !1;
-            let storedOriginal = oldMessages[message.id], storedOriginalData = storedOriginal.originalContentData || {}, translation = translatedMessages[message.id] || {};
+            let storedOriginal = this.ensureReceivedDisplayRuntime().peekSourceArchive(message.id).message, storedOriginalData = storedOriginal.originalContentData || {}, editRecord = this.ensureReceivedDisplayRuntime().getDisplayState(message.id), translation = editRecord && editRecord.translation || {};
             return [
               storedOriginal.content,
               storedOriginalData.content,
               translation.originalContent,
               translation.translatedContent,
               translation.content
-            ].map((value) => this.normalizeExtractedMessageText(value).trim()).filter(Boolean).includes(currentContent) ? !1 : (delete oldMessages[message.id], this.clearDisplayedTranslationState(message.id, { clearReplyPreview: !0 }), this.clearCachedTranslation(message.id), !0);
+            ].map((value) => this.normalizeExtractedMessageText(value).trim()).filter(Boolean).includes(currentContent) ? !1 : (this.ensureReceivedDisplayRuntime().dropSourceArchive(message.id), this.clearDisplayedTranslationState(message.id, { clearReplyPreview: !0 }), this.clearCachedTranslation(message.id), !0);
           }
           extractOriginalContentData(message, options = {}) {
-            let storedOriginalContentData = message && message.id && oldMessages[message.id] && oldMessages[message.id].originalContentData;
+            let extractArchive = message && message.id && this.ensureReceivedDisplayRuntime().peekSourceArchive(message.id), storedOriginalContentData = extractArchive && extractArchive.originalContentData;
             if (storedOriginalContentData) return this.cloneOriginalContentData(storedOriginalContentData);
             let messageContent = this.normalizeExtractedMessageText(message && message.content || "");
             options && options.ignoreReferencedPreview && (messageContent = this.stripReferencedPreviewFromContent(message, messageContent));
@@ -9001,7 +9045,7 @@ __________________ __________________ __________________
             return loadedTranslationStatusStore.markMessageSeen(channelId, messageId);
           }
           hasStoredOriginalMessageClone(messageId) {
-            return !!(messageId && oldMessages[messageId]);
+            return !!(messageId && this.ensureReceivedDisplayRuntime().hasSourceArchive(messageId));
           }
           persistReceivedSkipDecision(messageId, signature, reason, preview = "") {
             return this.ensureTranslationCacheStore().persistSkipDecision(messageId, signature, reason, preview);
@@ -9073,7 +9117,7 @@ __________________ __________________ __________________
           queueReplyPreviewTranslation(message, channelId, contextOptions = {}) {
             if (!message || !message.id || !channelId || queuedReplyPreviewTranslations[message.id]) return;
             let baseMessage = contextOptions.baseMessage || null;
-            if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId) || suppressedAutoTranslations[message.id] || !this.isTranslationEnabled(channelId) || this.isOwnMessage(message)) return;
+            if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId) || this.ensureReceivedDisplayRuntime().isSuppressed(message.id) || !this.isTranslationEnabled(channelId) || this.isOwnMessage(message)) return;
             let originalContent = (message.content || "").trim();
             if (!originalContent) return;
             let signature = this.createReplyPreviewSignature(message, channelId, originalContent), existingTranslation = replyPreviewTranslations[message.id];
@@ -9183,7 +9227,7 @@ __________________ __________________ __________________
             return BDFDB.ReactUtils.createElement(node.type, Object.assign({}, props, { key: node.key, ref: node.ref }));
           }
           shouldAutoTranslateReplyPreview(baseMessage, referencedMessage, channelId) {
-            return !this.settings.general.showOriginalInReplyPreview || !channelId || !baseMessage || !baseMessage.id || !referencedMessage || !referencedMessage.id || !this.isTranslationEnabled(channelId) || this.isOwnMessage(baseMessage) || this.isOwnMessage(referencedMessage) || suppressedAutoTranslations[referencedMessage.id] ? !1 : this.getReceivedAutoTranslateScope() == "loaded_messages" ? this.isMessageWithinLoadedRange(baseMessage) : this.isAutoTranslationEligibleReplyPreviewMessage(channelId, baseMessage.id);
+            return !this.settings.general.showOriginalInReplyPreview || !channelId || !baseMessage || !baseMessage.id || !referencedMessage || !referencedMessage.id || !this.isTranslationEnabled(channelId) || this.isOwnMessage(baseMessage) || this.isOwnMessage(referencedMessage) || this.ensureReceivedDisplayRuntime().isSuppressed(referencedMessage.id) ? !1 : this.getReceivedAutoTranslateScope() == "loaded_messages" ? this.isMessageWithinLoadedRange(baseMessage) : this.isAutoTranslationEligibleReplyPreviewMessage(channelId, baseMessage.id);
           }
           getMessagesScroller() {
             return this.ensureMessageViewportStore().getMessagesScroller();
@@ -9431,9 +9475,10 @@ __________________ __________________ __________________
           }
           getDisplayedTranslationChannelId(messageId) {
             if (!messageId) return null;
-            let translation = translatedMessages[messageId];
+            let channelRecord = this.ensureReceivedDisplayRuntime().getDisplayState(messageId), translation = channelRecord && channelRecord.translation;
             if (translation && translation.channelId) return translation.channelId;
-            if (oldMessages[messageId] && oldMessages[messageId].channel_id) return oldMessages[messageId].channel_id;
+            let channelArchive = this.ensureReceivedDisplayRuntime().peekSourceArchive(messageId);
+            if (channelArchive && channelArchive.message.channel_id) return channelArchive.message.channel_id;
             let displayView = this.getReceivedDisplayRuntimeView(messageId);
             return displayView && displayView.channelId || null;
           }
@@ -9467,16 +9512,14 @@ __________________ __________________ __________________
             delete autoTranslationEligibleReplyPreviewMessages[channelId], loadedTranslationStatusStore.resetSeen(channelId), loadedTranslationStatusStore.isForChannel(channelId) && this.clearLoadedAutoTranslationStatus();
           }
           clearDisplayedTranslations(channelId = null) {
-            for (let messageId of Object.keys(translatedMessages))
-              channelId && this.getDisplayedTranslationChannelId(messageId) != channelId || this.clearDisplayedTranslationState(messageId);
+            for (let record of this.ensureReceivedDisplayRuntime().listTranslated())
+              channelId && this.getDisplayedTranslationChannelId(record.messageId) != channelId || this.clearDisplayedTranslationState(record.messageId);
             for (let messageId of Object.keys(replyPreviewTranslations))
               channelId && replyPreviewTranslations[messageId].channelId != channelId || (delete replyPreviewTranslations[messageId], delete queuedReplyPreviewTranslations[messageId]);
           }
           clearDisplayedAutoTranslations(channelId = null) {
-            for (let messageId of Object.keys(translatedMessages)) {
-              let translation = translatedMessages[messageId];
-              !translation || !translation.auto || channelId && this.getDisplayedTranslationChannelId(messageId) != channelId || this.clearDisplayedTranslationState(messageId);
-            }
+            for (let record of this.ensureReceivedDisplayRuntime().listTranslated())
+              !record.translation || !record.translation.auto || channelId && this.getDisplayedTranslationChannelId(record.messageId) != channelId || this.clearDisplayedTranslationState(record.messageId);
             for (let messageId of Object.keys(replyPreviewTranslations)) {
               let translation = replyPreviewTranslations[messageId];
               !translation || !translation.auto || channelId && translation.channelId != channelId || (delete replyPreviewTranslations[messageId], delete queuedReplyPreviewTranslations[messageId]);
@@ -10203,7 +10246,7 @@ __________________ __________________ __________________
           forceUpdateAll() {
             favorites = BDFDB.DataUtils.load(this, "favorites"), favorites = BDFDB.ArrayUtils.is(favorites) ? favorites : [], authKeys = BDFDB.DataUtils.load(this, "authKeys"), channelLanguages = BDFDB.DataUtils.load(this, "channelLanguages"), guildLanguages = BDFDB.DataUtils.load(this, "guildLanguages"), channelPrimaryEngineOverrides = this.normalizeStoredChannelPrimaryEngineOverrides(BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides")), this.ensureTranslationCacheStore().loadPersisted();
             let storedTranslationEnabledStates = BDFDB.DataUtils.load(this, "translationEnabledStates"), storedReceivedAutoTranslationEnabledStates = BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates"), normalizedStoredTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedTranslationEnabledStates), normalizedStoredReceivedAutoTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedReceivedAutoTranslationEnabledStates);
-            translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates), (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) && this.saveChannelEnablementState(translationEnabledStates), suppressedAutoTranslations = {}, this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), replyPreviewTranslations = {}, this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
+            translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates), (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) && this.saveChannelEnablementState(translationEnabledStates), this.ensureReceivedDisplayRuntime().clearAllSuppression(), this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), replyPreviewTranslations = {}, this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
           }
           onMessageContextMenu(e) {
             if (e.instance.props.message && e.instance.props.channel) {
@@ -11115,18 +11158,11 @@ __________________ __________________ __________________
               isManualTranslation && (manualRequestKey = this.ensureSentTranslationStore().createManualRequestKey(channelId, message.id));
               let activeTranslation = this.getActiveMessageTranslation(message, channelId), storeDisplayView = !activeTranslation && this.getReceivedDisplayRuntimeView(message.id), storeTranslated = !!(storeDisplayView && storeDisplayView.translated && storeDisplayView.origin === "automatic");
               if (isManualTranslation && !activeTranslation && !storeTranslated && this.ensureSentTranslationStore().hasManualRequest(manualRequestKey)) return finish(!1);
-              if (isManualTranslation && this.lockManualTranslationScroll(message.id), activeTranslation) {
+              if (isManualTranslation && this.lockManualTranslationScroll(message.id), activeTranslation || storeTranslated) {
                 if (options.auto) return finish(!1);
-                suppressedAutoTranslations[message.id] = !0, this.clearDisplayedTranslationState(message.id, {
-                  clearReplyPreview: !0,
-                  preserveSuppressed: !0
-                }), this.scheduleTranslationRerender(), finish(!1);
-              } else if (storeTranslated) {
-                if (options.auto) return finish(!1);
-                suppressedAutoTranslations[message.id] = !0, this.clearDisplayedTranslationState(message.id, {
-                  clearReplyPreview: !0,
-                  preserveSuppressed: !0
-                }), this.restoreReceivedDisplayMessage(message.id).then((_2) => finish(!1), (_2) => finish(!1));
+                this.ensureReceivedDisplayRuntime().suppress(message.id), this.restoreReceivedDisplayMessage(message.id).then((_2) => {
+                  this.ensureReceivedDisplayRuntime().clearPreview(message.id), finish(!1);
+                }, (_2) => finish(!1));
               } else {
                 if (options.auto && !this.isTranslationEnabled(channelId)) return finish(!1);
                 let rerenderOptions = {

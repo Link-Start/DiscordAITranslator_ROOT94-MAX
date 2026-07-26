@@ -274,6 +274,14 @@ function createMessageStateStore({journal = null} = {}) {
 			if (channelGenerations.has(channelId) && channelGenerations.get(channelId) !== snapshot.generation) return null;
 			const sourceSignature = normalizeIdentity(snapshot.sourceSignature);
 			if (current && current.generation === snapshot.generation && current.sourceSignature === sourceSignature) return current;
+			// A manual translation committed before anything captured this message carries no
+			// signature, so its FIRST capture would look like a source change and silently
+			// discard standing user intent. A later capture whose signature actually differs
+			// is a real edit, and then the translation is stale and must go.
+			const keepsManualTranslation = !!(current
+				&& current.origin === MESSAGE_ORIGINS.MANUAL
+				&& current.status === MESSAGE_STATUSES.TRANSLATED
+				&& !current.sourceSignature);
 			// A changed source resets the translation lifecycle but keeps the projections that
 			// carry their own validity rule: suppression is standing user intent, the archive is
 			// the only way back to the original, and the preview is checked against a signature
@@ -285,6 +293,10 @@ function createMessageStateStore({journal = null} = {}) {
 				preview: current ? current.preview : null,
 				previewSignature: current ? current.previewSignature : null,
 				previewPending: current ? current.previewPending : null,
+				status: keepsManualTranslation ? current.status : MESSAGE_STATUSES.IDLE,
+				translation: keepsManualTranslation ? current.translation : null,
+				origin: keepsManualTranslation ? current.origin : null,
+				manualOptions: keepsManualTranslation ? current.manualOptions : null,
 				generation: snapshot.generation,
 				sourceSignature,
 				source: freezeValue(snapshot.source || {}),
