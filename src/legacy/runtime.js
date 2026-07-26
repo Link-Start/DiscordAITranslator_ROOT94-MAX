@@ -606,6 +606,9 @@ module.exports = (_ => {
 		var lastAutoTranslationUserScrollTime = 0;
 		var autoTranslationUserScrollChannelId = null;
 		var autoTranslationUserScrollIntentSequence = 0;
+		var lastProgrammaticScrollWriteTime = 0;
+		var receivedDisplayFlushTimer = null;
+		var receivedDisplayFlushQueues = new Map();
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		var autoTranslationBackoffUntil = 0;
@@ -645,6 +648,9 @@ module.exports = (_ => {
 		const MAX_SENT_ORIGINAL_ENTRIES = 200;
 		const AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900;
 		const AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300;
+		// Scroll events delivered shortly after our own scroll restores are echoes of the
+		// programmatic write, not user activity; they must not extend the user-scroll window.
+		const AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE = 150;
 		const HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100;
 		const DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50;
 		const LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1;
@@ -1405,9 +1411,12 @@ module.exports = (_ => {
 					requestIdentity: queueItem.liveRequest ? String(queueItem.liveRequest.id) : null,
 					status: "translated",
 					translation: storedTranslation
-				}));
-				const finishRequest = () => receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
-				Promise.resolve(commit).then(finishRequest, finishRequest);
+				}), {refresh: false});
+				const finishRequest = outcome => {
+					if (outcome && outcome.deferredIds && outcome.deferredIds.length) plugin.scheduleReceivedDisplayFlush(channelId, queueItem.message.id);
+					receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+				};
+				Promise.resolve(commit).then(finishRequest, _ => finishRequest(null));
 				return true;
 			},
 			handleQueueItemGuardFailure(plugin, queueItem) {
@@ -3607,6 +3616,7 @@ module.exports = (_ => {
 				deferredSettingsRerenderTimer = null;
 				// Restore store-owned automatic records synchronously before legacy cleanup so the
 				// final rerender paints originals; onStop must not reload settings via forceUpdateAll.
+				this.clearReceivedDisplayFlushQueue();
 				this.restoreAllReceivedDisplay({refresh: false});
 				this.clearDisplayedTranslations();
 				failedHistoricalTranslationSnapshots.clear();
@@ -6481,6 +6491,7 @@ module.exports = (_ => {
 				const delta = elementRect.top - desiredTop;
 				if (Math.abs(delta) < 1) return;
 				const maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
+				lastProgrammaticScrollWriteTime = Date.now();
 				messagesScroller.scrollTop = Math.max(0, Math.min(messagesScroller.scrollTop + delta, maxScrollTop));
 			}
 
@@ -6535,6 +6546,7 @@ module.exports = (_ => {
 					const messagesScroller = this.getMessagesScroller();
 					if (!messagesScroller) return;
 					if (scrollerState.keepBottom) {
+						lastProgrammaticScrollWriteTime = Date.now();
 						messagesScroller.scrollTop = messagesScroller.scrollHeight;
 						return;
 					}
@@ -6543,6 +6555,7 @@ module.exports = (_ => {
 						return;
 					}
 					const maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
+					lastProgrammaticScrollWriteTime = Date.now();
 					messagesScroller.scrollTop = Math.max(0, Math.min(scrollerState.scrollTop, maxScrollTop));
 				};
 				requestAnimationFrame(() => requestAnimationFrame(restore));
@@ -7199,6 +7212,7 @@ module.exports = (_ => {
 				this.detachAutoTranslationScrollWatcher();
 				autoTranslationScrollActivityHandler = _ => {
 					const now = Date.now();
+					if (now - lastProgrammaticScrollWriteTime < AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE) return;
 					const channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
 					if (autoTranslationScrollIntentPending) {
 						this.clearAutoTranslationScrollIntent();
@@ -8454,6 +8468,36 @@ module.exports = (_ => {
 				return this.ensureReceivedDisplayRuntime().releasePending(request);
 			}
 
+			// Live automatic commits write the store immediately and coalesce their visible
+			// refresh: one acknowledged display transaction per channel per debounce window
+			// instead of one full-list repaint (plus scroll restore) per message.
+			scheduleReceivedDisplayFlush (channelId, messageId) {
+				if (!channelId || messageId == null) return;
+				const key = String(channelId);
+				if (!receivedDisplayFlushQueues.has(key)) receivedDisplayFlushQueues.set(key, new Set());
+				receivedDisplayFlushQueues.get(key).add(String(messageId));
+				if (receivedDisplayFlushTimer) return;
+				receivedDisplayFlushTimer = setTimeout(_ => {
+					receivedDisplayFlushTimer = null;
+					this.flushReceivedDisplayQueues();
+				}, AUTO_TRANSLATION_RERENDER_DELAY);
+			}
+
+			flushReceivedDisplayQueues () {
+				const queues = [...receivedDisplayFlushQueues.entries()];
+				receivedDisplayFlushQueues.clear();
+				for (const [, messageIds] of queues) {
+					const flush = this.ensureReceivedDisplayRuntime().renderMessages([...messageIds]);
+					if (flush && flush.catch) flush.catch(_ => {});
+				}
+			}
+
+			clearReceivedDisplayFlushQueue () {
+				if (receivedDisplayFlushTimer) clearTimeout(receivedDisplayFlushTimer);
+				receivedDisplayFlushTimer = null;
+				receivedDisplayFlushQueues.clear();
+			}
+
 			restoreReceivedDisplayMessage (messageId, options) {
 				return this.ensureReceivedDisplayRuntime().restoreMessage(messageId, options);
 			}
@@ -9251,7 +9295,10 @@ module.exports = (_ => {
 									requestIdentity: liveRequest ? String(liveRequest.id) : null,
 									status: "translated",
 									translation: storedCachedTranslation
-								})).then(_ => finish(true), _ => finish(false));
+								}), {refresh: false}).then(outcome => {
+									if (outcome && outcome.deferredIds && outcome.deferredIds.length) this.scheduleReceivedDisplayFlush(channelId, message.id);
+									finish(true);
+								}, _ => finish(false));
 								return;
 							}
 							this.applyStoredTranslationToMessage(message, storedCachedTranslation, originalContentData);
@@ -9324,7 +9371,10 @@ module.exports = (_ => {
 										requestIdentity: liveRequest ? String(liveRequest.id) : null,
 										status: "translated",
 										translation: storedTranslation
-									})).then(_ => finish(true), _ => finish(false));
+									}), {refresh: false}).then(outcome => {
+										if (outcome && outcome.deferredIds && outcome.deferredIds.length) this.scheduleReceivedDisplayFlush(channelId, message.id);
+										finish(true);
+									}, _ => finish(false));
 									return;
 								}
 								this.applyStoredTranslationToMessage(message, storedTranslation, originalContentData);

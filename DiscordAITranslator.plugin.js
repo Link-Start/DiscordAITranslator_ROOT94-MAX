@@ -327,6 +327,10 @@ var require_translation_display_controller = __commonJS({
           let record = store.getDisplayState(messageId);
           return record ? refreshRecords([record]) : createEmptyOutcome();
         },
+        async renderMessages(messageIds) {
+          let records = (Array.isArray(messageIds) ? messageIds : []).map((messageId) => store.getDisplayState(messageId)).filter(Boolean);
+          return refreshRecords(records);
+        },
         async markPending(request, { refresh = !0 } = {}) {
           let record = store.markPending(request);
           return record ? refresh ? refreshRecords([record]) : createEmptyOutcome({ deferredIds: [record.messageId] }) : createEmptyOutcome({ rejectedIds: [String(request.messageId)] });
@@ -484,6 +488,7 @@ var require_display_runtime = __commonJS({
         releasePending: /* @__PURE__ */ __name((request) => store.releasePending(request), "releasePending"),
         commitMessageResult: /* @__PURE__ */ __name((result, options) => controller.commitMessageResult(result, options), "commitMessageResult"),
         commitHistoricalBatch: /* @__PURE__ */ __name((results) => controller.commitHistoricalBatch(results), "commitHistoricalBatch"),
+        renderMessages: /* @__PURE__ */ __name((messageIds) => controller.renderMessages(messageIds), "renderMessages"),
         restoreMessage: /* @__PURE__ */ __name((messageId, options) => controller.restoreMessage(messageId, options), "restoreMessage"),
         restoreChannel: /* @__PURE__ */ __name((channelId) => controller.restoreChannel(channelId), "restoreChannel"),
         restoreAll: /* @__PURE__ */ __name((options) => controller.restoreAll(options), "restoreAll")
@@ -1232,8 +1237,8 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             primaryLabelEn: "Open Baidu Translate Open Platform"
           }
         };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, translationCache = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationCacheSaveTimer = null, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, lastAutoTranslationUserScrollTime = 0, autoTranslationUserScrollChannelId = null, autoTranslationUserScrollIntentSequence = 0, autoTranslationBackoffUntil = 0, autoTranslationScrollWatcherAttached = !1, autoTranslationScrollWatcherElement = null, autoTranslationScrollActivityHandler = null, autoTranslationScrollIntentHandler = null, autoTranslationScrollIntentEndHandler = null, autoTranslationScrollEndHandler = null, autoTranslationScrollIntentPending = !1, autoTranslationScrollIntentTimer = null, autoTranslationScrollIdleTimer = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map(), translatedChannelTitles = {}, pendingChannelTitleTranslations = {}, failedChannelTitleTranslations = {}, channelTitleTranslationSequence = 0, pluginRuntimeActive = !0, lastAutoTranslationInputActivityTime = 0, autoTranslationInputActivityHandler = null, loadedAutoTranslationSeenMessages = {}, loadedAutoTranslationStatus = { active: !1, collecting: !1, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" }, loadedAutoTranslationStatusHideTimer = null, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {}, manualTranslationScrollAnchor = null, manualTranslationScrollLockTimer = null;
-        let MAX_TRANSLATION_CACHE_ENTRIES = 500, AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900, AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD = 80, MANUAL_TRANSLATION_SCROLL_LOCK_MS = 4500, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
+        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, translationCache = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationCacheSaveTimer = null, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, lastAutoTranslationUserScrollTime = 0, autoTranslationUserScrollChannelId = null, autoTranslationUserScrollIntentSequence = 0, lastProgrammaticScrollWriteTime = 0, receivedDisplayFlushTimer = null, receivedDisplayFlushQueues = /* @__PURE__ */ new Map(), autoTranslationBackoffUntil = 0, autoTranslationScrollWatcherAttached = !1, autoTranslationScrollWatcherElement = null, autoTranslationScrollActivityHandler = null, autoTranslationScrollIntentHandler = null, autoTranslationScrollIntentEndHandler = null, autoTranslationScrollEndHandler = null, autoTranslationScrollIntentPending = !1, autoTranslationScrollIntentTimer = null, autoTranslationScrollIdleTimer = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map(), translatedChannelTitles = {}, pendingChannelTitleTranslations = {}, failedChannelTitleTranslations = {}, channelTitleTranslationSequence = 0, pluginRuntimeActive = !0, lastAutoTranslationInputActivityTime = 0, autoTranslationInputActivityHandler = null, loadedAutoTranslationSeenMessages = {}, loadedAutoTranslationStatus = { active: !1, collecting: !1, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" }, loadedAutoTranslationStatusHideTimer = null, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {}, manualTranslationScrollAnchor = null, manualTranslationScrollLockTimer = null;
+        let MAX_TRANSLATION_CACHE_ENTRIES = 500, AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900, AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300, AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE = 150, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD = 80, MANUAL_TRANSLATION_SCROLL_LOCK_MS = 4500, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
         }, languageTypes = {
@@ -1712,8 +1717,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               requestIdentity: queueItem.liveRequest ? String(queueItem.liveRequest.id) : null,
               status: "translated",
               translation: storedTranslation
-            })), finishRequest = /* @__PURE__ */ __name(() => receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest), "finishRequest");
-            return Promise.resolve(commit).then(finishRequest, finishRequest), !0;
+            }), { refresh: !1 }), finishRequest = /* @__PURE__ */ __name((outcome) => {
+              outcome && outcome.deferredIds && outcome.deferredIds.length && plugin.scheduleReceivedDisplayFlush(channelId, queueItem.message.id), receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest);
+            }, "finishRequest");
+            return Promise.resolve(commit).then(finishRequest, (_2) => finishRequest(null)), !0;
           },
           handleQueueItemGuardFailure(plugin, queueItem) {
             return !queueItem || plugin.shouldAutoTranslateReceivedMessage(queueItem.message, queueItem.channel, queueItem.originalContentData, !0) ? !1 : (receivedTranslationRuntime.finishLiveTranslationRequest(plugin, queueItem.liveRequest), !0);
@@ -3526,7 +3533,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "after") }), this.forceUpdateAll();
           }
           onStop() {
-            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleTranslationSequence++, this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), manualTranslationScrollLockTimer && clearTimeout(manualTranslationScrollLockTimer), manualTranslationScrollLockTimer = null, manualTranslationScrollAnchor = null, deferredSettingsRerenderTimer = null, this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
+            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleTranslationSequence++, this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), manualTranslationScrollLockTimer && clearTimeout(manualTranslationScrollLockTimer), manualTranslationScrollLockTimer = null, manualTranslationScrollAnchor = null, deferredSettingsRerenderTimer = null, this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
             let settingsPanel;
@@ -5747,7 +5754,7 @@ __________________ __________________ __________________
             let scrollerRect = messagesScroller.getBoundingClientRect(), elementRect = element.getBoundingClientRect(), desiredTop = scrollerRect.top + (typeof anchorState.relativeTop == "number" ? anchorState.relativeTop : elementRect.top - scrollerRect.top), delta = elementRect.top - desiredTop;
             if (Math.abs(delta) < 1) return;
             let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
-            messagesScroller.scrollTop = Math.max(0, Math.min(messagesScroller.scrollTop + delta, maxScrollTop));
+            lastProgrammaticScrollWriteTime = Date.now(), messagesScroller.scrollTop = Math.max(0, Math.min(messagesScroller.scrollTop + delta, maxScrollTop));
           }
           restoreMessageAnchorState(anchorState) {
             if (!anchorState) return;
@@ -5781,7 +5788,7 @@ __________________ __________________ __________________
               let messagesScroller = this.getMessagesScroller();
               if (!messagesScroller) return;
               if (scrollerState.keepBottom) {
-                messagesScroller.scrollTop = messagesScroller.scrollHeight;
+                lastProgrammaticScrollWriteTime = Date.now(), messagesScroller.scrollTop = messagesScroller.scrollHeight;
                 return;
               }
               if (scrollerState.anchor) {
@@ -5789,7 +5796,7 @@ __________________ __________________ __________________
                 return;
               }
               let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
-              messagesScroller.scrollTop = Math.max(0, Math.min(scrollerState.scrollTop, maxScrollTop));
+              lastProgrammaticScrollWriteTime = Date.now(), messagesScroller.scrollTop = Math.max(0, Math.min(scrollerState.scrollTop, maxScrollTop));
             }, "restore");
             requestAnimationFrame(() => requestAnimationFrame(restore));
           }
@@ -6240,7 +6247,9 @@ __________________ __________________ __________________
             let messagesScroller = document.querySelector(BDFDB.dotCN.messagesscroller);
             if (messagesScroller && !(autoTranslationScrollWatcherAttached && autoTranslationScrollWatcherElement == messagesScroller)) {
               this.detachAutoTranslationScrollWatcher(), autoTranslationScrollActivityHandler = /* @__PURE__ */ __name((_2) => {
-                let now = Date.now(), channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
+                let now = Date.now();
+                if (now - lastProgrammaticScrollWriteTime < AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE) return;
+                let channelId = BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
                 autoTranslationScrollIntentPending ? (this.clearAutoTranslationScrollIntent(), autoTranslationUserScrollChannelId = channelId || null, lastAutoTranslationUserScrollTime = now, this.scheduleAutoTranslationScrollIdleFinish(channelId)) : channelId && autoTranslationUserScrollChannelId == channelId && lastAutoTranslationUserScrollTime && now - lastAutoTranslationUserScrollTime < AUTO_TRANSLATION_SCROLL_IDLE_DELAY && (lastAutoTranslationUserScrollTime = now, this.scheduleAutoTranslationScrollIdleFinish(channelId));
               }, "autoTranslationScrollActivityHandler"), autoTranslationScrollIntentHandler = /* @__PURE__ */ __name((event) => {
                 event && event.type == "keydown" && !["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key) || (autoTranslationUserScrollIntentSequence++, this.markAutoTranslationScrollIntent());
@@ -7137,6 +7146,28 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
           releaseReceivedDisplayPending(request) {
             return this.ensureReceivedDisplayRuntime().releasePending(request);
           }
+          // Live automatic commits write the store immediately and coalesce their visible
+          // refresh: one acknowledged display transaction per channel per debounce window
+          // instead of one full-list repaint (plus scroll restore) per message.
+          scheduleReceivedDisplayFlush(channelId, messageId) {
+            if (!channelId || messageId == null) return;
+            let key = String(channelId);
+            receivedDisplayFlushQueues.has(key) || receivedDisplayFlushQueues.set(key, /* @__PURE__ */ new Set()), receivedDisplayFlushQueues.get(key).add(String(messageId)), !receivedDisplayFlushTimer && (receivedDisplayFlushTimer = setTimeout((_2) => {
+              receivedDisplayFlushTimer = null, this.flushReceivedDisplayQueues();
+            }, AUTO_TRANSLATION_RERENDER_DELAY));
+          }
+          flushReceivedDisplayQueues() {
+            let queues = [...receivedDisplayFlushQueues.entries()];
+            receivedDisplayFlushQueues.clear();
+            for (let [, messageIds] of queues) {
+              let flush = this.ensureReceivedDisplayRuntime().renderMessages([...messageIds]);
+              flush && flush.catch && flush.catch((_2) => {
+              });
+            }
+          }
+          clearReceivedDisplayFlushQueue() {
+            receivedDisplayFlushTimer && clearTimeout(receivedDisplayFlushTimer), receivedDisplayFlushTimer = null, receivedDisplayFlushQueues.clear();
+          }
           restoreReceivedDisplayMessage(messageId, options) {
             return this.ensureReceivedDisplayRuntime().restoreMessage(messageId, options);
           }
@@ -7727,7 +7758,9 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
                       requestIdentity: liveRequest ? String(liveRequest.id) : null,
                       status: "translated",
                       translation: storedCachedTranslation
-                    })).then((_2) => finish(!0), (_2) => finish(!1));
+                    }), { refresh: !1 }).then((outcome) => {
+                      outcome && outcome.deferredIds && outcome.deferredIds.length && this.scheduleReceivedDisplayFlush(channelId, message.id), finish(!0);
+                    }, (_2) => finish(!1));
                     return;
                   }
                   return this.applyStoredTranslationToMessage(message, storedCachedTranslation, originalContentData), this.scheduleTranslationRerender(rerenderOptions), finish(!0);
@@ -7782,7 +7815,9 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
                             requestIdentity: liveRequest ? String(liveRequest.id) : null,
                             status: "translated",
                             translation: storedTranslation
-                          })).then((_2) => finish(!0), (_2) => finish(!1));
+                          }), { refresh: !1 }).then((outcome) => {
+                            outcome && outcome.deferredIds && outcome.deferredIds.length && this.scheduleReceivedDisplayFlush(channelId, message.id), finish(!0);
+                          }, (_2) => finish(!1));
                           return;
                         }
                         this.applyStoredTranslationToMessage(message, storedTranslation, originalContentData), this.scheduleTranslationRerender(rerenderOptions), this.persistTranslationCacheEntry(message.id, signature, storedTranslation);

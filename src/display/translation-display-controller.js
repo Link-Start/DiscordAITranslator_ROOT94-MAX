@@ -95,6 +95,10 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			const record = store.getDisplayState(messageId);
 			return record ? refreshRecords([record]) : createEmptyOutcome();
 		},
+		async renderMessages(messageIds) {
+			const records = (Array.isArray(messageIds) ? messageIds : []).map(messageId => store.getDisplayState(messageId)).filter(Boolean);
+			return refreshRecords(records);
+		},
 		async markPending(request, {refresh = true} = {}) {
 			const record = store.markPending(request);
 			if (!record) return createEmptyOutcome({rejectedIds: [String(request.messageId)]});
