@@ -5442,13 +5442,35 @@ var require_protection_logic = __commonJS({
         formatProtectedExceptionForDisplay(_plugin, exception) {
           return exception == null ? "" : (exception = String(exception), /^<a?:[A-Za-z0-9_~]+:\d+>$/.test(exception) || /^<@!?\d+>$/.test(exception) || /^<@&\d+>$/.test(exception) || /^<#\d+>$/.test(exception), exception);
         },
+        // A protected span can swallow another one: with wrapper rules for both quotes and
+        // backticks, `"x"` masks the quotes first, so segment 1 is the backtick pair and
+        // its stored text is `<0>`. Placeholder 0 therefore never appears in the string the
+        // provider was given, and both functions below have to account for that.
+        getNestedProtectionPlaceholderKeys(plugin, protectedSegments) {
+          let keys = Object.keys(protectedSegments || {}), nested = /* @__PURE__ */ new Set();
+          for (let outer of keys) {
+            let outerText = String(protectedSegments[outer]);
+            for (let inner of keys)
+              inner === outer || nested.has(inner) || protectionLogic.getProtectionPlaceholderRegex(plugin, inner).test(outerText) && nested.add(inner);
+          }
+          return nested;
+        },
         hasAllProtectionPlaceholders(plugin, string, protectedSegments) {
-          return !protectedSegments || !Object.keys(protectedSegments).length ? !0 : Object.keys(protectedSegments).every((count) => protectionLogic.getProtectionPlaceholderRegex(plugin, count).test(string || ""));
+          if (!protectedSegments || !Object.keys(protectedSegments).length) return !0;
+          let nested = protectionLogic.getNestedProtectionPlaceholderKeys(plugin, protectedSegments);
+          return Object.keys(protectedSegments).every((count) => nested.has(count) || protectionLogic.getProtectionPlaceholderRegex(plugin, count).test(string || ""));
         },
         addExceptions(plugin, string, protectedSegments) {
-          for (let count in protectedSegments) {
-            let exception = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) && plugin.settings.exceptions.wordStart.some((n) => String(protectedSegments[count]).indexOf(n) == 0) ? String(protectedSegments[count]).slice(1) : String(protectedSegments[count]), replacement = protectionLogic.formatProtectedExceptionForDisplay(plugin, exception);
-            string = string.replace(protectionLogic.getProtectionPlaceholderRegex(plugin, count), replacement);
+          let keys = Object.keys(protectedSegments || {});
+          if (!keys.length) return string;
+          for (let pass = 0; pass <= keys.length; pass++) {
+            let changed = !1;
+            for (let count of keys) {
+              if (!protectionLogic.getProtectionPlaceholderRegex(plugin, count).test(string)) continue;
+              let segmentText = String(protectedSegments[count]), exception = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) && plugin.settings.exceptions.wordStart.some((n) => segmentText.indexOf(n) == 0) ? segmentText.slice(1) : segmentText, replacement = protectionLogic.formatProtectedExceptionForDisplay(plugin, exception);
+              string = string.replace(protectionLogic.getProtectionPlaceholderRegex(plugin, count), replacement), changed = !0;
+            }
+            if (!changed) break;
           }
           return string;
         },

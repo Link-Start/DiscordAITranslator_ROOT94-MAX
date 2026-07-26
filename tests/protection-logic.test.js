@@ -293,20 +293,36 @@ test("two spans sharing a delimiter are protected separately, not merged", () =>
 	assert.equal(result.restoredText, `say "a" then "b"`);
 });
 
-test("a nested wrapper pair masks correctly but does not survive the restore", () => {
-	// Known limitation carried over from the legacy runtime, asserted so a future fix is
-	// a deliberate change rather than an accident: the outer span captures the inner
-	// placeholder text, and addExceptions substitutes in ascending index order, so the
-	// inner marker is re-introduced after its own substitution has already run.
+test("a nested wrapper pair survives the round trip", () => {
+	// The outer span swallows the inner placeholder, so segment 1 holds the text `<0>`
+	// and placeholder 0 never reaches the provider. A single ascending pass used to
+	// substitute 0 before 1 put it back, leaving a raw marker in the message, and the
+	// response guard used to demand a placeholder the provider was never shown - which
+	// rejected every translation of a message containing a nested pair.
 	const protection = createProtection();
 	const plugin = createPlugin({exceptions: {wrapperPairs: [`"|"`, "`|`"]}});
 	const result = roundTrip(protection, plugin, '`"x"` done');
 	assert.equal(result.maskedText, `${placeholder(1)} done`);
 	assert.deepEqual(result.protectedSegments, {0: `"x"`, 1: `\`${placeholder(0)}\``});
-	assert.equal(result.restoredText, `\`${placeholder(0)}\` done`);
-	// And the guard that validates a provider response can never be satisfied here,
-	// because placeholder 0 is not present in the text the provider was given.
-	assert.equal(protection.hasAllProtectionPlaceholders(plugin, result.maskedText, result.protectedSegments), false);
+	assert.equal(result.restoredText, '`"x"` done');
+	assert.equal(protection.hasAllProtectionPlaceholders(plugin, result.maskedText, result.protectedSegments), true);
+});
+
+test("a three-deep nest restores from the inside out", () => {
+	const protection = createProtection();
+	const plugin = createPlugin({exceptions: {wrapperPairs: [`"|"`, "`|`", "(|)"]}});
+	const result = roundTrip(protection, plugin, '(`"x"`)');
+	assert.equal(result.restoredText, '(`"x"`)');
+	assert.equal(protection.hasAllProtectionPlaceholders(plugin, result.maskedText, result.protectedSegments), true);
+});
+
+test("a nested placeholder the provider dropped is still detected", () => {
+	// Only the markers the provider actually saw are evidence. Dropping the outer one
+	// must still fail the guard, or a mangled response would reach the user.
+	const protection = createProtection();
+	const plugin = createPlugin({exceptions: {wrapperPairs: [`"|"`, "`|`"]}});
+	const result = roundTrip(protection, plugin, '`"x"` done');
+	assert.equal(protection.hasAllProtectionPlaceholders(plugin, "done", result.protectedSegments), false);
 });
 
 test("configured terms match case-insensitively and across collapsed spaces", () => {
