@@ -18,6 +18,434 @@ var __commonJS = (cb, mod) => function() {
   }
 };
 
+// src/display/message-state-store.js
+var require_message_state_store = __commonJS({
+  "src/display/message-state-store.js"(exports2, module2) {
+    var MESSAGE_STATUSES = Object.freeze({
+      IDLE: "idle",
+      PENDING: "pending",
+      TRANSLATING: "translating",
+      TRANSLATED: "translated",
+      SKIPPED: "skipped",
+      FAILED: "failed",
+      CANCELLED: "cancelled"
+    }), RENDER_STATUSES = Object.freeze({
+      IDLE: "idle",
+      PENDING: "pending",
+      CONFIRMED: "confirmed",
+      UNCONFIRMED: "unconfirmed"
+    }), TERMINAL_STATUSES = /* @__PURE__ */ new Set([
+      MESSAGE_STATUSES.TRANSLATED,
+      MESSAGE_STATUSES.SKIPPED,
+      MESSAGE_STATUSES.FAILED,
+      MESSAGE_STATUSES.CANCELLED
+    ]), INVALID_REQUEST_IDENTITY = /* @__PURE__ */ Symbol("invalid-request-identity");
+    function freezeValue(value) {
+      return Array.isArray(value) ? Object.freeze(value.map(freezeValue)) : !value || typeof value != "object" ? value : Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeValue(item)])));
+    }
+    __name(freezeValue, "freezeValue");
+    function normalizeIdentity(value) {
+      return value == null ? "" : String(value);
+    }
+    __name(normalizeIdentity, "normalizeIdentity");
+    function normalizeRequestIdentity(value) {
+      if (value == null) return null;
+      switch (typeof value) {
+        case "string":
+          return value;
+        case "number":
+        case "bigint":
+        case "boolean":
+          return String(value);
+        default:
+          return INVALID_REQUEST_IDENTITY;
+      }
+    }
+    __name(normalizeRequestIdentity, "normalizeRequestIdentity");
+    function hasGeneration(value) {
+      return value != null && !(typeof value == "number" && Number.isNaN(value));
+    }
+    __name(hasGeneration, "hasGeneration");
+    function createMessageStateStore() {
+      let records = /* @__PURE__ */ new Map(), channelMessageIds = /* @__PURE__ */ new Map(), channelGenerations = /* @__PURE__ */ new Map(), revision = 0;
+      function indexRecord(record) {
+        channelMessageIds.has(record.channelId) || channelMessageIds.set(record.channelId, /* @__PURE__ */ new Set()), channelMessageIds.get(record.channelId).add(record.messageId);
+      }
+      __name(indexRecord, "indexRecord");
+      function update(messageId, changes, { advanceRevision = !0 } = {}) {
+        let current = records.get(normalizeIdentity(messageId));
+        if (!current) return null;
+        let next = Object.freeze({ ...current, ...changes, revision: advanceRevision ? ++revision : current.revision });
+        return records.set(next.messageId, next), next;
+      }
+      __name(update, "update");
+      function getCurrentRecord(input) {
+        if (!input || typeof input != "object" || !hasGeneration(input.generation)) return null;
+        let messageId = normalizeIdentity(input.messageId), channelId = normalizeIdentity(input.channelId);
+        if (!messageId || !channelId) return null;
+        let record = records.get(messageId);
+        return !record || record.channelId !== channelId || record.generation !== input.generation || !channelGenerations.has(channelId) || channelGenerations.get(channelId) !== input.generation ? null : record;
+      }
+      __name(getCurrentRecord, "getCurrentRecord");
+      function getTerminalStatus(result) {
+        return result && (result.status || MESSAGE_STATUSES.TRANSLATED);
+      }
+      __name(getTerminalStatus, "getTerminalStatus");
+      function validatesTerminalResult(result) {
+        let status = getTerminalStatus(result), record = getCurrentRecord(result);
+        if (!record || !TERMINAL_STATUSES.has(status) || result.sourceSignature === void 0 || result.sourceSignature === null || normalizeIdentity(result.sourceSignature) !== record.sourceSignature) return !1;
+        let requestIdentity = normalizeRequestIdentity(result.requestIdentity);
+        return requestIdentity === INVALID_REQUEST_IDENTITY || record.requestIdentity !== null && requestIdentity !== record.requestIdentity ? !1 : status !== MESSAGE_STATUSES.TRANSLATED || !!(result.translation && typeof result.translation.content == "string");
+      }
+      __name(validatesTerminalResult, "validatesTerminalResult");
+      function applyResult(result) {
+        let status = getTerminalStatus(result), translated = status === MESSAGE_STATUSES.TRANSLATED;
+        return update(result.messageId, {
+          status,
+          translation: translated ? freezeValue(result.translation) : null,
+          reason: translated ? null : String(result.reason || status),
+          origin: result.origin || "automatic",
+          requestIdentity: null,
+          renderStatus: RENDER_STATUSES.PENDING,
+          renderReason: null
+        });
+      }
+      __name(applyResult, "applyResult");
+      function restoreRecords(recordsToRestore, reason) {
+        return recordsToRestore.filter((record) => record && record.origin === "automatic" && record.status !== MESSAGE_STATUSES.CANCELLED).map((record) => update(record.messageId, {
+          status: MESSAGE_STATUSES.CANCELLED,
+          translation: null,
+          reason,
+          requestIdentity: null,
+          renderStatus: RENDER_STATUSES.PENDING,
+          renderReason: null
+        }));
+      }
+      __name(restoreRecords, "restoreRecords");
+      function listChannel(channelId) {
+        return [...channelMessageIds.get(normalizeIdentity(channelId)) || []].map((messageId) => records.get(messageId)).filter(Boolean);
+      }
+      return __name(listChannel, "listChannel"), Object.freeze({
+        captureSource(snapshot) {
+          if (!snapshot || typeof snapshot != "object" || !hasGeneration(snapshot.generation)) return null;
+          let messageId = normalizeIdentity(snapshot.messageId), channelId = normalizeIdentity(snapshot.channelId);
+          if (!messageId || !channelId) return null;
+          let current = records.get(messageId);
+          if (current && current.channelId !== channelId || channelGenerations.has(channelId) && channelGenerations.get(channelId) !== snapshot.generation) return null;
+          let sourceSignature = normalizeIdentity(snapshot.sourceSignature);
+          if (current && current.generation === snapshot.generation && current.sourceSignature === sourceSignature) return current;
+          let record = Object.freeze({
+            messageId,
+            channelId,
+            generation: snapshot.generation,
+            sourceSignature,
+            source: freezeValue(snapshot.source || {}),
+            status: MESSAGE_STATUSES.IDLE,
+            translation: null,
+            reason: null,
+            origin: null,
+            requestIdentity: null,
+            renderStatus: RENDER_STATUSES.IDLE,
+            renderReason: null,
+            revision: ++revision
+          });
+          return records.set(messageId, record), indexRecord(record), channelGenerations.has(channelId) || channelGenerations.set(channelId, snapshot.generation), record;
+        },
+        setChannelGeneration(channelId, generation) {
+          let normalizedChannelId = normalizeIdentity(channelId);
+          return !normalizedChannelId || !hasGeneration(generation) ? null : (channelGenerations.set(normalizedChannelId, generation), generation);
+        },
+        getChannelGeneration(channelId) {
+          return channelGenerations.get(normalizeIdentity(channelId));
+        },
+        getDisplayState(messageId) {
+          return records.get(normalizeIdentity(messageId)) || null;
+        },
+        listChannel,
+        markPending(request) {
+          if (!getCurrentRecord(request) || request.status && request.status !== MESSAGE_STATUSES.PENDING) return null;
+          let requestIdentity = normalizeRequestIdentity(request.requestIdentity);
+          return requestIdentity === INVALID_REQUEST_IDENTITY ? null : update(request.messageId, {
+            status: MESSAGE_STATUSES.PENDING,
+            translation: null,
+            reason: null,
+            origin: request.origin || "automatic",
+            requestIdentity,
+            renderStatus: RENDER_STATUSES.PENDING,
+            renderReason: null
+          });
+        },
+        markTranslating(request) {
+          let current = getCurrentRecord(request);
+          if (!current || request.status && request.status !== MESSAGE_STATUSES.TRANSLATING) return null;
+          let nextRequestIdentity = Object.prototype.hasOwnProperty.call(request, "requestIdentity") ? normalizeRequestIdentity(request.requestIdentity) : null;
+          if (nextRequestIdentity === INVALID_REQUEST_IDENTITY) return null;
+          let requestIdentity = nextRequestIdentity === null ? current.requestIdentity : nextRequestIdentity;
+          return update(request.messageId, {
+            status: MESSAGE_STATUSES.TRANSLATING,
+            reason: null,
+            origin: request.origin || current.origin || "automatic",
+            requestIdentity,
+            renderStatus: RENDER_STATUSES.PENDING,
+            renderReason: null
+          });
+        },
+        commitResult(result) {
+          return validatesTerminalResult(result) ? applyResult(result) : null;
+        },
+        commitBatch(results) {
+          let rejected = new Set(results.map((result) => normalizeIdentity(result && result.channelId))).size === 1 ? results.filter((result) => !validatesTerminalResult(result)) : results.slice();
+          return rejected.length ? { committed: [], rejected } : { committed: results.map(applyResult), rejected: [] };
+        },
+        restoreChannel(channelId, reason = "channel-disabled") {
+          return restoreRecords(listChannel(channelId), reason);
+        },
+        restoreAll(reason = "plugin-stopped") {
+          return restoreRecords([...records.values()], reason);
+        },
+        markRenderOutcome({ confirmedIds = [], missingIds = [] } = {}) {
+          for (let messageId of confirmedIds)
+            update(messageId, { renderStatus: RENDER_STATUSES.CONFIRMED, renderReason: null }, { advanceRevision: !1 });
+          for (let messageId of missingIds)
+            update(messageId, { renderStatus: RENDER_STATUSES.UNCONFIRMED, renderReason: "render-unconfirmed" }, { advanceRevision: !1 });
+        }
+      });
+    }
+    __name(createMessageStateStore, "createMessageStateStore");
+    module2.exports = { MESSAGE_STATUSES, RENDER_STATUSES, createMessageStateStore };
+  }
+});
+
+// src/display/translation-display-controller.js
+var require_translation_display_controller = __commonJS({
+  "src/display/translation-display-controller.js"(exports2, module2) {
+    function createDisplayView(state) {
+      if (!state) return null;
+      let translated = state.status === "translated" && !!state.translation, content = translated ? state.translation.content : state.source && state.source.content;
+      return Object.freeze({
+        messageId: state.messageId,
+        channelId: state.channelId,
+        revision: state.revision,
+        status: state.status,
+        content: String(content ?? ""),
+        translated,
+        showWatermark: translated,
+        showLoading: state.status === "pending" || state.status === "translating",
+        reason: state.reason,
+        renderStatus: state.renderStatus,
+        renderReason: state.renderReason,
+        translation: state.translation,
+        source: state.source,
+        origin: state.origin
+      });
+    }
+    __name(createDisplayView, "createDisplayView");
+    function createEmptyOutcome(additions) {
+      return {
+        confirmedIds: [],
+        missingIds: [],
+        fallbackUsed: !1,
+        ...additions
+      };
+    }
+    __name(createEmptyOutcome, "createEmptyOutcome");
+    function createTranslationDisplayController({ store, renderAdapter }) {
+      let transactionSequence = 0;
+      async function refreshRecords(records) {
+        if (!records.length) return createEmptyOutcome();
+        let views = records.map((record) => createDisplayView(store.getDisplayState(record.messageId)));
+        if (views.some((view) => !view)) throw new Error("A display transaction requires one view per record");
+        if (new Set(views.map((view) => view.channelId)).size !== 1) throw new Error("A display transaction cannot span channels");
+        let requestedViews = new Map(views.map((view) => [String(view.messageId), view])), rawOutcome = await renderAdapter.refreshMessages({
+          transactionId: ++transactionSequence,
+          channelId: views[0].channelId,
+          messageIds: views.map((view) => view.messageId),
+          views
+        }) || createEmptyOutcome(), staleIds = [], staleIdSet = /* @__PURE__ */ new Set();
+        function filterCurrentIds(messageIds) {
+          return (Array.isArray(messageIds) ? messageIds : []).filter((messageId) => {
+            let requestedView = requestedViews.get(String(messageId));
+            if (!requestedView) return !1;
+            let current = store.getDisplayState(requestedView.messageId);
+            return current && current.revision === requestedView.revision ? !0 : (staleIdSet.has(requestedView.messageId) || (staleIdSet.add(requestedView.messageId), staleIds.push(requestedView.messageId)), !1);
+          });
+        }
+        __name(filterCurrentIds, "filterCurrentIds");
+        let confirmedIds = filterCurrentIds(rawOutcome.confirmedIds), missingIds = filterCurrentIds(rawOutcome.missingIds);
+        store.markRenderOutcome({ confirmedIds, missingIds });
+        let filteredOutcome = {
+          ...rawOutcome,
+          confirmedIds,
+          missingIds,
+          fallbackUsed: rawOutcome.fallbackUsed === !0
+        };
+        return staleIds.length && (filteredOutcome.staleIds = staleIds), filteredOutcome;
+      }
+      return __name(refreshRecords, "refreshRecords"), Object.freeze({
+        getDisplayView(messageId) {
+          return createDisplayView(store.getDisplayState(messageId));
+        },
+        async renderMessage(messageId) {
+          let record = store.getDisplayState(messageId);
+          return record ? refreshRecords([record]) : createEmptyOutcome();
+        },
+        async markPending(request, { refresh = !0 } = {}) {
+          let record = store.markPending(request);
+          return record ? refresh ? refreshRecords([record]) : createEmptyOutcome({ deferredIds: [record.messageId] }) : createEmptyOutcome({ rejectedIds: [String(request.messageId)] });
+        },
+        async commitMessageResult(result) {
+          let record = store.commitResult(result);
+          return record ? refreshRecords([record]) : createEmptyOutcome({ rejectedIds: [String(result.messageId)] });
+        },
+        async commitHistoricalBatch(results) {
+          let outcome = store.commitBatch(results);
+          return outcome.committed.length ? refreshRecords(outcome.committed) : outcome.rejected.length ? createEmptyOutcome({ rejectedIds: outcome.rejected.map((result) => String(result.messageId)) }) : createEmptyOutcome();
+        },
+        async restoreChannel(channelId) {
+          return refreshRecords(store.restoreChannel(channelId));
+        },
+        async restoreAll({ refresh = !0 } = {}) {
+          let records = store.restoreAll();
+          if (!refresh) return records;
+          if (!records.length) return createEmptyOutcome();
+          let byChannel = /* @__PURE__ */ new Map();
+          for (let record of records)
+            byChannel.has(record.channelId) || byChannel.set(record.channelId, []), byChannel.get(record.channelId).push(record);
+          return Promise.all([...byChannel.values()].map(refreshRecords));
+        }
+      });
+    }
+    __name(createTranslationDisplayController, "createTranslationDisplayController");
+    module2.exports = { createDisplayView, createTranslationDisplayController };
+  }
+});
+
+// src/display/discord-render-adapter.js
+var require_discord_render_adapter = __commonJS({
+  "src/display/discord-render-adapter.js"(exports2, module2) {
+    function createDiscordRenderAdapter({ BDFDB, document: document2, requestAnimationFrame: requestAnimationFrame2, setTimeout: setTimeout2, getUserScrollIntentSequence, captureScrollState, restoreScrollState }) {
+      function escapeAttributeValue(value) {
+        return String(value).replace(/(["\\])/g, "\\$1");
+      }
+      __name(escapeAttributeValue, "escapeAttributeValue");
+      function findMessageElement(messageId) {
+        let escapedId = escapeAttributeValue(messageId);
+        try {
+          return document2.querySelector(`[id="chat-messages-${escapedId}"], [data-list-item-id="chat-messages-${escapedId}"], [data-list-item-id="chat-messages___chat-messages-${escapedId}"]`);
+        } catch {
+          return null;
+        }
+      }
+      __name(findMessageElement, "findMessageElement");
+      function findStreamOwner(scroller) {
+        return BDFDB.ReactUtils.findOwner(scroller, {
+          up: !0,
+          unlimited: !0,
+          filter: /* @__PURE__ */ __name((instance) => {
+            let props = instance && (instance.stateNode && instance.stateNode.props || instance.props || instance.memoizedProps);
+            return !!(props && Array.isArray(props.channelStream));
+          }, "filter")
+        });
+      }
+      __name(findStreamOwner, "findStreamOwner");
+      function waitForPaint() {
+        return new Promise((resolve) => requestAnimationFrame2(() => requestAnimationFrame2(resolve)));
+      }
+      __name(waitForPaint, "waitForPaint");
+      function waitForFallbackPaint() {
+        return new Promise((resolve) => setTimeout2(() => waitForPaint().then(resolve), 0));
+      }
+      __name(waitForFallbackPaint, "waitForFallbackPaint");
+      function getUniqueMessageIds(messageIds) {
+        let seen = /* @__PURE__ */ new Set();
+        return messageIds.filter((messageId) => {
+          let key = String(messageId);
+          return seen.has(key) ? !1 : (seen.add(key), !0);
+        });
+      }
+      __name(getUniqueMessageIds, "getUniqueMessageIds");
+      function getViewsByMessageId(views) {
+        let viewsByMessageId = /* @__PURE__ */ new Map();
+        for (let view of views) {
+          if (!view) continue;
+          let key = String(view.messageId);
+          if (!viewsByMessageId.has(key)) {
+            viewsByMessageId.set(key, view);
+            continue;
+          }
+          let existingView = viewsByMessageId.get(key);
+          (!existingView || String(existingView.revision) !== String(view.revision)) && viewsByMessageId.set(key, null);
+        }
+        return viewsByMessageId;
+      }
+      __name(getViewsByMessageId, "getViewsByMessageId");
+      function confirmViews(messageIds, viewsByMessageId) {
+        return messageIds.filter((messageId) => {
+          let view = viewsByMessageId.get(String(messageId)), element = view && findMessageElement(messageId);
+          if (!element || typeof element.querySelector != "function") return !1;
+          try {
+            return !!element.querySelector(`[data-translator-revision="${escapeAttributeValue(view.revision)}"]`);
+          } catch {
+            return !1;
+          }
+        });
+      }
+      return __name(confirmViews, "confirmViews"), {
+        async refreshMessages({ messageIds = [], views = [] }) {
+          let uniqueMessageIds = getUniqueMessageIds(messageIds), viewsByMessageId = getViewsByMessageId(views), scroller = document2.querySelector(BDFDB.dotCN.messagesscroller), intentSequence = getUserScrollIntentSequence(), scrollState = scroller ? captureScrollState() : null, outcome, renderError, hasRenderError = !1;
+          try {
+            let owner = scroller && findStreamOwner(scroller);
+            owner && BDFDB.ReactUtils.forceUpdate(owner), await waitForPaint();
+            let confirmedIds = confirmViews(uniqueMessageIds, viewsByMessageId), fallbackUsed = !1;
+            confirmedIds.length !== uniqueMessageIds.length && (fallbackUsed = !0, BDFDB.MessageUtils.rerenderAll(!0), await waitForFallbackPaint(), confirmedIds = confirmViews(uniqueMessageIds, viewsByMessageId));
+            let confirmedIdSet = new Set(confirmedIds.map(String));
+            outcome = {
+              confirmedIds,
+              missingIds: uniqueMessageIds.filter((messageId) => !confirmedIdSet.has(String(messageId))),
+              fallbackUsed
+            };
+          } catch (err) {
+            renderError = err, hasRenderError = !0;
+          } finally {
+            try {
+              scrollState && intentSequence === getUserScrollIntentSequence() && restoreScrollState(scrollState);
+            } catch (err) {
+              hasRenderError || (renderError = err, hasRenderError = !0);
+            }
+          }
+          if (hasRenderError) throw renderError;
+          return outcome;
+        }
+      };
+    }
+    __name(createDiscordRenderAdapter, "createDiscordRenderAdapter");
+    module2.exports = { createDiscordRenderAdapter };
+  }
+});
+
+// src/display/display-runtime.js
+var require_display_runtime = __commonJS({
+  "src/display/display-runtime.js"(exports2, module2) {
+    var { createMessageStateStore } = require_message_state_store(), { createTranslationDisplayController } = require_translation_display_controller(), { createDiscordRenderAdapter } = require_discord_render_adapter();
+    function createDisplayRuntime(dependencies) {
+      let store = createMessageStateStore(), renderAdapter = createDiscordRenderAdapter(dependencies), controller = createTranslationDisplayController({ store, renderAdapter });
+      return Object.freeze({
+        captureSource: /* @__PURE__ */ __name((snapshot) => store.captureSource(snapshot), "captureSource"),
+        setChannelGeneration: /* @__PURE__ */ __name((channelId, generation) => store.setChannelGeneration(channelId, generation), "setChannelGeneration"),
+        getChannelGeneration: /* @__PURE__ */ __name((channelId) => store.getChannelGeneration(channelId), "getChannelGeneration"),
+        getDisplayView: /* @__PURE__ */ __name((messageId) => controller.getDisplayView(messageId), "getDisplayView"),
+        markPending: /* @__PURE__ */ __name((request, options) => controller.markPending(request, options), "markPending"),
+        commitMessageResult: /* @__PURE__ */ __name((result) => controller.commitMessageResult(result), "commitMessageResult"),
+        commitHistoricalBatch: /* @__PURE__ */ __name((results) => controller.commitHistoricalBatch(results), "commitHistoricalBatch"),
+        restoreChannel: /* @__PURE__ */ __name((channelId) => controller.restoreChannel(channelId), "restoreChannel"),
+        restoreAll: /* @__PURE__ */ __name((options) => controller.restoreAll(options), "restoreAll")
+      });
+    }
+    __name(createDisplayRuntime, "createDisplayRuntime");
+    module2.exports = { createDisplayRuntime };
+  }
+});
+
 // src/legacy/runtime.js
 var require_runtime = __commonJS({
   "src/legacy/runtime.js"(exports2, module2) {
@@ -1094,7 +1522,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             let maskedString = newString.join(place == messageTypes.RECEIVED ? "" : " "), hasTranslatableContent = maskedString.replace(/(?:⟦\s*(?:DTA\s*)?\d+\s*⟧|【\s*\d+\s*】|\[\s*\d+\s*\]|<<<\s*\d+\s*>>>|\{\{\d+\}\})/g, "").trim().length > 0;
             return [maskedString, protectedSegments, hasTranslatableContent];
           }
-        }, receivedTranslationRuntime = {
+        }, { createDisplayRuntime } = require_display_runtime(), receivedTranslationRuntime = {
           resetLoadedMessageTracking(channelId = null) {
             if (!channelId) {
               loadedAutoTranslationSeenMessages = {};
@@ -1312,9 +1740,25 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               deferHistoricalSnapshotStart: !!options.deferHistoricalSnapshotStart
             };
           },
+          captureReceivedDisplaySource(plugin, message, context) {
+            if (!context.channelId || plugin.isOwnMessage(message)) return null;
+            let generation = plugin.getReceivedDisplayGeneration(context.channelId);
+            return plugin.captureReceivedMessageSource({
+              messageId: message.id,
+              channelId: context.channelId,
+              generation: generation === void 0 ? 1 : generation,
+              sourceSignature: context.expectedSignature,
+              source: {
+                content: context.originalContentData && context.originalContentData.content || "",
+                embeds: context.originalContentData && context.originalContentData.embeds || []
+              }
+            });
+          },
           resolveCheckMessageDisplay(plugin, stream, message, context) {
             let hadDisplayedTranslation = !!translatedMessages[message.id], translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature), messageChanged = hadDisplayedTranslation && !translation, canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !suppressedAutoTranslations[message.id], canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary), cachedTranslation = null;
-            return canAutoTranslateReplyPreviewForBase && plugin.markAutoTranslationEligibleReplyPreviewMessage(context.channelId, message.id), !translation && canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad || context.forceQueue || messageChanged || context.isNewerThanBoundary) && (cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData), cachedTranslation && !context.historicalLoad && (translation = plugin.applyStoredTranslationToMessage(message, Object.assign({ channelId: context.channelId, auto: !0 }, cachedTranslation), context.originalContentData))), translation ? (plugin.refreshTranslationDisplay(translation), stream.content.content = translation.content) : oldMessages[message.id] && (stream.content.content = oldMessages[message.id].content, delete oldMessages[message.id], messageChanged = !0), { translation, messageChanged, cachedTranslation, canAutoTranslateMessage };
+            canAutoTranslateReplyPreviewForBase && plugin.markAutoTranslationEligibleReplyPreviewMessage(context.channelId, message.id), !translation && canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad || context.forceQueue || messageChanged || context.isNewerThanBoundary) && (cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData), cachedTranslation && !context.historicalLoad && (translation = plugin.applyStoredTranslationToMessage(message, Object.assign({ channelId: context.channelId, auto: !0 }, cachedTranslation), context.originalContentData)));
+            let storeView = !translation && plugin.getReceivedDisplayRuntimeView(message.id);
+            return translation ? (plugin.refreshTranslationDisplay(translation), stream.content.content = translation.content) : storeView && storeView.translated ? plugin.applyReceivedDisplayViewToStream(stream, storeView) : oldMessages[message.id] && (stream.content.content = oldMessages[message.id].content, delete oldMessages[message.id], messageChanged = !0), { translation, messageChanged, cachedTranslation, canAutoTranslateMessage };
           },
           queueCheckMessageTranslation(plugin, message, channel, context, outcome) {
             if (!(outcome.translation || context.skipAutoQueue || !outcome.canAutoTranslateMessage) && (context.channelState && (context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, message.id)), context.forceQueue || outcome.messageChanged || context.isNewerThanBoundary || context.historicalLoad)) {
@@ -1330,7 +1774,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           checkMessage(plugin, stream, message, channel, options = {}) {
             if (!message || !stream || !stream.content) return;
             plugin.captureSentOriginalMessage(message, channel && channel.id || message.channel_id || null);
-            let context = receivedTranslationRuntime.createCheckMessageContext(plugin, message, channel, options), outcome = receivedTranslationRuntime.resolveCheckMessageDisplay(plugin, stream, message, context);
+            let context = receivedTranslationRuntime.createCheckMessageContext(plugin, message, channel, options);
+            receivedTranslationRuntime.captureReceivedDisplaySource(plugin, message, context);
+            let outcome = receivedTranslationRuntime.resolveCheckMessageDisplay(plugin, stream, message, context);
             receivedTranslationRuntime.queueCheckMessageTranslation(plugin, message, channel, context, outcome);
           },
           processAutoTranslationQueue(plugin) {
@@ -5508,7 +5954,10 @@ __________________ __________________ __________________
           getDisplayedTranslationChannelId(messageId) {
             if (!messageId) return null;
             let translation = translatedMessages[messageId];
-            return translation && translation.channelId ? translation.channelId : oldMessages[messageId] && oldMessages[messageId].channel_id || null;
+            if (translation && translation.channelId) return translation.channelId;
+            if (oldMessages[messageId] && oldMessages[messageId].channel_id) return oldMessages[messageId].channel_id;
+            let displayView = this.getReceivedDisplayRuntimeView(messageId);
+            return displayView && displayView.channelId || null;
           }
           getMessageChannelId(message, fallbackChannelId = null) {
             return message && (message.channel_id || message.channelId) || fallbackChannelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
@@ -6488,6 +6937,122 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
               channelId: e.instance.props.channel.id
             })), e.returnvalue.props.children = children;
           }
+          ensureReceivedDisplayRuntime() {
+            return this.receivedDisplayRuntimeInstance || (this.receivedDisplayRuntimeInstance = createDisplayRuntime({
+              BDFDB: {
+                dotCN: BDFDB.dotCN || {},
+                ReactUtils: BDFDB.ReactUtils,
+                MessageUtils: BDFDB.MessageUtils
+              },
+              document: {
+                querySelector: /* @__PURE__ */ __name((selector) => typeof document > "u" || !document || !selector ? null : document.querySelector(selector), "querySelector")
+              },
+              requestAnimationFrame: /* @__PURE__ */ __name((callback) => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0), "requestAnimationFrame"),
+              setTimeout: /* @__PURE__ */ __name((callback, delay) => setTimeout(callback, delay), "setTimeout"),
+              getUserScrollIntentSequence: /* @__PURE__ */ __name(() => autoTranslationUserScrollIntentSequence, "getUserScrollIntentSequence"),
+              // Scroll preservation is best-effort: a capture or restore failure must never
+              // break an acknowledged display transaction.
+              captureScrollState: /* @__PURE__ */ __name(() => {
+                try {
+                  return this.captureMessageScrollerState();
+                } catch {
+                  return null;
+                }
+              }, "captureScrollState"),
+              restoreScrollState: /* @__PURE__ */ __name((scrollerState) => {
+                try {
+                  this.restoreMessageScrollerState(scrollerState);
+                } catch {
+                }
+              }, "restoreScrollState")
+            })), this.receivedDisplayRuntimeInstance;
+          }
+          resetReceivedDisplayRuntime() {
+            this.receivedDisplayRuntimeInstance = null;
+          }
+          captureReceivedMessageSource(snapshot) {
+            return this.ensureReceivedDisplayRuntime().captureSource(snapshot);
+          }
+          markReceivedDisplayPending(request, options) {
+            return this.ensureReceivedDisplayRuntime().markPending(request, options);
+          }
+          commitReceivedDisplayResult(result) {
+            return this.ensureReceivedDisplayRuntime().commitMessageResult(result);
+          }
+          commitHistoricalReceivedDisplayBatch(results) {
+            return this.ensureReceivedDisplayRuntime().commitHistoricalBatch(results);
+          }
+          getReceivedDisplayView(messageId) {
+            return this.getReceivedDisplayRuntimeView(messageId) || this.getLegacyReceivedDisplayView(messageId);
+          }
+          getReceivedDisplayRuntimeView(messageId) {
+            return this.ensureReceivedDisplayRuntime().getDisplayView(messageId);
+          }
+          // Compatibility projection: manual translations stay on the legacy path during this
+          // milestone but expose the same display-view shape as store-owned records.
+          getLegacyReceivedDisplayView(messageId) {
+            if (!messageId) return null;
+            let translation = translatedMessages[messageId];
+            if (!translation) return null;
+            let originalMessage = oldMessages[messageId], channelId = translation.channelId || originalMessage && originalMessage.channel_id || null;
+            return Object.freeze({
+              messageId: String(messageId),
+              channelId: channelId == null ? null : String(channelId),
+              revision: null,
+              status: "translated",
+              content: String(translation.content == null ? "" : translation.content),
+              translated: !0,
+              showWatermark: !0,
+              showLoading: !1,
+              reason: null,
+              renderStatus: null,
+              renderReason: null,
+              translation,
+              source: originalMessage ? { content: originalMessage.content, embeds: originalMessage.embeds } : null,
+              origin: translation.manual ? "manual" : "automatic"
+            });
+          }
+          restoreReceivedDisplayChannel(channelId) {
+            return this.ensureReceivedDisplayRuntime().restoreChannel(channelId);
+          }
+          restoreAllReceivedDisplay(options) {
+            return this.ensureReceivedDisplayRuntime().restoreAll(options);
+          }
+          setReceivedDisplayGeneration(channelId, generation) {
+            return this.ensureReceivedDisplayRuntime().setChannelGeneration(channelId, generation);
+          }
+          getReceivedDisplayGeneration(channelId) {
+            return this.ensureReceivedDisplayRuntime().getChannelGeneration(channelId);
+          }
+          applyReceivedDisplayViewToStream(stream, view) {
+            if (!stream || !stream.content || !view) return;
+            let displayContent = String(view.content == null ? "" : view.content);
+            if (stream.content.content === displayContent) return;
+            let clonedMessage = new BDFDB.DiscordObjects.Message(stream.content);
+            clonedMessage.content = displayContent, stream.content = clonedMessage;
+          }
+          applyReceivedDisplayViewToContent(e, view) {
+            if (!(!e || !e.returnvalue || !e.returnvalue.props)) {
+              if (this.cleanupInjectedMessageChildren(this.ensureElementChildrenArray(e.returnvalue)), translationDisplayLogic.clearTranslatedRenderDecorations(this, e), !view) {
+                delete e.returnvalue.props["data-translator-revision"];
+                return;
+              }
+              if (e.returnvalue.props["data-translator-revision"] = String(view.revision), view.translated && view.translation) {
+                this.shouldProtectWrappedTextForPlace(messageTypes.RECEIVED) && (e.returnvalue.props.children = this.highlightProtectedWrappedTextInNode(e.returnvalue.props.children, view.messageId)), this.settings.general.highlightTranslatedMessages && (e.returnvalue.props.className = BDFDB.DOMUtils.formatClassName(e.returnvalue.props.className, "translator-translated-message")), e.returnvalue.props.style = Object.assign({}, e.returnvalue.props.style, {
+                  "--translator-accent-color": this.getTranslatedTextColor(),
+                  "--translator-text-color": this.getTranslatedTextColor()
+                });
+                let watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(this, view.translation, "translator-translated-watermark");
+                watermarkNode && this.ensureElementChildrenArray(e.returnvalue).push(watermarkNode), view.translation.originalContent && this.settings.general.showOriginalMessage && this.settings.general.showOriginalDirectly && !view.translation.contentIncludesOriginal && this.ensureElementChildrenArray(e.returnvalue).push(this.createOriginalMessageBlock(view.translation.originalContent));
+                return;
+              }
+              view.showLoading && this.ensureElementChildrenArray(e.returnvalue).push(BDFDB.ReactUtils.createElement("span", {
+                key: "translator-translation-loading",
+                className: "translator-translation-loading",
+                "aria-label": this.isChineseUiLanguage() ? "正在翻译" : "Translating"
+              }));
+            }
+          }
           processMessages(e) {
             return receivedTranslationRuntime.processMessages(this, e);
           }
@@ -6507,8 +7072,12 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
             }
             let displayState = translationDisplayLogic.prepareMessageContentDisplay(this, e);
             message = displayState.message;
-            let translation = displayState.translation;
-            translationDisplayLogic.applyMessageContentRenderDecorations(this, e, message, translation);
+            let translation = displayState.translation, displayView = this.getReceivedDisplayRuntimeView(message.id);
+            if (!translation && displayView && displayView.translated) {
+              this.applyReceivedDisplayViewToContent(e, displayView);
+              return;
+            }
+            translationDisplayLogic.applyMessageContentRenderDecorations(this, e, message, translation), displayView ? e.returnvalue.props["data-translator-revision"] = String(displayView.revision) : delete e.returnvalue.props["data-translator-revision"];
           }
           processEmbed(e) {
             return translationDisplayLogic.processEmbed(this, e);

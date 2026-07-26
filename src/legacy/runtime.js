@@ -1195,6 +1195,8 @@ module.exports = (_ => {
 			}
 		};
 
+		const {createDisplayRuntime} = require("../display/display-runtime");
+
 		const receivedTranslationRuntime = {
 			resetLoadedMessageTracking(channelId = null) {
 				if (!channelId) {
@@ -1511,6 +1513,20 @@ module.exports = (_ => {
 					deferHistoricalSnapshotStart: !!options.deferHistoricalSnapshotStart
 				};
 			},
+			captureReceivedDisplaySource(plugin, message, context) {
+				if (!context.channelId || plugin.isOwnMessage(message)) return null;
+				const generation = plugin.getReceivedDisplayGeneration(context.channelId);
+				return plugin.captureReceivedMessageSource({
+					messageId: message.id,
+					channelId: context.channelId,
+					generation: generation === undefined ? 1 : generation,
+					sourceSignature: context.expectedSignature,
+					source: {
+						content: context.originalContentData && context.originalContentData.content || "",
+						embeds: context.originalContentData && context.originalContentData.embeds || []
+					}
+				});
+			},
 			resolveCheckMessageDisplay(plugin, stream, message, context) {
 				const hadDisplayedTranslation = !!translatedMessages[message.id];
 				let translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature);
@@ -1523,9 +1539,13 @@ module.exports = (_ => {
 					cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData);
 					if (cachedTranslation && !context.historicalLoad) translation = plugin.applyStoredTranslationToMessage(message, Object.assign({channelId: context.channelId, auto: true}, cachedTranslation), context.originalContentData);
 				}
+				const storeView = !translation && plugin.getReceivedDisplayRuntimeView(message.id);
 				if (translation) {
 					plugin.refreshTranslationDisplay(translation);
 					stream.content.content = translation.content;
+				}
+				else if (storeView && storeView.translated) {
+					plugin.applyReceivedDisplayViewToStream(stream, storeView);
 				}
 				else if (oldMessages[message.id]) {
 					stream.content.content = oldMessages[message.id].content;
@@ -1551,6 +1571,7 @@ module.exports = (_ => {
 				if (!message || !stream || !stream.content) return;
 				plugin.captureSentOriginalMessage(message, channel && channel.id || message.channel_id || null);
 				const context = receivedTranslationRuntime.createCheckMessageContext(plugin, message, channel, options);
+				receivedTranslationRuntime.captureReceivedDisplaySource(plugin, message, context);
 				const outcome = receivedTranslationRuntime.resolveCheckMessageDisplay(plugin, stream, message, context);
 				receivedTranslationRuntime.queueCheckMessageTranslation(plugin, message, channel, context, outcome);
 			},
@@ -6843,7 +6864,9 @@ module.exports = (_ => {
 				if (!messageId) return null;
 				const translation = translatedMessages[messageId];
 				if (translation && translation.channelId) return translation.channelId;
-				return oldMessages[messageId] && oldMessages[messageId].channel_id || null;
+				if (oldMessages[messageId] && oldMessages[messageId].channel_id) return oldMessages[messageId].channel_id;
+				const displayView = this.getReceivedDisplayRuntimeView(messageId);
+				return displayView && displayView.channelId || null;
 			}
 
 			getMessageChannelId (message, fallbackChannelId = null) {
@@ -8233,6 +8256,140 @@ module.exports = (_ => {
 				e.returnvalue.props.children = children;
 			}
 
+			ensureReceivedDisplayRuntime () {
+				if (!this.receivedDisplayRuntimeInstance) this.receivedDisplayRuntimeInstance = createDisplayRuntime({
+					BDFDB: {
+						dotCN: BDFDB.dotCN || {},
+						ReactUtils: BDFDB.ReactUtils,
+						MessageUtils: BDFDB.MessageUtils
+					},
+					document: {
+						querySelector: selector => typeof document == "undefined" || !document || !selector ? null : document.querySelector(selector)
+					},
+					requestAnimationFrame: callback => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0),
+					setTimeout: (callback, delay) => setTimeout(callback, delay),
+					getUserScrollIntentSequence: () => autoTranslationUserScrollIntentSequence,
+					// Scroll preservation is best-effort: a capture or restore failure must never
+					// break an acknowledged display transaction.
+					captureScrollState: () => {
+						try {return this.captureMessageScrollerState();}
+						catch (error) {return null;}
+					},
+					restoreScrollState: scrollerState => {
+						try {this.restoreMessageScrollerState(scrollerState);}
+						catch (error) {}
+					}
+				});
+				return this.receivedDisplayRuntimeInstance;
+			}
+
+			resetReceivedDisplayRuntime () {
+				this.receivedDisplayRuntimeInstance = null;
+			}
+
+			captureReceivedMessageSource (snapshot) {
+				return this.ensureReceivedDisplayRuntime().captureSource(snapshot);
+			}
+
+			markReceivedDisplayPending (request, options) {
+				return this.ensureReceivedDisplayRuntime().markPending(request, options);
+			}
+
+			commitReceivedDisplayResult (result) {
+				return this.ensureReceivedDisplayRuntime().commitMessageResult(result);
+			}
+
+			commitHistoricalReceivedDisplayBatch (results) {
+				return this.ensureReceivedDisplayRuntime().commitHistoricalBatch(results);
+			}
+
+			getReceivedDisplayView (messageId) {
+				return this.getReceivedDisplayRuntimeView(messageId) || this.getLegacyReceivedDisplayView(messageId);
+			}
+
+			getReceivedDisplayRuntimeView (messageId) {
+				return this.ensureReceivedDisplayRuntime().getDisplayView(messageId);
+			}
+
+			// Compatibility projection: manual translations stay on the legacy path during this
+			// milestone but expose the same display-view shape as store-owned records.
+			getLegacyReceivedDisplayView (messageId) {
+				if (!messageId) return null;
+				const translation = translatedMessages[messageId];
+				if (!translation) return null;
+				const originalMessage = oldMessages[messageId];
+				const channelId = translation.channelId || originalMessage && originalMessage.channel_id || null;
+				return Object.freeze({
+					messageId: String(messageId),
+					channelId: channelId == null ? null : String(channelId),
+					revision: null,
+					status: "translated",
+					content: String(translation.content == null ? "" : translation.content),
+					translated: true,
+					showWatermark: true,
+					showLoading: false,
+					reason: null,
+					renderStatus: null,
+					renderReason: null,
+					translation,
+					source: originalMessage ? {content: originalMessage.content, embeds: originalMessage.embeds} : null,
+					origin: translation.manual ? "manual" : "automatic"
+				});
+			}
+
+			restoreReceivedDisplayChannel (channelId) {
+				return this.ensureReceivedDisplayRuntime().restoreChannel(channelId);
+			}
+
+			restoreAllReceivedDisplay (options) {
+				return this.ensureReceivedDisplayRuntime().restoreAll(options);
+			}
+
+			setReceivedDisplayGeneration (channelId, generation) {
+				return this.ensureReceivedDisplayRuntime().setChannelGeneration(channelId, generation);
+			}
+
+			getReceivedDisplayGeneration (channelId) {
+				return this.ensureReceivedDisplayRuntime().getChannelGeneration(channelId);
+			}
+
+			applyReceivedDisplayViewToStream (stream, view) {
+				if (!stream || !stream.content || !view) return;
+				const displayContent = String(view.content == null ? "" : view.content);
+				if (stream.content.content === displayContent) return;
+				const clonedMessage = new BDFDB.DiscordObjects.Message(stream.content);
+				clonedMessage.content = displayContent;
+				stream.content = clonedMessage;
+			}
+
+			applyReceivedDisplayViewToContent (e, view) {
+				if (!e || !e.returnvalue || !e.returnvalue.props) return;
+				this.cleanupInjectedMessageChildren(this.ensureElementChildrenArray(e.returnvalue));
+				translationDisplayLogic.clearTranslatedRenderDecorations(this, e);
+				if (!view) {
+					delete e.returnvalue.props["data-translator-revision"];
+					return;
+				}
+				e.returnvalue.props["data-translator-revision"] = String(view.revision);
+				if (view.translated && view.translation) {
+					if (this.shouldProtectWrappedTextForPlace(messageTypes.RECEIVED)) e.returnvalue.props.children = this.highlightProtectedWrappedTextInNode(e.returnvalue.props.children, view.messageId);
+					if (this.settings.general.highlightTranslatedMessages) e.returnvalue.props.className = BDFDB.DOMUtils.formatClassName(e.returnvalue.props.className, "translator-translated-message");
+					e.returnvalue.props.style = Object.assign({}, e.returnvalue.props.style, {
+						"--translator-accent-color": this.getTranslatedTextColor(),
+						"--translator-text-color": this.getTranslatedTextColor()
+					});
+					const watermarkNode = translationDisplayLogic.createTranslationWatermarkNode(this, view.translation, "translator-translated-watermark");
+					if (watermarkNode) this.ensureElementChildrenArray(e.returnvalue).push(watermarkNode);
+					if (view.translation.originalContent && this.settings.general.showOriginalMessage && this.settings.general.showOriginalDirectly && !view.translation.contentIncludesOriginal) this.ensureElementChildrenArray(e.returnvalue).push(this.createOriginalMessageBlock(view.translation.originalContent));
+					return;
+				}
+				if (view.showLoading) this.ensureElementChildrenArray(e.returnvalue).push(BDFDB.ReactUtils.createElement("span", {
+					key: "translator-translation-loading",
+					className: "translator-translation-loading",
+					"aria-label": this.isChineseUiLanguage() ? "正在翻译" : "Translating"
+				}));
+			}
+
 			processMessages (e) {
 				return receivedTranslationRuntime.processMessages(this, e);
 			}
@@ -8257,7 +8414,14 @@ module.exports = (_ => {
 				const displayState = translationDisplayLogic.prepareMessageContentDisplay(this, e);
 				message = displayState.message;
 				const translation = displayState.translation;
+				const displayView = this.getReceivedDisplayRuntimeView(message.id);
+				if (!translation && displayView && displayView.translated) {
+					this.applyReceivedDisplayViewToContent(e, displayView);
+					return;
+				}
 				translationDisplayLogic.applyMessageContentRenderDecorations(this, e, message, translation);
+				if (displayView) e.returnvalue.props["data-translator-revision"] = String(displayView.revision);
+				else delete e.returnvalue.props["data-translator-revision"];
 			}
 
 			processEmbed (e) {
