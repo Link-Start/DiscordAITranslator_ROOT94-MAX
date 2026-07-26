@@ -650,6 +650,9 @@ module.exports = (_ => {
 		// A live burst drains into one AI batch request instead of one request per
 		// message; the cap keeps a single prompt within comfortable output limits.
 		const LIVE_AI_BATCH_ITEM_LIMIT = 10;
+		// How often a deferred repaint re-checks whether the user stopped typing or closed
+		// the settings surface. Matches the legacy text-area deferral.
+		const AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450;
 		const AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900;
 		const AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300;
 		// Scroll events delivered shortly after our own scroll restores are echoes of the
@@ -8646,37 +8649,11 @@ module.exports = (_ => {
 			}
 
 			getReceivedDisplayView (messageId) {
-				return this.getReceivedDisplayRuntimeView(messageId) || this.getLegacyReceivedDisplayView(messageId);
+				return this.ensureReceivedDisplayRuntime().getDisplayView(messageId);
 			}
 
 			getReceivedDisplayRuntimeView (messageId) {
 				return this.ensureReceivedDisplayRuntime().getDisplayView(messageId);
-			}
-
-			// Compatibility projection: manual translations stay on the legacy path during this
-			// milestone but expose the same display-view shape as store-owned records.
-			getLegacyReceivedDisplayView (messageId) {
-				if (!messageId) return null;
-				const translation = translatedMessages[messageId];
-				if (!translation) return null;
-				const originalMessage = oldMessages[messageId];
-				const channelId = translation.channelId || originalMessage && originalMessage.channel_id || null;
-				return Object.freeze({
-					messageId: String(messageId),
-					channelId: channelId == null ? null : String(channelId),
-					revision: null,
-					status: "translated",
-					content: String(translation.content == null ? "" : translation.content),
-					translated: true,
-					showWatermark: true,
-					showLoading: false,
-					reason: null,
-					renderStatus: null,
-					renderReason: null,
-					translation,
-					source: originalMessage ? {content: originalMessage.content, embeds: originalMessage.embeds} : null,
-					origin: translation.manual ? "manual" : "automatic"
-				});
 			}
 
 			restoreReceivedDisplayChannel (channelId) {
@@ -8707,7 +8684,20 @@ module.exports = (_ => {
 			// Live automatic commits write the store immediately and coalesce their visible
 			// refresh: one acknowledged display transaction per channel per debounce window
 			// instead of one full-list repaint (plus scroll restore) per message.
-			scheduleReceivedDisplayFlush (channelId, messageId) {
+			// The single choke point for "may a store commit repaint the chat list right now".
+			// Repainting under either condition is what the legacy path went out of its way to
+			// avoid: it disturbs an open translator settings surface and interrupts typing.
+			canRepaintReceivedDisplayNow () {
+				if (this.isTranslatorSettingsSurfaceOpen()) return false;
+				if (this.isChannelTextAreaFocused()) return false;
+				return true;
+			}
+
+			getReceivedDisplayFlushDelay () {
+				return this.isViewingMessageHistory() ? AUTO_TRANSLATION_HISTORY_RERENDER_DELAY : AUTO_TRANSLATION_RERENDER_DELAY;
+			}
+
+			scheduleReceivedDisplayFlush (channelId, messageId, delay = null) {
 				if (!channelId || messageId == null) return;
 				const key = String(channelId);
 				if (!receivedDisplayFlushQueues.has(key)) receivedDisplayFlushQueues.set(key, new Set());
@@ -8716,10 +8706,19 @@ module.exports = (_ => {
 				receivedDisplayFlushTimer = setTimeout(_ => {
 					receivedDisplayFlushTimer = null;
 					this.flushReceivedDisplayQueues();
-				}, AUTO_TRANSLATION_RERENDER_DELAY);
+				}, delay == null ? this.getReceivedDisplayFlushDelay() : delay);
 			}
 
 			flushReceivedDisplayQueues () {
+				if (!receivedDisplayFlushQueues.size) return;
+				// The commit already landed in the store; only the visible repaint waits, so
+				// nothing is lost by deferring until the user is no longer busy.
+				if (!this.canRepaintReceivedDisplayNow()) {
+					const [firstChannelId, firstMessageIds] = [...receivedDisplayFlushQueues.entries()][0];
+					const anyMessageId = [...firstMessageIds][0];
+					this.scheduleReceivedDisplayFlush(firstChannelId, anyMessageId, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY);
+					return;
+				}
 				const queues = [...receivedDisplayFlushQueues.entries()];
 				receivedDisplayFlushQueues.clear();
 				for (const [, messageIds] of queues) {
