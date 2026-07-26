@@ -70,6 +70,7 @@ module.exports = (_ => {
 		const {createProviderClient, translationEngines, enginePortals} = require("../providers/provider-client");
 		const {createSentTranslationStore} = require("../sent/sent-translation-store");
 		const {createLiveTranslationQueue} = require("../orchestrator/live-translation-queue");
+		const {createHistoricalJobRegistry} = require("../orchestrator/historical-job-registry");
 		const {getLabelsForUiLanguage} = require("../i18n/labels");
 		const {getCustomTextValue} = require("../i18n/text");
 
@@ -398,10 +399,6 @@ module.exports = (_ => {
 		var autoTranslationEligibleReplyPreviewMessages = {};
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
-		var historicalTranslationJobQueues = new Map();
-		var historicalTranslationJobSequence = 0;
-		var historicalTranslationRuntimeGeneration = 0;
-		var failedHistoricalTranslationSnapshots = new Map();
 		const channelTitleStore = createChannelTitleStore();
 		const loadedTranslationStatusStore = createLoadedTranslationStatusStore({isChineseUiLanguage: () => _this && _this.isChineseUiLanguage()});
 		var pluginRuntimeActive = true;
@@ -2094,7 +2091,7 @@ module.exports = (_ => {
 				this.resetReceivedDisplayRuntime();
 				this.ensureLiveTranslationQueue().restartRequestGeneration();
 				this.ensureSentTranslationStore().resetForStart();
-				historicalTranslationRuntimeGeneration++;
+				this.ensureHistoricalJobRegistry().advanceRuntimeGeneration();
 				this.attachAutoTranslationInputActivityWatcher();
 				BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", {before: e => {
 					if (e.methodArguments[1] && oldMessages[e.methodArguments[1]] && oldMessages[e.methodArguments[1]].content) e.methodArguments[2] = oldMessages[e.methodArguments[1]].content;
@@ -2126,7 +2123,7 @@ module.exports = (_ => {
 				this.invalidateLiveTranslationRequests();
 				this.invalidateSentAutomaticTranslationRequests();
 				this.ensureSentTranslationStore().clearPendingOriginals();
-				historicalTranslationRuntimeGeneration++;
+				this.ensureHistoricalJobRegistry().advanceRuntimeGeneration();
 				channelTitleStore.invalidateInFlight();
 				this.cancelHistoricalTranslationJobs(null, "plugin-stopped");
 				this.clearChannelTitleTranslations();
@@ -2141,7 +2138,7 @@ module.exports = (_ => {
 				this.clearReceivedDisplayFlushQueue();
 				this.restoreAllReceivedDisplay({refresh: false});
 				this.clearDisplayedTranslations();
-				failedHistoricalTranslationSnapshots.clear();
+				this.ensureHistoricalJobRegistry().clearFailedSnapshots();
 				this.ensureSentTranslationStore().clearManualRequests();
 				suppressedAutoTranslations = {};
 				this.ensureLiveTranslationQueue().clearAllQueuedMessages();
@@ -5352,7 +5349,7 @@ module.exports = (_ => {
 
 			updateFailedHistoricalTranslationSnapshots (summary, channelId) {
 				if (!channelId) return 0;
-				const existingEntry = failedHistoricalTranslationSnapshots.get(channelId);
+				const existingEntry = this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
 				const snapshotsById = new Map((existingEntry && existingEntry.items || []).map(item => [String(item.message.id), item]));
 				for (const item of [].concat(summary && summary.translated || [], summary && summary.skipped || [])) {
 					if (item && item.message && item.message.id) snapshotsById.delete(String(item.message.id));
@@ -5362,19 +5359,19 @@ module.exports = (_ => {
 					if (snapshot) snapshotsById.set(String(snapshot.message.id), snapshot);
 				}
 				const items = [...snapshotsById.values()];
-				if (items.length) failedHistoricalTranslationSnapshots.set(channelId, {channelId, items, updatedAt: Date.now()});
-				else failedHistoricalTranslationSnapshots.delete(channelId);
+				if (items.length) this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, {channelId, items, updatedAt: Date.now()});
+				else this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId);
 				return items.length;
 			}
 
 			getFailedHistoricalTranslationCount (channelId) {
-				const entry = channelId && failedHistoricalTranslationSnapshots.get(channelId);
+				const entry = channelId && this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
 				return entry && entry.items ? entry.items.length : 0;
 			}
 
 			retryFailedHistoricalTranslations (channelId = null) {
 				channelId = channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-				const failedEntry = channelId && failedHistoricalTranslationSnapshots.get(channelId);
+				const failedEntry = channelId && this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
 				if (!failedEntry || !failedEntry.items || !failedEntry.items.length || !this.isTranslationEnabled(channelId)) return Promise.resolve(false);
 				const queueEntry = this.getHistoricalTranslationJobQueue(channelId, false);
 				if (queueEntry && (queueEntry.runningPromise || queueEntry.jobs.some(job => job && job.state == "collecting"))) return Promise.resolve(false);
@@ -5404,13 +5401,7 @@ module.exports = (_ => {
 			}
 
 			getHistoricalTranslationJobQueue (channelId, create = true) {
-				if (!channelId) return null;
-				let entry = historicalTranslationJobQueues.get(channelId);
-				if (!entry && create) {
-					entry = {channelId, generation: 0, jobs: [], runningPromise: null, startToken: null};
-					historicalTranslationJobQueues.set(channelId, entry);
-				}
-				return entry || null;
+				return this.ensureHistoricalJobRegistry().getQueue(channelId, create);
 			}
 
 			createCollectedHistoricalTranslationJob (channelId) {
@@ -5418,7 +5409,7 @@ module.exports = (_ => {
 				entry.generation++;
 				let job;
 				job = this.createHistoricalTranslationJob({
-					id: `${channelId}:${++historicalTranslationJobSequence}`,
+					id: this.ensureHistoricalJobRegistry().nextJobId(channelId),
 					channelId,
 					generation: entry.generation,
 					configurationSignature: this.createHistoricalTranslationJobConfigurationSignature(channelId),
@@ -5461,7 +5452,7 @@ module.exports = (_ => {
 				const token = {};
 				entry.startToken = token;
 				const startSnapshot = _ => {
-					if (entry.startToken !== token || historicalTranslationJobQueues.get(channelId) !== entry) return;
+					if (entry.startToken !== token || !this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry)) return;
 					entry.startToken = null;
 					this.finishHistoricalTranslationSnapshot(channelId);
 				};
@@ -5500,7 +5491,7 @@ module.exports = (_ => {
 					if (entry.runningPromise == runningPromise) entry.runningPromise = null;
 					entry.jobs = entry.jobs.filter(candidate => candidate != job);
 					if (entry.jobs.some(candidate => candidate && candidate.state == "collecting" && candidate.sealed)) this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false});
-					else if (!entry.jobs.length && !entry.startToken && historicalTranslationJobQueues.get(channelId) === entry) historicalTranslationJobQueues.delete(channelId);
+					else if (!entry.jobs.length && !entry.startToken && this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry)) this.ensureHistoricalJobRegistry().deleteQueue(channelId);
 				});
 				entry.runningPromise = runningPromise;
 				return runningPromise;
@@ -5518,7 +5509,7 @@ module.exports = (_ => {
 
 			isHistoricalMessagePending (messageId, channelId = null) {
 				if (!messageId) return false;
-				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : [...historicalTranslationJobQueues.values()];
+				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
 				return entries.some(entry => entry.jobs.some(job => job.isMessagePending(messageId)));
 			}
 
@@ -5534,7 +5525,7 @@ module.exports = (_ => {
 					if (sourceSignature == currentSignature) continue;
 					if (job.invalidateMessage(messageId, "source-edited")) invalidated = true;
 				}
-				const failedEntry = failedHistoricalTranslationSnapshots.get(channelId);
+				const failedEntry = this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
 				if (failedEntry && failedEntry.items) {
 					const nextItems = failedEntry.items.filter(item => {
 						if (!item || !item.message || String(item.message.id) != String(messageId)) return true;
@@ -5543,8 +5534,8 @@ module.exports = (_ => {
 						invalidated = true;
 						return false;
 					});
-					if (nextItems.length) failedHistoricalTranslationSnapshots.set(channelId, Object.assign({}, failedEntry, {items: nextItems}));
-					else failedHistoricalTranslationSnapshots.delete(channelId);
+					if (nextItems.length) this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, Object.assign({}, failedEntry, {items: nextItems}));
+					else this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId);
 				}
 				if (invalidated) {
 					this.ensureLiveTranslationQueue().clearQueuedMessage(messageId);
@@ -5560,7 +5551,7 @@ module.exports = (_ => {
 			}
 
 			cancelHistoricalTranslationJobs (channelId = null, reason = "cancelled") {
-				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : [...historicalTranslationJobQueues.values()];
+				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
 				for (const entry of entries) {
 					entry.generation++;
 					entry.startToken = null;
@@ -5569,10 +5560,10 @@ module.exports = (_ => {
 						for (const record of job.items.values()) if (record.source && record.source.message) this.ensureLiveTranslationQueue().clearQueuedMessage(record.source.message.id);
 					}
 					entry.jobs = [];
-					if (channelId) historicalTranslationJobQueues.delete(channelId);
+					if (channelId) this.ensureHistoricalJobRegistry().deleteQueue(channelId);
 				}
-				if (!channelId) historicalTranslationJobQueues.clear();
-				historicalTranslationRuntimeGeneration++;
+				if (!channelId) this.ensureHistoricalJobRegistry().clearQueues();
+				this.ensureHistoricalJobRegistry().advanceRuntimeGeneration();
 			}
 
 			prepareHistoricalTranslationJobItem (queueItem, job) {
@@ -6025,6 +6016,11 @@ module.exports = (_ => {
 
 			get modelCatalogState () {
 				return this.ensureProviderClient().getModelCatalogState();
+			}
+
+			ensureHistoricalJobRegistry () {
+				if (!this.historicalJobRegistryInstance) this.historicalJobRegistryInstance = createHistoricalJobRegistry();
+				return this.historicalJobRegistryInstance;
 			}
 
 			ensureLiveTranslationQueue () {

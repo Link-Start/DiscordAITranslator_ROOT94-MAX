@@ -12,8 +12,8 @@ const runtimePath = path.join(root, "src", "legacy", "runtime.js");
 // The size backstop that used to live in build-contract.test.js was raised the
 // moment it was breached, which made it worthless; do not repeat that here.
 const BUDGET = Object.freeze({
-	runtimeLines: 7641,
-	moduleLevelVarDeclarators: 20
+	runtimeLines: 7637,
+	moduleLevelVarDeclarators: 16
 });
 
 function readRuntimeLines() {

@@ -3924,6 +3924,70 @@ var require_live_translation_queue = __commonJS({
   }
 });
 
+// src/orchestrator/historical-job-registry.js
+var require_historical_job_registry = __commonJS({
+  "src/orchestrator/historical-job-registry.js"(exports2, module2) {
+    function createHistoricalJobRegistry() {
+      let queues = /* @__PURE__ */ new Map(), failedSnapshots = /* @__PURE__ */ new Map(), jobSequence = 0, runtimeGeneration = 0;
+      function normalizeChannelId(channelId) {
+        return channelId == null ? "" : String(channelId);
+      }
+      return __name(normalizeChannelId, "normalizeChannelId"), Object.freeze({
+        // A queue entry is created on demand so callers can ask about a channel that
+        // has never had a job without allocating one.
+        getQueue(channelId, createWhenMissing = !0) {
+          let key = normalizeChannelId(channelId);
+          if (!key) return null;
+          let entry = queues.get(key);
+          return !entry && createWhenMissing && (entry = { channelId: key, generation: 0, jobs: [], runningPromise: null, startToken: null }, queues.set(key, entry)), entry || null;
+        },
+        hasQueue(channelId) {
+          return queues.has(normalizeChannelId(channelId));
+        },
+        isCurrentQueue(channelId, entry) {
+          return !!entry && queues.get(normalizeChannelId(channelId)) === entry;
+        },
+        deleteQueue(channelId) {
+          return queues.delete(normalizeChannelId(channelId));
+        },
+        clearQueues() {
+          queues.clear();
+        },
+        listQueues() {
+          return [...queues.values()];
+        },
+        nextJobId(channelId) {
+          return `${normalizeChannelId(channelId)}:${++jobSequence}`;
+        },
+        // Bumping the generation is how a plugin stop or a bulk cancel makes every
+        // in-flight job stale without having to reach into each one.
+        advanceRuntimeGeneration() {
+          return ++runtimeGeneration;
+        },
+        getRuntimeGeneration() {
+          return runtimeGeneration;
+        },
+        getFailedSnapshot(channelId) {
+          let key = normalizeChannelId(channelId);
+          return key && failedSnapshots.get(key) || null;
+        },
+        setFailedSnapshot(channelId, snapshot) {
+          let key = normalizeChannelId(channelId);
+          return key ? (failedSnapshots.set(key, snapshot), snapshot) : null;
+        },
+        deleteFailedSnapshot(channelId) {
+          return failedSnapshots.delete(normalizeChannelId(channelId));
+        },
+        clearFailedSnapshots() {
+          failedSnapshots.clear();
+        }
+      });
+    }
+    __name(createHistoricalJobRegistry, "createHistoricalJobRegistry");
+    module2.exports = { createHistoricalJobRegistry };
+  }
+});
+
 // src/i18n/labels.js
 var require_labels = __commonJS({
   "src/i18n/labels.js"(exports2, module2) {
@@ -5482,7 +5546,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a, _b, _c;
-        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
+        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
         var _this;
         let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
           render() {
@@ -5962,7 +6026,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           "−−−−−": "0",
           _: "··−−·−"
         };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, translatedMessages = {}, oldMessages = {}, suppressedAutoTranslations = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map();
+        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, translatedMessages = {}, oldMessages = {}, suppressedAutoTranslations = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {};
         let channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
         var pluginRuntimeActive = !0;
         let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
@@ -7131,7 +7195,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             });
           }
           onStart() {
-            pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), this.ensureLiveTranslationQueue().restartRequestGeneration(), this.ensureSentTranslationStore().resetForStart(), historicalTranslationRuntimeGeneration++, this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
+            pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), this.ensureLiveTranslationQueue().restartRequestGeneration(), this.ensureSentTranslationStore().resetForStart(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
               e.methodArguments[1] && oldMessages[e.methodArguments[1]] && oldMessages[e.methodArguments[1]].content ? e.methodArguments[2] = oldMessages[e.methodArguments[1]].content : e.methodArguments[1] && (e.methodArguments[2] = this.getEditableSentMessageText(e.methodArguments[1], e.methodArguments[2]));
             }, "before") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "editMessage", { instead: /* @__PURE__ */ __name((e) => this.handleEditedMessageSubmit(e.methodArguments, (...args) => e.originalMethod(...args)), "instead") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageToolbarUtils, "useMessageMenu", { after: /* @__PURE__ */ __name((e) => {
               if (e.instance.props.message && e.instance.props.channel) {
@@ -7148,7 +7212,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "after") }), this.forceUpdateAll();
           }
           onStop() {
-            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), this.ensureSentTranslationStore().clearPendingOriginals(), historicalTranslationRuntimeGeneration++, channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.ensureLiveTranslationQueue().cancelQueueRetry(), this.ensureMessageViewportStore().clearManualScrollLock(), this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), this.ensureSentTranslationStore().clearManualRequests(), suppressedAutoTranslations = {}, this.ensureLiveTranslationQueue().clearAllQueuedMessages(), queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, this.ensureLiveTranslationQueue().setBusyTranslating(!1), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
+            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), this.ensureSentTranslationStore().clearPendingOriginals(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.ensureLiveTranslationQueue().cancelQueueRetry(), this.ensureMessageViewportStore().clearManualScrollLock(), this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), this.ensureHistoricalJobRegistry().clearFailedSnapshots(), this.ensureSentTranslationStore().clearManualRequests(), suppressedAutoTranslations = {}, this.ensureLiveTranslationQueue().clearAllQueuedMessages(), queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, this.ensureLiveTranslationQueue().setBusyTranslating(!1), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
             let settingsPanel;
@@ -9542,7 +9606,7 @@ __________________ __________________ __________________
           }
           updateFailedHistoricalTranslationSnapshots(summary, channelId) {
             if (!channelId) return 0;
-            let existingEntry = failedHistoricalTranslationSnapshots.get(channelId), snapshotsById = new Map((existingEntry && existingEntry.items || []).map((item) => [String(item.message.id), item]));
+            let existingEntry = this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId), snapshotsById = new Map((existingEntry && existingEntry.items || []).map((item) => [String(item.message.id), item]));
             for (let item of [].concat(summary && summary.translated || [], summary && summary.skipped || []))
               item && item.message && item.message.id && snapshotsById.delete(String(item.message.id));
             for (let item of summary && summary.failed || []) {
@@ -9550,15 +9614,15 @@ __________________ __________________ __________________
               snapshot && snapshotsById.set(String(snapshot.message.id), snapshot);
             }
             let items = [...snapshotsById.values()];
-            return items.length ? failedHistoricalTranslationSnapshots.set(channelId, { channelId, items, updatedAt: Date.now() }) : failedHistoricalTranslationSnapshots.delete(channelId), items.length;
+            return items.length ? this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, { channelId, items, updatedAt: Date.now() }) : this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId), items.length;
           }
           getFailedHistoricalTranslationCount(channelId) {
-            let entry = channelId && failedHistoricalTranslationSnapshots.get(channelId);
+            let entry = channelId && this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
             return entry && entry.items ? entry.items.length : 0;
           }
           retryFailedHistoricalTranslations(channelId = null) {
             channelId = channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
-            let failedEntry = channelId && failedHistoricalTranslationSnapshots.get(channelId);
+            let failedEntry = channelId && this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
             if (!failedEntry || !failedEntry.items || !failedEntry.items.length || !this.isTranslationEnabled(channelId)) return Promise.resolve(!1);
             let queueEntry = this.getHistoricalTranslationJobQueue(channelId, !1);
             if (queueEntry && (queueEntry.runningPromise || queueEntry.jobs.some((job) => job && job.state == "collecting"))) return Promise.resolve(!1);
@@ -9586,16 +9650,14 @@ __________________ __________________ __________________
             return Promise.resolve(this.startCollectedHistoricalTranslationJobs(channelId)).then((_2) => !0);
           }
           getHistoricalTranslationJobQueue(channelId, create = !0) {
-            if (!channelId) return null;
-            let entry = historicalTranslationJobQueues.get(channelId);
-            return !entry && create && (entry = { channelId, generation: 0, jobs: [], runningPromise: null, startToken: null }, historicalTranslationJobQueues.set(channelId, entry)), entry || null;
+            return this.ensureHistoricalJobRegistry().getQueue(channelId, create);
           }
           createCollectedHistoricalTranslationJob(channelId) {
             let entry = this.getHistoricalTranslationJobQueue(channelId);
             entry.generation++;
             let job;
             return job = this.createHistoricalTranslationJob({
-              id: `${channelId}:${++historicalTranslationJobSequence}`,
+              id: this.ensureHistoricalJobRegistry().nextJobId(channelId),
               channelId,
               generation: entry.generation,
               configurationSignature: this.createHistoricalTranslationJobConfigurationSignature(channelId),
@@ -9627,7 +9689,7 @@ __________________ __________________ __________________
             let token = {};
             entry.startToken = token;
             let startSnapshot = /* @__PURE__ */ __name((_2) => {
-              entry.startToken !== token || historicalTranslationJobQueues.get(channelId) !== entry || (entry.startToken = null, this.finishHistoricalTranslationSnapshot(channelId));
+              entry.startToken !== token || !this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry) || (entry.startToken = null, this.finishHistoricalTranslationSnapshot(channelId));
             }, "startSnapshot");
             typeof queueMicrotask == "function" ? queueMicrotask(startSnapshot) : Promise.resolve().then(startSnapshot);
           }
@@ -9649,7 +9711,7 @@ __________________ __________________ __________________
                 let messageId = record && record.source && record.source.message && record.source.message.id, queuedMarker = messageId && this.ensureLiveTranslationQueue().getQueuedMarker(messageId);
                 queuedMarker && queuedMarker.type == "historical" && queuedMarker.jobId == job.id && this.ensureLiveTranslationQueue().clearQueuedMessage(messageId);
               }
-              entry.runningPromise == runningPromise && (entry.runningPromise = null), entry.jobs = entry.jobs.filter((candidate) => candidate != job), entry.jobs.some((candidate) => candidate && candidate.state == "collecting" && candidate.sealed) ? this.startCollectedHistoricalTranslationJobs(channelId, { sealCurrent: !1 }) : !entry.jobs.length && !entry.startToken && historicalTranslationJobQueues.get(channelId) === entry && historicalTranslationJobQueues.delete(channelId);
+              entry.runningPromise == runningPromise && (entry.runningPromise = null), entry.jobs = entry.jobs.filter((candidate) => candidate != job), entry.jobs.some((candidate) => candidate && candidate.state == "collecting" && candidate.sealed) ? this.startCollectedHistoricalTranslationJobs(channelId, { sealCurrent: !1 }) : !entry.jobs.length && !entry.startToken && this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry) && this.ensureHistoricalJobRegistry().deleteQueue(channelId);
             });
             return entry.runningPromise = runningPromise, runningPromise;
           }
@@ -9661,7 +9723,7 @@ __________________ __________________ __________________
             }
           }
           isHistoricalMessagePending(messageId, channelId = null) {
-            return messageId ? (channelId ? [this.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : [...historicalTranslationJobQueues.values()]).some((entry) => entry.jobs.some((job) => job.isMessagePending(messageId))) : !1;
+            return messageId ? (channelId ? [this.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues()).some((entry) => entry.jobs.some((job) => job.isMessagePending(messageId))) : !1;
           }
           invalidateHistoricalTranslationMessage(messageId, channelId, currentSignature) {
             if (!messageId || !channelId || !currentSignature) return !1;
@@ -9672,10 +9734,10 @@ __________________ __________________ __________________
               let source = record.source || {};
               (record.prepared && record.prepared.signature || this.createReceivedTranslationSignature(source.message, channelId, source.originalContentData)) != currentSignature && job.invalidateMessage(messageId, "source-edited") && (invalidated = !0);
             }
-            let failedEntry = failedHistoricalTranslationSnapshots.get(channelId);
+            let failedEntry = this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
             if (failedEntry && failedEntry.items) {
               let nextItems = failedEntry.items.filter((item) => !item || !item.message || String(item.message.id) != String(messageId) || this.createReceivedTranslationSignature(item.message, channelId, item.originalContentData) == currentSignature ? !0 : (invalidated = !0, !1));
-              nextItems.length ? failedHistoricalTranslationSnapshots.set(channelId, Object.assign({}, failedEntry, { items: nextItems })) : failedHistoricalTranslationSnapshots.delete(channelId);
+              nextItems.length ? this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, Object.assign({}, failedEntry, { items: nextItems })) : this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId);
             }
             if (invalidated) {
               this.ensureLiveTranslationQueue().clearQueuedMessage(messageId), this.clearCachedTranslation(messageId);
@@ -9688,16 +9750,16 @@ __________________ __________________ __________________
             return invalidated;
           }
           cancelHistoricalTranslationJobs(channelId = null, reason = "cancelled") {
-            let entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : [...historicalTranslationJobQueues.values()];
+            let entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
             for (let entry of entries) {
               entry.generation++, entry.startToken = null;
               for (let job of entry.jobs) {
                 job.cancel(reason);
                 for (let record of job.items.values()) record.source && record.source.message && this.ensureLiveTranslationQueue().clearQueuedMessage(record.source.message.id);
               }
-              entry.jobs = [], channelId && historicalTranslationJobQueues.delete(channelId);
+              entry.jobs = [], channelId && this.ensureHistoricalJobRegistry().deleteQueue(channelId);
             }
-            channelId || historicalTranslationJobQueues.clear(), historicalTranslationRuntimeGeneration++;
+            channelId || this.ensureHistoricalJobRegistry().clearQueues(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration();
           }
           prepareHistoricalTranslationJobItem(queueItem, job) {
             if (!queueItem || !queueItem.message || !this.isHistoricalTranslationJobCurrent(job)) return { status: "failed", reason: "stale_job" };
@@ -9997,6 +10059,9 @@ __________________ __________________ __________________
           }
           get modelCatalogState() {
             return this.ensureProviderClient().getModelCatalogState();
+          }
+          ensureHistoricalJobRegistry() {
+            return this.historicalJobRegistryInstance || (this.historicalJobRegistryInstance = createHistoricalJobRegistry()), this.historicalJobRegistryInstance;
           }
           ensureLiveTranslationQueue() {
             return this.liveTranslationQueueInstance || (this.liveTranslationQueueInstance = createLiveTranslationQueue({
