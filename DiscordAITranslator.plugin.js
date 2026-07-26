@@ -6788,7 +6788,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             return sourceLanguages.length && !plugin.matchesConfiguredSourceLanguage(localDetection.languageId, sourceLanguages);
           },
           shouldAutoTranslateReceivedMessage(plugin, message, channel, originalContentData = null, ignoreQueued = !1) {
-            if (!channel || !channel.id || !message || !message.id || !plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || translatedMessages[message.id] || !ignoreQueued && queuedAutoTranslations[message.id]) return !1;
+            if (!channel || !channel.id || !message || !message.id || !plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message) || suppressedAutoTranslations[message.id] || plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && queuedAutoTranslations[message.id]) return !1;
             let sourceData = originalContentData || plugin.extractOriginalContentData(message);
             if (plugin.getCachedReceivedSkipDecision(message, channel.id, sourceData) || receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, sourceData) || !plugin.hasTranslatableMessageContent(sourceData)) return !1;
             let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, sourceData, channel.id);

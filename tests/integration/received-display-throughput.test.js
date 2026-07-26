@@ -563,3 +563,28 @@ test("a repaint that needed the full-list fallback backs off before the next one
 		harness.restore();
 	}
 });
+
+test("an already translated message is not re-queued after a channel boundary reset", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		const channelId = "channel-1";
+		const message = {id: "m1", channel_id: channelId, content: "english text to translate", embeds: [], attachments: [], author: {id: "other-user"}};
+		const contentData = {content: message.content, embeds: []};
+		const signature = plugin.createReceivedTranslationSignature(message, channelId, contentData);
+		plugin.captureReceivedMessageSource({messageId: message.id, channelId, generation: 1, sourceSignature: signature, source: contentData});
+		await plugin.commitReceivedDisplayResult({messageId: message.id, channelId, generation: 1, sourceSignature: signature, origin: "automatic", status: "translated", translation: {content: "中文译文"}}, {refresh: false});
+		assert.equal(plugin.getReceivedDisplayRuntimeView("m1").translated, true);
+
+		// A cleared cache is the realistic case: without it the cache hit masks the bug.
+		plugin.getCachedReceivedTranslation = () => null;
+		plugin.getCachedReceivedSkipDecision = () => null;
+
+		// Re-entering a channel resets the boundary, so every rendered message looks new.
+		const eligible = plugin.shouldAutoTranslateReceivedMessage(message, {id: channelId}, contentData);
+
+		assert.equal(eligible, false, "a message already translated in the display store must not be queued again");
+		assert.equal(plugin.getReceivedDisplayRuntimeView("m1").translated, true, "its visible translation must survive");
+	}
+	finally {harness.restore();}
+});
