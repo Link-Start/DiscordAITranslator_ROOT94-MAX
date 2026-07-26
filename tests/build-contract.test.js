@@ -52,3 +52,8 @@ test("the generated plugin keeps metadata and excludes development artifacts", a
 	assert.match(activeEsbuildPackage.resolved, /^https:\/\/registry\.npmjs\.org\/@esbuild\/[^/]+\/-\/[^/]+\.tgz$/);
 	assert.match(activeEsbuildPackage.integrity, /^sha512-[A-Za-z0-9+/]+={0,2}$/);
 });
+
+test("the generated plugin stays inside the first-milestone size budget", () => {
+	const pluginBytes = fs.statSync(releasePath).size;
+	assert.ok(pluginBytes <= 700 * 1024, `generated plugin unexpectedly exceeds 700 KB: ${pluginBytes} bytes`);
+});
