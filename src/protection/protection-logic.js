@@ -286,16 +286,50 @@ function createProtectionLogic({
 			if (/^<#\d+>$/.test(exception)) return exception;
 			return exception;
 		},
+		// A protected span can swallow another one: with wrapper rules for both quotes and
+		// backticks, `"x"` masks the quotes first, so segment 1 is the backtick pair and
+		// its stored text is `<0>`. Placeholder 0 therefore never appears in the string the
+		// provider was given, and both functions below have to account for that.
+		getNestedProtectionPlaceholderKeys(plugin, protectedSegments) {
+			const keys = Object.keys(protectedSegments || {});
+			const nested = new Set();
+			for (const outer of keys) {
+				const outerText = String(protectedSegments[outer]);
+				for (const inner of keys) {
+					if (inner === outer || nested.has(inner)) continue;
+					if (protectionLogic.getProtectionPlaceholderRegex(plugin, inner).test(outerText)) nested.add(inner);
+				}
+			}
+			return nested;
+		},
 		hasAllProtectionPlaceholders(plugin, string, protectedSegments) {
 			if (!protectedSegments || !Object.keys(protectedSegments).length) return true;
-			return Object.keys(protectedSegments).every(count => protectionLogic.getProtectionPlaceholderRegex(plugin, count).test(string || ""));
+			// Only the placeholders the provider actually saw are evidence of a mangled
+			// response. Demanding the nested ones rejected every translation of a message
+			// that happened to contain a wrapper pair inside another.
+			const nested = protectionLogic.getNestedProtectionPlaceholderKeys(plugin, protectedSegments);
+			return Object.keys(protectedSegments).every(count => nested.has(count) || protectionLogic.getProtectionPlaceholderRegex(plugin, count).test(string || ""));
 		},
 		addExceptions(plugin, string, protectedSegments) {
-			for (let count in protectedSegments) {
-				let exception = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) && plugin.settings.exceptions.wordStart.some(n => String(protectedSegments[count]).indexOf(n) == 0) ? String(protectedSegments[count]).slice(1) : String(protectedSegments[count]);
-				let replacement = protectionLogic.formatProtectedExceptionForDisplay(plugin, exception);
-				let newString = string.replace(protectionLogic.getProtectionPlaceholderRegex(plugin, count), replacement);
-				string = newString;
+			const keys = Object.keys(protectedSegments || {});
+			if (!keys.length) return string;
+			// Substituting once in key order is not enough: restoring segment 1 puts the
+			// text `<0>` back into the string, and if 0 was already visited that marker is
+			// left showing in the message. Keep sweeping until a pass changes nothing. The
+			// pass count is bounded by the segment count because every sweep that changes
+			// anything consumes at least one placeholder.
+			for (let pass = 0; pass <= keys.length; pass++) {
+				let changed = false;
+				for (const count of keys) {
+					const placeholder = protectionLogic.getProtectionPlaceholderRegex(plugin, count);
+					if (!placeholder.test(string)) continue;
+					const segmentText = String(protectedSegments[count]);
+					const exception = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) && plugin.settings.exceptions.wordStart.some(n => segmentText.indexOf(n) == 0) ? segmentText.slice(1) : segmentText;
+					const replacement = protectionLogic.formatProtectedExceptionForDisplay(plugin, exception);
+					string = string.replace(protectionLogic.getProtectionPlaceholderRegex(plugin, count), replacement);
+					changed = true;
+				}
+				if (!changed) break;
 			}
 			return string;
 		},
