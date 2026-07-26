@@ -1822,768 +1822,6 @@ var require_styles = __commonJS({
   }
 });
 
-// src/channel-title/channel-title-store.js
-var require_channel_title_store = __commonJS({
-  "src/channel-title/channel-title-store.js"(exports2, module2) {
-    function createChannelTitleStore({ now = Date.now } = {}) {
-      let translated = {}, pending = {}, failed = {}, requestSequence = 0;
-      function normalizeChannelId(channelId) {
-        return channelId == null ? "" : String(channelId);
-      }
-      return __name(normalizeChannelId, "normalizeChannelId"), Object.freeze({
-        // A translated title only counts while its signature still matches the current
-        // configuration; a stale entry is dropped on read so it cannot resurface.
-        getTranslatedTitle(channelId, signature) {
-          let key = normalizeChannelId(channelId), entry = translated[key];
-          return entry ? entry.signature !== signature ? (delete translated[key], null) : entry.text : null;
-        },
-        hasTranslatedTitle(channelId) {
-          let key = normalizeChannelId(channelId);
-          return key ? !!translated[key] : !!Object.keys(translated).length;
-        },
-        // Returns null when a request for this exact signature is already settled,
-        // in flight, or inside its failure cooldown.
-        beginRequest(channelId, signature) {
-          let key = normalizeChannelId(channelId);
-          if (!key || !signature || translated[key] && translated[key].signature === signature || pending[key] && pending[key].signature === signature) return null;
-          let failure = failed[key];
-          if (failure && failure.signature === signature && failure.retryAfter > now()) return null;
-          let request = { id: ++requestSequence, channelId: key, signature };
-          return pending[key] = request, request;
-        },
-        isRequestCurrent(request) {
-          return !!request && pending[normalizeChannelId(request.channelId)] === request;
-        },
-        completeRequest(request, text) {
-          let key = normalizeChannelId(request && request.channelId);
-          return !key || pending[key] !== request ? !1 : (delete pending[key], translated[key] = { signature: request.signature, text }, delete failed[key], !0);
-        },
-        failRequest(request) {
-          let key = normalizeChannelId(request && request.channelId);
-          return !key || pending[key] !== request ? !1 : (delete pending[key], failed[key] = { signature: request.signature, retryAfter: now() + 3e4 }, !0);
-        },
-        // Drops an in-flight request without recording a failure, so the next render
-        // may retry immediately.
-        abandonRequest(request) {
-          let key = normalizeChannelId(request && request.channelId);
-          return !key || pending[key] !== request ? !1 : (delete pending[key], !0);
-        },
-        cancelPending(channelId = null) {
-          let key = normalizeChannelId(channelId);
-          if (!key) {
-            pending = {}, failed = {};
-            return;
-          }
-          delete pending[key], delete failed[key];
-        },
-        // Returns whether a visible title was actually removed, so the caller knows
-        // if a component refresh is warranted.
-        clear(channelId = null) {
-          let key = normalizeChannelId(channelId), hadTranslatedTitle = this.hasTranslatedTitle(channelId);
-          return this.cancelPending(channelId), key ? delete translated[key] : translated = {}, hadTranslatedTitle;
-        },
-        // Invalidates every in-flight request without touching displayed titles;
-        // used when the plugin stops so late callbacks cannot commit.
-        invalidateInFlight() {
-          requestSequence++, pending = {};
-        }
-      });
-    }
-    __name(createChannelTitleStore, "createChannelTitleStore");
-    module2.exports = { CHANNEL_TITLE_FAILURE_RETRY_MS: 3e4, createChannelTitleStore };
-  }
-});
-
-// src/viewport/message-viewport-store.js
-var require_message_viewport_store = __commonJS({
-  "src/viewport/message-viewport-store.js"(exports2, module2) {
-    var MANUAL_TRANSLATION_ANCHOR_RESTORE_DELAYS = [60, 180, 420, 900], SCROLL_INTENT_KEYS = ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "], SCROLL_INTENT_EVENTS = ["wheel", "touchmove", "pointerdown", "keydown"], SCROLL_INTENT_END_EVENTS = ["pointerup", "pointercancel"], INPUT_ACTIVITY_EVENTS = ["beforeinput", "input", "keydown"], MESSAGE_ELEMENT_SELECTOR = '[id^="chat-messages-"], [data-list-item-id*="chat-messages"]', TEXT_INPUT_SELECTOR = "textarea, input, [contenteditable='true']";
-    function createMessageViewportStore({
-      getDocument = /* @__PURE__ */ __name(() => null, "getDocument"),
-      setTimeout: setTimeout2,
-      clearTimeout: clearTimeout2,
-      requestAnimationFrame: requestAnimationFrame2,
-      now = Date.now,
-      getSelectedChannelId = /* @__PURE__ */ __name(() => null, "getSelectedChannelId"),
-      getMessagesScrollerSelector = /* @__PURE__ */ __name(() => null, "getMessagesScrollerSelector"),
-      getChannelTextAreaSelector = /* @__PURE__ */ __name(() => null, "getChannelTextAreaSelector"),
-      escapeSelectorValue = null,
-      // Finishing a scroll is the moment the legacy runtime is allowed to close a
-      // historical snapshot; the store must not know what that means.
-      onScrollActivityFinished = /* @__PURE__ */ __name(() => {
-      }, "onScrollActivityFinished")
-    } = {}) {
-      let userScrollTime = 0, userScrollChannelId = "", userScrollIntentSequence = 0, programmaticScrollWriteTime = 0, scrollWatcherAttached = !1, scrollWatcherElement = null, scrollActivityHandler = null, scrollIntentHandler = null, scrollIntentEndHandler = null, scrollEndHandler = null, scrollIntentPending = !1, scrollIntentTimer = null, scrollIdleTimer = null, inputActivityTime = 0, inputActivityHandler = null, manualScrollAnchor = null, manualScrollLockTimer = null;
-      function normalizeChannelId(channelId) {
-        return channelId == null ? "" : String(channelId);
-      }
-      __name(normalizeChannelId, "normalizeChannelId");
-      function escapeSelector(value) {
-        return escapeSelectorValue ? escapeSelectorValue(String(value)) : String(value).replace(/(["\\])/g, "\\$1");
-      }
-      __name(escapeSelector, "escapeSelector");
-      function getMessagesScroller() {
-        let documentRef = getDocument(), selector = getMessagesScrollerSelector();
-        return !documentRef || !selector ? null : documentRef.querySelector(selector);
-      }
-      __name(getMessagesScroller, "getMessagesScroller");
-      function extractMessageIdFromElement(element) {
-        if (!element) return null;
-        let values = [
-          element.getAttribute && element.getAttribute("data-list-item-id"),
-          element.getAttribute && element.getAttribute("aria-labelledby"),
-          element.id
-        ].filter(Boolean);
-        for (let value of values) {
-          let match = String(value).match(/(\d{15,25})(?!.*\d)/);
-          if (match) return match[1];
-        }
-        return null;
-      }
-      __name(extractMessageIdFromElement, "extractMessageIdFromElement");
-      function findMessageElementById(messageId) {
-        let documentRef = getDocument();
-        if (!messageId || !documentRef) return null;
-        let escapedId = escapeSelector(messageId), selectors = [
-          `[id="chat-messages-${escapedId}"]`,
-          `[id$="-${escapedId}"]`,
-          `[data-list-item-id$="-${escapedId}"]`,
-          `[data-list-item-id*="${escapedId}"]`,
-          `[aria-labelledby*="${escapedId}"]`
-        ];
-        for (let selector of selectors)
-          try {
-            let element = documentRef.querySelector(selector);
-            if (element) return element.closest && element.closest(MESSAGE_ELEMENT_SELECTOR) || element;
-          } catch {
-          }
-        return null;
-      }
-      __name(findMessageElementById, "findMessageElementById");
-      function findVisibleMessageAnchor(messagesScroller = null) {
-        if (messagesScroller = messagesScroller || getMessagesScroller(), !messagesScroller || !getDocument()) return null;
-        let scrollerRect = messagesScroller.getBoundingClientRect(), candidates = [];
-        try {
-          candidates = Array.from(messagesScroller.querySelectorAll(MESSAGE_ELEMENT_SELECTOR));
-        } catch {
-          candidates = [];
-        }
-        let seen = /* @__PURE__ */ new Set();
-        for (let element of candidates) {
-          if (!element || seen.has(element)) continue;
-          seen.add(element);
-          let messageId = extractMessageIdFromElement(element);
-          if (!messageId) continue;
-          let rect = element.getBoundingClientRect();
-          if (!(!rect || rect.height <= 0) && !(rect.bottom <= scrollerRect.top + 8 || rect.top >= scrollerRect.bottom - 8))
-            return { messageId, element };
-        }
-        return null;
-      }
-      __name(findVisibleMessageAnchor, "findVisibleMessageAnchor");
-      function captureAnchorState(messageId = null) {
-        let messagesScroller = getMessagesScroller(), element = messageId ? findMessageElementById(messageId) : null;
-        if (!element) {
-          let visibleAnchor = findVisibleMessageAnchor(messagesScroller);
-          visibleAnchor && (messageId = visibleAnchor.messageId, element = visibleAnchor.element);
-        }
-        if (!messagesScroller || !element || !messageId) return null;
-        let elementRect = element.getBoundingClientRect(), scrollerRect = messagesScroller.getBoundingClientRect();
-        return {
-          messageId,
-          scrollTop: messagesScroller.scrollTop,
-          elementTop: elementRect.top,
-          relativeTop: elementRect.top - scrollerRect.top,
-          expiresAt: now() + 4500
-        };
-      }
-      __name(captureAnchorState, "captureAnchorState");
-      function restoreAnchorPosition(anchorState) {
-        if (!anchorState) return;
-        let messagesScroller = getMessagesScroller(), element = findMessageElementById(anchorState.messageId);
-        if (!messagesScroller || !element) return;
-        let scrollerRect = messagesScroller.getBoundingClientRect(), elementRect = element.getBoundingClientRect(), desiredTop = scrollerRect.top + (typeof anchorState.relativeTop == "number" ? anchorState.relativeTop : elementRect.top - scrollerRect.top), delta = elementRect.top - desiredTop;
-        if (Math.abs(delta) < 1) return;
-        let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
-        programmaticScrollWriteTime = now(), messagesScroller.scrollTop = Math.max(0, Math.min(messagesScroller.scrollTop + delta, maxScrollTop));
-      }
-      __name(restoreAnchorPosition, "restoreAnchorPosition");
-      function restoreAnchorState(anchorState) {
-        if (!anchorState) return;
-        let restore = /* @__PURE__ */ __name(() => restoreAnchorPosition(anchorState), "restore");
-        requestAnimationFrame2(() => requestAnimationFrame2(restore));
-        for (let delay of MANUAL_TRANSLATION_ANCHOR_RESTORE_DELAYS) setTimeout2(restore, delay);
-      }
-      __name(restoreAnchorState, "restoreAnchorState");
-      function lockManualScroll(messageId) {
-        let anchorState = captureAnchorState(messageId);
-        anchorState && (manualScrollAnchor = anchorState, manualScrollLockTimer && clearTimeout2(manualScrollLockTimer), manualScrollLockTimer = setTimeout2((_) => {
-          manualScrollLockTimer = null, manualScrollAnchor = null;
-        }, 4500));
-      }
-      __name(lockManualScroll, "lockManualScroll");
-      function getActiveManualScrollAnchor() {
-        return manualScrollAnchor ? now() > manualScrollAnchor.expiresAt ? (manualScrollAnchor = null, null) : manualScrollAnchor : null;
-      }
-      __name(getActiveManualScrollAnchor, "getActiveManualScrollAnchor");
-      function clearManualScrollLock() {
-        manualScrollLockTimer && clearTimeout2(manualScrollLockTimer), manualScrollLockTimer = null, manualScrollAnchor = null;
-      }
-      __name(clearManualScrollLock, "clearManualScrollLock");
-      function captureScrollerState() {
-        let messagesScroller = getMessagesScroller();
-        if (!messagesScroller) return null;
-        let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight), keepBottom = Math.max(0, maxScrollTop - messagesScroller.scrollTop) <= 80;
-        return {
-          scrollTop: messagesScroller.scrollTop,
-          keepBottom,
-          userScrollIntentSequence,
-          anchor: keepBottom ? null : captureAnchorState()
-        };
-      }
-      __name(captureScrollerState, "captureScrollerState");
-      function restoreScrollerState(scrollerState) {
-        if (!scrollerState) return;
-        let restore = /* @__PURE__ */ __name(() => {
-          if (scrollerState.userScrollIntentSequence !== userScrollIntentSequence) return;
-          let messagesScroller = getMessagesScroller();
-          if (!messagesScroller) return;
-          if (scrollerState.keepBottom) {
-            programmaticScrollWriteTime = now(), messagesScroller.scrollTop = messagesScroller.scrollHeight;
-            return;
-          }
-          if (scrollerState.anchor) {
-            restoreAnchorPosition(scrollerState.anchor);
-            return;
-          }
-          let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
-          programmaticScrollWriteTime = now(), messagesScroller.scrollTop = Math.max(0, Math.min(scrollerState.scrollTop, maxScrollTop));
-        }, "restore");
-        requestAnimationFrame2(() => requestAnimationFrame2(restore));
-      }
-      __name(restoreScrollerState, "restoreScrollerState");
-      function isViewingMessageHistory() {
-        let scrollerState = captureScrollerState();
-        return !!(scrollerState && !scrollerState.keepBottom);
-      }
-      __name(isViewingMessageHistory, "isViewingMessageHistory");
-      function clearScrollIntent() {
-        scrollIntentTimer && clearTimeout2(scrollIntentTimer), scrollIntentTimer = null, scrollIntentPending = !1;
-      }
-      __name(clearScrollIntent, "clearScrollIntent");
-      function markScrollIntent() {
-        clearScrollIntent(), scrollIntentPending = !0, scrollIntentTimer = setTimeout2(() => {
-          scrollIntentTimer = null, scrollIntentPending = !1;
-        }, 300);
-      }
-      __name(markScrollIntent, "markScrollIntent");
-      function finishScrollActivity(channelId) {
-        scrollIdleTimer && clearTimeout2(scrollIdleTimer), scrollIdleTimer = null, clearScrollIntent();
-        let key = normalizeChannelId(channelId);
-        (!key || userScrollChannelId === key) && (userScrollTime = 0, userScrollChannelId = ""), key && onScrollActivityFinished(channelId);
-      }
-      __name(finishScrollActivity, "finishScrollActivity");
-      function scheduleScrollIdleFinish(channelId, delay = 900) {
-        channelId && (scrollIdleTimer && clearTimeout2(scrollIdleTimer), scrollIdleTimer = setTimeout2(() => {
-          scrollIdleTimer = null, finishScrollActivity(channelId);
-        }, delay));
-      }
-      __name(scheduleScrollIdleFinish, "scheduleScrollIdleFinish");
-      function isUserScrollingChannel(channelId) {
-        return userScrollChannelId === normalizeChannelId(channelId) && now() - userScrollTime < 900;
-      }
-      __name(isUserScrollingChannel, "isUserScrollingChannel");
-      function isUserActivelyScrolling(channelId = null) {
-        let key = normalizeChannelId(channelId || getSelectedChannelId());
-        return !!key && userScrollChannelId === key && !!userScrollTime && now() - userScrollTime < 900;
-      }
-      __name(isUserActivelyScrolling, "isUserActivelyScrolling");
-      function handleScrollActivity() {
-        let timestamp = now();
-        if (timestamp - programmaticScrollWriteTime < 150) return;
-        let channelId = getSelectedChannelId(), key = normalizeChannelId(channelId);
-        scrollIntentPending ? (clearScrollIntent(), userScrollChannelId = key, userScrollTime = timestamp, scheduleScrollIdleFinish(channelId)) : key && userScrollChannelId === key && userScrollTime && timestamp - userScrollTime < 900 && (userScrollTime = timestamp, scheduleScrollIdleFinish(channelId));
-      }
-      __name(handleScrollActivity, "handleScrollActivity");
-      function attachScrollWatcher() {
-        if (!getDocument()) return;
-        let messagesScroller = getMessagesScroller();
-        if (messagesScroller && !(scrollWatcherAttached && scrollWatcherElement === messagesScroller)) {
-          detachScrollWatcher(), scrollActivityHandler = /* @__PURE__ */ __name((_) => handleScrollActivity(), "scrollActivityHandler"), scrollIntentHandler = /* @__PURE__ */ __name((event) => {
-            event && event.type === "keydown" && !SCROLL_INTENT_KEYS.includes(event.key) || (userScrollIntentSequence++, markScrollIntent());
-          }, "scrollIntentHandler"), scrollIntentEndHandler = /* @__PURE__ */ __name((_) => {
-            clearScrollIntent();
-          }, "scrollIntentEndHandler"), scrollEndHandler = /* @__PURE__ */ __name((_) => {
-            finishScrollActivity(userScrollChannelId || getSelectedChannelId());
-          }, "scrollEndHandler"), scrollWatcherElement = messagesScroller, scrollWatcherAttached = !0, messagesScroller.addEventListener("scroll", scrollActivityHandler, { passive: !0 }), messagesScroller.addEventListener("scrollend", scrollEndHandler, { passive: !0 });
-          for (let eventName of SCROLL_INTENT_EVENTS) messagesScroller.addEventListener(eventName, scrollIntentHandler, { passive: eventName !== "keydown" });
-          for (let eventName of SCROLL_INTENT_END_EVENTS) messagesScroller.addEventListener(eventName, scrollIntentEndHandler, { passive: !0 });
-        }
-      }
-      __name(attachScrollWatcher, "attachScrollWatcher");
-      function detachScrollWatcher() {
-        if (scrollIdleTimer && clearTimeout2(scrollIdleTimer), scrollIdleTimer = null, clearScrollIntent(), userScrollTime = 0, userScrollChannelId = "", scrollWatcherElement) {
-          if (scrollActivityHandler && scrollWatcherElement.removeEventListener("scroll", scrollActivityHandler), scrollEndHandler && scrollWatcherElement.removeEventListener("scrollend", scrollEndHandler), scrollIntentHandler) for (let eventName of SCROLL_INTENT_EVENTS) scrollWatcherElement.removeEventListener(eventName, scrollIntentHandler);
-          if (scrollIntentEndHandler) for (let eventName of SCROLL_INTENT_END_EVENTS) scrollWatcherElement.removeEventListener(eventName, scrollIntentEndHandler);
-        }
-        scrollWatcherAttached = !1, scrollWatcherElement = null, scrollActivityHandler = null, scrollIntentHandler = null, scrollIntentEndHandler = null, scrollEndHandler = null;
-      }
-      __name(detachScrollWatcher, "detachScrollWatcher");
-      function attachInputActivityWatcher() {
-        let documentRef = getDocument();
-        if (!(inputActivityHandler || !documentRef)) {
-          inputActivityHandler = /* @__PURE__ */ __name((event) => {
-            let target = event && event.target;
-            if (!target) return;
-            let isTextInput = !1;
-            try {
-              isTextInput = !!(target.matches && target.matches(TEXT_INPUT_SELECTOR) || target.closest && target.closest(TEXT_INPUT_SELECTOR));
-            } catch {
-            }
-            isTextInput && (inputActivityTime = now());
-          }, "inputActivityHandler");
-          for (let eventName of INPUT_ACTIVITY_EVENTS) documentRef.addEventListener(eventName, inputActivityHandler, !0);
-        }
-      }
-      __name(attachInputActivityWatcher, "attachInputActivityWatcher");
-      function detachInputActivityWatcher() {
-        let documentRef = getDocument();
-        if (!inputActivityHandler || !documentRef) {
-          inputActivityHandler = null;
-          return;
-        }
-        for (let eventName of INPUT_ACTIVITY_EVENTS) documentRef.removeEventListener(eventName, inputActivityHandler, !0);
-        inputActivityHandler = null;
-      }
-      __name(detachInputActivityWatcher, "detachInputActivityWatcher");
-      function isChannelTextAreaFocused() {
-        let documentRef = getDocument();
-        if (!documentRef) return !1;
-        let activeElement = documentRef.activeElement;
-        return !activeElement || activeElement === documentRef.body || !(activeElement.tagName === "TEXTAREA" || activeElement.tagName === "INPUT" || activeElement.getAttribute && activeElement.getAttribute("role") === "textbox" || activeElement.isContentEditable) ? !1 : [getChannelTextAreaSelector(), '[class*="channelTextArea"]', "form"].some((selector) => {
-          if (!selector) return !1;
-          try {
-            return !!(activeElement.matches && activeElement.matches(selector) || activeElement.closest && activeElement.closest(selector));
-          } catch {
-            return !1;
-          }
-        });
-      }
-      __name(isChannelTextAreaFocused, "isChannelTextAreaFocused");
-      function pauseForNavigation(duration = 1800) {
-        let channelId = getSelectedChannelId();
-        userScrollChannelId = normalizeChannelId(channelId), userScrollTime = now() + Math.max(0, duration - 900), channelId && scheduleScrollIdleFinish(channelId, duration);
-      }
-      return __name(pauseForNavigation, "pauseForNavigation"), Object.freeze({
-        getMessagesScroller,
-        extractMessageIdFromElement,
-        findMessageElementById,
-        findVisibleMessageAnchor,
-        captureAnchorState,
-        restoreAnchorPosition,
-        restoreAnchorState,
-        lockManualScroll,
-        getActiveManualScrollAnchor,
-        clearManualScrollLock,
-        captureScrollerState,
-        restoreScrollerState,
-        isViewingMessageHistory,
-        attachScrollWatcher,
-        detachScrollWatcher,
-        markScrollIntent,
-        clearScrollIntent,
-        finishScrollActivity,
-        scheduleScrollIdleFinish,
-        isUserActivelyScrolling,
-        // Narrower than isUserActivelyScrolling: no fallback to the selected channel and
-        // no truthiness check on the timestamp, matching the historical commit gate.
-        isUserScrollingChannel,
-        getUserScrollIntentSequence: /* @__PURE__ */ __name(() => userScrollIntentSequence, "getUserScrollIntentSequence"),
-        attachInputActivityWatcher,
-        detachInputActivityWatcher,
-        getTimeSinceInputActivity: /* @__PURE__ */ __name(() => now() - inputActivityTime, "getTimeSinceInputActivity"),
-        isChannelTextAreaFocused,
-        pauseForNavigation
-      });
-    }
-    __name(createMessageViewportStore, "createMessageViewportStore");
-    module2.exports = {
-      AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE: 150,
-      AUTO_TRANSLATION_SCROLL_IDLE_DELAY: 900,
-      AUTO_TRANSLATION_SCROLL_INTENT_WINDOW: 300,
-      AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD: 80,
-      MANUAL_TRANSLATION_SCROLL_LOCK_MS: 4500,
-      MANUAL_TRANSLATION_ANCHOR_RESTORE_DELAYS,
-      createMessageViewportStore
-    };
-  }
-});
-
-// src/status/loaded-translation-status-store.js
-var require_loaded_translation_status_store = __commonJS({
-  "src/status/loaded-translation-status-store.js"(exports2, module2) {
-    var LOADED_STATUS_PHASES = Object.freeze(["collecting", "requesting", "repairing", "committing", "done", "failed"]), LOADED_STATUS_PHASE_SET = new Set(LOADED_STATUS_PHASES), LOADED_STATUS_TERMINAL_PHASES = /* @__PURE__ */ new Set(["done", "failed"]), LOADED_STATUS_PHASE_BY_JOB_STATE = Object.freeze({
-      collecting: "collecting",
-      translating: "requesting",
-      repairing: "repairing",
-      ready: "committing",
-      committed: "done",
-      cancelled: null
-    }), LOADED_STATUS_PROGRESS_FIELDS = Object.freeze(["total", "processed", "displayed", "skipped", "failed"]);
-    function createEmptyStatus() {
-      return {
-        active: !1,
-        collecting: !1,
-        done: !1,
-        channelId: null,
-        total: 0,
-        processed: 0,
-        batch: 0,
-        displayed: 0,
-        skipped: 0,
-        failed: 0,
-        retryable: 0,
-        aiDropped: 0,
-        lastSkipReason: "",
-        lastSkipPreview: "",
-        phase: null,
-        phaseStartedAt: 0,
-        progressAt: 0
-      };
-    }
-    __name(createEmptyStatus, "createEmptyStatus");
-    function normalizeChannelId(channelId) {
-      return channelId == null ? "" : String(channelId);
-    }
-    __name(normalizeChannelId, "normalizeChannelId");
-    function formatSeconds(ms) {
-      return `${Math.max(0, Math.floor((ms || 0) / 1e3))}s`;
-    }
-    __name(formatSeconds, "formatSeconds");
-    function getPhaseLabel(phase, chinese) {
-      switch (phase) {
-        case "collecting":
-          return chinese ? "收集中" : "collecting";
-        case "requesting":
-          return chinese ? "请求中" : "requesting";
-        case "repairing":
-          return chinese ? "修复中" : "repairing";
-        case "committing":
-          return chinese ? "提交中" : "committing";
-        case "done":
-          return chinese ? "已完成" : "done";
-        case "failed":
-          return chinese ? "已失败" : "failed";
-        default:
-          return "";
-      }
-    }
-    __name(getPhaseLabel, "getPhaseLabel");
-    function hasCounterMoved(previous, next) {
-      return LOADED_STATUS_PROGRESS_FIELDS.some((field) => (previous[field] || 0) !== (next[field] || 0));
-    }
-    __name(hasCounterMoved, "hasCounterMoved");
-    function renderPhaseSegment(status, chinese, currentTime, stalledAfterMs) {
-      let phase = status && status.phase;
-      if (!phase || LOADED_STATUS_TERMINAL_PHASES.has(phase)) return "";
-      let label = getPhaseLabel(phase, chinese);
-      if (!label) return "";
-      let progressAt = status.progressAt || status.phaseStartedAt || 0, sinceProgressMs = progressAt ? Math.max(0, currentTime - progressAt) : 0;
-      if (progressAt && sinceProgressMs >= stalledAfterMs)
-        return chinese ? `，${label} ${formatSeconds(sinceProgressMs)} 无进展` : `, ${label} ${formatSeconds(sinceProgressMs)} no progress`;
-      let phaseStartedAt = status.phaseStartedAt || 0;
-      return phaseStartedAt ? chinese ? `，${label} ${formatSeconds(currentTime - phaseStartedAt)}` : `, ${label} ${formatSeconds(currentTime - phaseStartedAt)}` : chinese ? `，${label}` : `, ${label}`;
-    }
-    __name(renderPhaseSegment, "renderPhaseSegment");
-    function renderStatusText(status, chinese, phaseSegment) {
-      let total = Math.max(0, status && status.total || 0), processed = Math.max(0, Math.min(total || 0, status && status.processed || 0)), displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0)), skipped = Math.max(0, Math.min(total || 0, status && status.skipped || 0)), failedValue = status && status.failed != null ? status.failed : status && status.aiDropped, failed = Math.max(0, failedValue || 0), retryable = Math.max(0, status && status.retryable || 0), batch = Math.max(1, status && status.batch || 1), extraText = `${skipped ? chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}` : ""}${failed ? chinese ? `，失败 ${failed}` : `, failed ${failed}` : ""}${retryable && retryable != failed ? chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}` : ""}`;
-      return status && status.done ? total ? chinese ? `已加载翻译：第 ${batch} 批完成，显示 ${displayed}/${total}${extraText}` : `Loaded translation: batch ${batch} done, shown ${displayed}/${total}${extraText}` : failed || retryable ? chinese ? `已加载翻译：失败 ${failed}，待重试 ${retryable}` : `Loaded translation: ${failed} failed, ${retryable} retry pending` : chinese ? "已加载翻译：开启，暂无待翻译" : "Loaded translation: on, no pending messages" : status && status.collecting ? chinese ? `收集已加载：第 ${batch} 批 ${processed}/${total}${extraText}${phaseSegment}` : `Collecting loaded: batch ${batch} ${processed}/${total}${extraText}${phaseSegment}` : total ? chinese ? `翻译已加载：第 ${batch} 批 ${processed}/${total}，显示 ${displayed}${extraText}${phaseSegment}` : `Translating loaded: batch ${batch} ${processed}/${total}, shown ${displayed}${extraText}${phaseSegment}` : chinese ? "已加载翻译：开启，等待消息" : "Loaded translation: on, waiting";
-    }
-    __name(renderStatusText, "renderStatusText");
-    function createLoadedTranslationStatusStore({
-      now = Date.now,
-      setTimeout: scheduleTimer = null,
-      clearTimeout: cancelTimer = null,
-      isChineseUiLanguage = /* @__PURE__ */ __name(() => !1, "isChineseUiLanguage"),
-      stalledAfterMs = 45e3
-    } = {}) {
-      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), status = createEmptyStatus(), hideTimer = null, seenMessages = {};
-      function resolvePhase(previous, next, updates) {
-        if (updates && typeof updates.phase == "string" && LOADED_STATUS_PHASE_SET.has(updates.phase)) return updates.phase;
-        if (next.done) return "done";
-        if (next.collecting) return "collecting";
-        if (!next.active) return null;
-        let carried = previous.phase;
-        return !carried || carried === "collecting" || LOADED_STATUS_TERMINAL_PHASES.has(carried) ? "requesting" : carried;
-      }
-      __name(resolvePhase, "resolvePhase");
-      function readStatus(statusOverride) {
-        return statusOverride === void 0 ? status : statusOverride;
-      }
-      return __name(readStatus, "readStatus"), Object.freeze({
-        getStatus() {
-          return Object.assign({}, status);
-        },
-        getChannelId() {
-          return status.channelId;
-        },
-        isForChannel(channelId) {
-          return normalizeChannelId(status.channelId) === normalizeChannelId(channelId);
-        },
-        isActive() {
-          return !!status.active;
-        },
-        isDone() {
-          return !!status.done;
-        },
-        // The batch label shown for the batch already running.
-        getCurrentBatchNumber() {
-          return status.batch || 1;
-        },
-        // Without a channel the counter simply advances. With one it restarts at 1 when
-        // the status belongs to a different channel, so a channel switch never inherits
-        // another channel's batch number.
-        getNextBatchNumber(channelId = null) {
-          return channelId == null ? (status.batch || 0) + 1 : (this.isForChannel(channelId) && status.batch || 0) + 1;
-        },
-        getPhaseForJobState(jobState) {
-          return LOADED_STATUS_PHASE_BY_JOB_STATE[jobState] || null;
-        },
-        update(updates = {}) {
-          let previous = status, next = Object.assign({}, previous, updates);
-          return next.phase = resolvePhase(previous, next, updates), next.phase !== previous.phase ? (next.phaseStartedAt = now(), next.progressAt = next.phaseStartedAt) : (next.phaseStartedAt = previous.phaseStartedAt, next.progressAt = hasCounterMoved(previous, next) ? now() : previous.progressAt), status = next, this.getStatus();
-        },
-        clear() {
-          return this.cancelHide(), status = createEmptyStatus(), this.getStatus();
-        },
-        // Reports whether the phase is progressing, so a caller can log or diagnose
-        // without parsing the rendered text.
-        getPhaseSnapshot(statusOverride) {
-          let target = readStatus(statusOverride), phase = target && target.phase || null, currentTime = now(), phaseStartedAt = target && target.phaseStartedAt || 0, progressAt = target && target.progressAt || phaseStartedAt, terminal = LOADED_STATUS_TERMINAL_PHASES.has(phase), sinceProgressMs = progressAt ? Math.max(0, currentTime - progressAt) : 0, stalled = !!phase && !terminal && !!progressAt && sinceProgressMs >= stalledAfterMs;
-          return {
-            phase,
-            label: getPhaseLabel(phase, !!isChineseUiLanguage()),
-            phaseStartedAt,
-            phaseElapsedMs: phaseStartedAt ? Math.max(0, currentTime - phaseStartedAt) : 0,
-            progressAt,
-            sinceProgressMs,
-            stalled,
-            working: !!phase && !terminal && !stalled
-          };
-        },
-        getStatusText(statusOverride) {
-          let target = readStatus(statusOverride), chinese = !!isChineseUiLanguage();
-          return renderStatusText(target, chinese, renderPhaseSegment(target, chinese, now(), stalledAfterMs));
-        },
-        getPreviewText(text) {
-          return text = (text || "").replace(/\s+/g, " ").trim(), text ? text.length > 24 ? `${text.slice(0, 24)}...` : text : "";
-        },
-        // The inline variant falls back to a generic sentence whenever the record belongs
-        // to another channel, so a channel switch never shows the previous channel's counts.
-        getInlineStatusText(selectedChannelId) {
-          let statusChannelId = status.channelId, matchesChannel = !statusChannelId || statusChannelId == "__global" || normalizeChannelId(statusChannelId) === normalizeChannelId(selectedChannelId);
-          return (status.active || status.done) && matchesChannel ? this.getStatusText(status) : isChineseUiLanguage() ? "已加载消息自动翻译已开启，等待当前批次…" : "Loaded-message auto-translate is on; waiting for the current batch…";
-        },
-        hasPendingHide() {
-          return hideTimer !== null;
-        },
-        cancelHide() {
-          hideTimer !== null && stopTimer(hideTimer), hideTimer = null;
-        },
-        // The handle is cleared before the callback runs, so the callback may schedule
-        // another hide without cancelling itself.
-        scheduleHide(delay, onHide) {
-          return this.cancelHide(), hideTimer = startTimer(() => {
-            hideTimer = null, typeof onHide == "function" && onHide();
-          }, delay), hideTimer;
-        },
-        getSeenCount(channelId) {
-          let key = normalizeChannelId(channelId), seen = key && seenMessages[key];
-          return seen ? Object.keys(seen).length : 0;
-        },
-        // Returns whether this message had already been seen in this channel session,
-        // which is what the boundary dedup decides on.
-        markMessageSeen(channelId, messageId) {
-          let key = normalizeChannelId(channelId), messageKey = normalizeChannelId(messageId);
-          if (!key || !messageKey) return !1;
-          seenMessages[key] || (seenMessages[key] = {});
-          let wasSeen = !!seenMessages[key][messageKey];
-          return seenMessages[key][messageKey] = !0, wasSeen;
-        },
-        // The seen map only serves boundary dedup inside the active channel session;
-        // keeping it for left channels grows memory for the whole Discord session.
-        resetSeen(channelId = null) {
-          let key = normalizeChannelId(channelId);
-          if (!key) {
-            seenMessages = {};
-            return;
-          }
-          delete seenMessages[key];
-        }
-      });
-    }
-    __name(createLoadedTranslationStatusStore, "createLoadedTranslationStatusStore");
-    module2.exports = {
-      LOADED_STATUS_STALLED_AFTER_MS: 45e3,
-      LOADED_STATUS_PREVIEW_MAX_LENGTH: 24,
-      LOADED_STATUS_PHASES,
-      LOADED_STATUS_PHASE_BY_JOB_STATE,
-      createLoadedTranslationStatusStore
-    };
-  }
-});
-
-// src/cache/translation-cache-store.js
-var require_translation_cache_store = __commonJS({
-  "src/cache/translation-cache-store.js"(exports2, module2) {
-    var PERSISTED_RECEIVED_SKIP_REASONS = Object.freeze(["same_language", "too_similar", "ai_skip_signal", "source_filter"]), SIGNATURE_DIGEST_PREFIX = "h1:";
-    function createTranslationCacheStore({
-      now = Date.now,
-      setTimeout: setTimeout2,
-      clearTimeout: clearTimeout2,
-      // Persistence. loadCache returns whatever is on disk, including garbage.
-      loadCache = /* @__PURE__ */ __name(() => null, "loadCache"),
-      saveCache = /* @__PURE__ */ __name(() => {
-      }, "saveCache"),
-      // Message shape helpers owned by the received-translation runtime.
-      extractOriginalContentData = /* @__PURE__ */ __name(() => ({}), "extractOriginalContentData"),
-      createSignature = /* @__PURE__ */ __name(() => "", "createSignature"),
-      normalizeStoredTranslation = /* @__PURE__ */ __name((translation) => translation, "normalizeStoredTranslation"),
-      extractLegacyDisplayedParts = /* @__PURE__ */ __name(() => ({}), "extractLegacyDisplayedParts"),
-      // Policy and display seams. A cache lookup has no business deciding any of these,
-      // but the lookup it replaces did, so they are injected rather than reimplemented.
-      refreshTranslationDisplay = /* @__PURE__ */ __name((translation) => translation, "refreshTranslationDisplay"),
-      isTranslationResultTooSimilar = /* @__PURE__ */ __name(() => !1, "isTranslationResultTooSimilar"),
-      shouldSkipBeforeRequest = /* @__PURE__ */ __name(() => !1, "shouldSkipBeforeRequest"),
-      shouldKeepAutoTranslatedResult = /* @__PURE__ */ __name(() => !0, "shouldKeepAutoTranslatedResult"),
-      getSkipPreviewText = /* @__PURE__ */ __name((text) => text == null ? "" : String(text), "getSkipPreviewText")
-    } = {}) {
-      let cache = {}, saveTimer = null;
-      function hashSignature(signature) {
-        let text = String(signature ?? ""), hash = 2166136261;
-        for (let index = 0; index < text.length; index++)
-          hash ^= text.charCodeAt(index), hash = Math.imul(hash, 16777619) >>> 0;
-        return `${SIGNATURE_DIGEST_PREFIX}${hash.toString(36)}:${text.length.toString(36)}`;
-      }
-      __name(hashSignature, "hashSignature");
-      function matchesSignature(entry, signature) {
-        return !entry || entry.signature == null ? !1 : String(entry.signature).indexOf(SIGNATURE_DIGEST_PREFIX) !== 0 ? entry.signature == signature : entry.signature == hashSignature(signature);
-      }
-      __name(matchesSignature, "matchesSignature");
-      function scheduleSave() {
-        saveTimer && clearTimeout2(saveTimer), saveTimer = setTimeout2((_) => {
-          saveCache(cache), saveTimer = null;
-        }, 300);
-      }
-      __name(scheduleSave, "scheduleSave");
-      function cancelPendingSave() {
-        saveTimer && clearTimeout2(saveTimer), saveTimer = null;
-      }
-      __name(cancelPendingSave, "cancelPendingSave");
-      function evictOldestBeyondLimit() {
-        let cacheKeys = Object.keys(cache);
-        cacheKeys.length <= 500 || cacheKeys.sort((keyA, keyB) => (cache[keyA].cachedAt || 0) - (cache[keyB].cachedAt || 0)).slice(0, cacheKeys.length - 500).forEach((key) => delete cache[key]);
-      }
-      __name(evictOldestBeyondLimit, "evictOldestBeyondLimit");
-      function dropEntry(messageId) {
-        delete cache[messageId], scheduleSave();
-      }
-      __name(dropEntry, "dropEntry");
-      function getCachedTranslation(message, channelId, originalContentData = null) {
-        if (!message || !cache[message.id]) return null;
-        let sourceData = originalContentData || extractOriginalContentData(message), signature = createSignature(message, channelId, sourceData);
-        if (!matchesSignature(cache[message.id], signature) || cache[message.id].skipped) return null;
-        let cachedTranslation = Object.assign({ signature, channelId }, cache[message.id].translation), beforeSerialized = JSON.stringify(cachedTranslation || {});
-        if (cachedTranslation = normalizeStoredTranslation(cachedTranslation), !cachedTranslation.originalContent && sourceData && sourceData.content && (cachedTranslation.originalContent = String(sourceData.content)), !cachedTranslation.translatedContent && cachedTranslation.content && (cachedTranslation.translatedContent = extractLegacyDisplayedParts(cachedTranslation.content).translatedContent || cachedTranslation.content), !cachedTranslation.translatedContent || (sourceData && sourceData.content || "").trim() && !String(cachedTranslation.originalContent || "").trim()) return null;
-        if (cachedTranslation = refreshTranslationDisplay(cachedTranslation), isTranslationResultTooSimilar(cachedTranslation) || shouldSkipBeforeRequest(sourceData, channelId) || !shouldKeepAutoTranslatedResult(cachedTranslation, channelId))
-          return dropEntry(message.id), null;
-        if (JSON.stringify(cachedTranslation || {}) != beforeSerialized) {
-          let upgradedTranslation = Object.assign({}, cachedTranslation);
-          delete upgradedTranslation.signature, cache[message.id].translation = upgradedTranslation, cache[message.id].signature = hashSignature(signature), cache[message.id].cachedAt = cache[message.id].cachedAt || now(), scheduleSave();
-        }
-        return cachedTranslation;
-      }
-      __name(getCachedTranslation, "getCachedTranslation");
-      function getCachedSkipDecision(message, channelId, originalContentData = null) {
-        if (!message || !cache[message.id]) return null;
-        let sourceData = originalContentData || extractOriginalContentData(message), signature = createSignature(message, channelId, sourceData);
-        if (!matchesSignature(cache[message.id], signature)) return null;
-        let skipped = cache[message.id].skipped;
-        return !skipped || !skipped.reason ? null : skipped.policyVersion !== 2 ? (dropEntry(message.id), null) : Object.assign({ signature, channelId }, skipped);
-      }
-      __name(getCachedSkipDecision, "getCachedSkipDecision");
-      function shouldPersistSkipDecision(reason) {
-        return PERSISTED_RECEIVED_SKIP_REASONS.includes(reason);
-      }
-      __name(shouldPersistSkipDecision, "shouldPersistSkipDecision");
-      function persistTranslation(messageId, signature, translation) {
-        let storedTranslation = Object.assign({}, translation);
-        delete storedTranslation.signature, cache[messageId] = {
-          signature: hashSignature(signature),
-          cachedAt: now(),
-          translation: storedTranslation
-        }, evictOldestBeyondLimit(), scheduleSave();
-      }
-      __name(persistTranslation, "persistTranslation");
-      function persistSkipDecision(messageId, signature, reason, preview = "") {
-        !messageId || !signature || !reason || !shouldPersistSkipDecision(reason) || (cache[messageId] = {
-          signature: hashSignature(signature),
-          cachedAt: now(),
-          skipped: {
-            policyVersion: 2,
-            reason,
-            preview: getSkipPreviewText(preview)
-          }
-        }, evictOldestBeyondLimit(), scheduleSave());
-      }
-      __name(persistSkipDecision, "persistSkipDecision");
-      function clear(messageId) {
-        !messageId || !cache[messageId] || dropEntry(messageId);
-      }
-      __name(clear, "clear");
-      function loadPersisted() {
-        let loaded = loadCache();
-        return cache = loaded && typeof loaded == "object" && !Array.isArray(loaded) ? loaded : {}, cache;
-      }
-      return __name(loadPersisted, "loadPersisted"), Object.freeze({
-        getCachedTranslation,
-        getCachedSkipDecision,
-        persistTranslation,
-        persistSkipDecision,
-        shouldPersistSkipDecision,
-        clear,
-        hasEntry(messageId) {
-          return !!(messageId && cache[messageId]);
-        },
-        getEntry(messageId) {
-          return messageId && cache[messageId] || null;
-        },
-        scheduleSave,
-        // Used when the plugin stops: the pending save is abandoned, not flushed, which
-        // is what the legacy shutdown did.
-        cancelPendingSave,
-        loadPersisted,
-        hashSignature,
-        matchesSignature,
-        // Writes an entry with a raw, undigested signature, the shape a pre-digest install
-        // has on disk. Only the compatibility tests need it.
-        seedRawEntryForTest(messageId, signature, translation) {
-          cache[messageId] = { signature, cachedAt: now(), translation: Object.assign({}, translation) };
-        }
-      });
-    }
-    __name(createTranslationCacheStore, "createTranslationCacheStore");
-    module2.exports = {
-      MAX_TRANSLATION_CACHE_ENTRIES: 500,
-      RECEIVED_SKIP_CACHE_POLICY_VERSION: 2,
-      TRANSLATION_CACHE_SAVE_DEBOUNCE_MS: 300,
-      PERSISTED_RECEIVED_SKIP_REASONS,
-      SIGNATURE_DIGEST_PREFIX,
-      createTranslationCacheStore
-    };
-  }
-});
-
 // src/providers/provider-client.js
 var require_provider_client = __commonJS({
   "src/providers/provider-client.js"(exports2, module2) {
@@ -3710,6 +2948,1732 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
       parseGeminiResponseText,
       parseAiBatchTranslationResponse,
       createProviderClient
+    };
+  }
+});
+
+// src/ui/settings-panel.js
+var require_settings_panel = __commonJS({
+  "src/ui/settings-panel.js"(exports2, module2) {
+    var { translationEngines, enginePortals } = require_provider_client(), languageTypes = Object.freeze({ INPUT: "input", OUTPUT: "output" }), messageTypes = Object.freeze({ RECEIVED: "received", SENT: "sent" });
+    function renderSettingsPanel(plugin, collapseStates = {}, dependencies = {}) {
+      let { BDFDB } = dependencies, settingsPanel;
+      return settingsPanel = BDFDB.PluginUtils.createSettingsPanel(plugin, {
+        collapseStates,
+        children: /* @__PURE__ */ __name((_) => {
+          let settingsItems = [], recommendedEngines = ["microsoft", "googlecloud", "googleapi", "deepseek", "openai", "gemini", "oaicompat"], getSettingsPanelRoot = /* @__PURE__ */ __name(() => document.querySelector(".translator-settings-panel-root"), "getSettingsPanelRoot"), isScrollableElement = /* @__PURE__ */ __name((node) => {
+            if (!node || node == document || node == document.body || node == document.documentElement || typeof node.scrollTop != "number" || typeof node.scrollHeight != "number" || typeof node.clientHeight != "number" || node.scrollHeight <= node.clientHeight + 1) return !1;
+            let overflowY = "";
+            try {
+              let style = window.getComputedStyle(node);
+              overflowY = style && style.overflowY || "";
+            } catch {
+            }
+            return overflowY != "visible" && overflowY != "clip" || node.scrollTop > 0;
+          }, "isScrollableElement"), getSettingsPanelScrollElements = /* @__PURE__ */ __name((root) => {
+            let scrollers = [], addScroller = /* @__PURE__ */ __name((node) => {
+              node && isScrollableElement(node) && !scrollers.includes(node) && scrollers.push(node);
+            }, "addScroller"), current = root;
+            for (; current && current.parentElement; )
+              addScroller(current), current = current.parentElement;
+            addScroller(current);
+            try {
+              for (let node of document.querySelectorAll("div"))
+                node.scrollTop > 0 && addScroller(node);
+            } catch {
+            }
+            return scrollers;
+          }, "getSettingsPanelScrollElements"), captureSettingsPanelScrollState = /* @__PURE__ */ __name(() => {
+            let root = getSettingsPanelRoot();
+            if (!root) return null;
+            let scrollers = getSettingsPanelScrollElements(root);
+            return scrollers.length ? {
+              items: scrollers.map((scroller) => ({
+                scroller,
+                scrollTop: scroller.scrollTop,
+                scrollLeft: scroller.scrollLeft
+              })),
+              windowX: typeof window < "u" ? window.scrollX : 0,
+              windowY: typeof window < "u" ? window.scrollY : 0
+            } : null;
+          }, "captureSettingsPanelScrollState"), applySettingsPanelScrollState = /* @__PURE__ */ __name((scrollState) => {
+            if (!(!scrollState || !scrollState.items)) {
+              for (let item of scrollState.items) {
+                if (!item || !item.scroller) continue;
+                let maxScrollTop = Math.max(0, item.scroller.scrollHeight - item.scroller.clientHeight), maxScrollLeft = Math.max(0, item.scroller.scrollWidth - item.scroller.clientWidth);
+                item.scroller.scrollTop = Math.max(0, Math.min(item.scrollTop, maxScrollTop)), item.scroller.scrollLeft = Math.max(0, Math.min(item.scrollLeft || 0, maxScrollLeft));
+              }
+              typeof window < "u" && window.scrollTo(scrollState.windowX || 0, scrollState.windowY || 0);
+            }
+          }, "applySettingsPanelScrollState"), restoreSettingsPanelScrollState = /* @__PURE__ */ __name((scrollState) => {
+            scrollState && (applySettingsPanelScrollState(scrollState), requestAnimationFrame(() => {
+              applySettingsPanelScrollState(scrollState), requestAnimationFrame(() => applySettingsPanelScrollState(scrollState));
+            }));
+          }, "restoreSettingsPanelScrollState"), refreshPanel = /* @__PURE__ */ __name(() => {
+            let scrollState = captureSettingsPanelScrollState();
+            BDFDB.PluginUtils.refreshSettingsPanel(plugin, settingsPanel, collapseStates), restoreSettingsPanelScrollState(scrollState);
+          }, "refreshPanel"), saveAuthField = /* @__PURE__ */ __name((engineKey, field, value) => {
+            plugin.ensureSettingsStore().setCredentialField(engineKey, field, value), plugin.SettingsUpdated = !0;
+          }, "saveAuthField"), saveReceivedFilterSetting = /* @__PURE__ */ __name((key, value) => {
+            saveFilterSetting(key, value);
+          }, "saveReceivedFilterSetting"), infoText = /* @__PURE__ */ __name((text) => BDFDB.ReactUtils.createElement("div", {
+            className: "translator-settings-note",
+            children: text
+          }), "infoText"), isChineseUi = plugin.isChineseUiLanguage(), isRussianUi = plugin.isRussianUiLanguage(), compactText = /* @__PURE__ */ __name((zh, en, ru = null) => isChineseUi ? zh : isRussianUi && ru || en, "compactText"), getEnginePortalConfig = /* @__PURE__ */ __name((engineKey) => {
+            let portal = enginePortals[engineKey];
+            return portal ? {
+              primaryUrl: portal.primaryUrl,
+              primaryLabel: isChineseUi ? portal.primaryLabelZh : portal.primaryLabelEn,
+              secondaryUrl: portal.secondaryUrl,
+              secondaryLabel: isChineseUi ? portal.secondaryLabelZh : portal.secondaryLabelEn,
+              hint: isChineseUi ? portal.hintZh : portal.hintEn
+            } : null;
+          }, "getEnginePortalConfig"), defaultSecondaryButtonColor = BDFDB.LibraryComponents.Button.Colors.PRIMARY || BDFDB.LibraryComponents.Button.Colors.GREY || void 0, createActionButton = /* @__PURE__ */ __name(({ label, onClick, color = void 0, look = null, className = null }) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
+            size: BDFDB.LibraryComponents.Button.Sizes.SMALL,
+            color: color === null ? void 0 : color || defaultSecondaryButtonColor,
+            look: look || void 0,
+            className,
+            onClick,
+            children: label
+          }), "createActionButton"), stableSelectScrollState = null, stableSelectScrollIntoViewOriginal = null, stableSelectScrollLockTimer = null, restoreStableSelectScrollIntoView = /* @__PURE__ */ __name((_2) => {
+            try {
+              stableSelectScrollIntoViewOriginal && typeof Element < "u" && Element.prototype.scrollIntoView != stableSelectScrollIntoViewOriginal && (Element.prototype.scrollIntoView = stableSelectScrollIntoViewOriginal);
+            } catch {
+            }
+            stableSelectScrollIntoViewOriginal = null;
+          }, "restoreStableSelectScrollIntoView"), lockStableSelectScrollIntoView = /* @__PURE__ */ __name((duration = 900) => {
+            try {
+              if (typeof Element > "u" || !Element.prototype || typeof Element.prototype.scrollIntoView != "function") return;
+              stableSelectScrollIntoViewOriginal || (stableSelectScrollIntoViewOriginal = Element.prototype.scrollIntoView, Element.prototype.scrollIntoView = function() {
+                if (!(this && this.closest && this.closest(".translator-settings-panel-root")))
+                  return stableSelectScrollIntoViewOriginal.apply(this, arguments);
+              }), stableSelectScrollLockTimer && clearTimeout(stableSelectScrollLockTimer), stableSelectScrollLockTimer = setTimeout(restoreStableSelectScrollIntoView, duration);
+            } catch {
+            }
+          }, "lockStableSelectScrollIntoView"), restoreStableSelectScroll = /* @__PURE__ */ __name((scrollState, repeat = !1) => {
+            if (!scrollState) return;
+            let apply = /* @__PURE__ */ __name((_2) => restoreSettingsPanelScrollState(scrollState), "apply");
+            requestAnimationFrame(apply), setTimeout(apply, 0), repeat && [16, 40, 80, 160, 320, 520].forEach((delay) => setTimeout(apply, delay));
+          }, "restoreStableSelectScroll"), createStableSelect = /* @__PURE__ */ __name((props) => {
+            let getScrollState = /* @__PURE__ */ __name((_2) => stableSelectScrollState || captureSettingsPanelScrollState(), "getScrollState"), rememberScroll = /* @__PURE__ */ __name((_2) => (stableSelectScrollState = captureSettingsPanelScrollState(), stableSelectScrollState), "rememberScroll"), rememberAndSoftRestore = /* @__PURE__ */ __name((repeat = !1) => {
+              let scrollState = rememberScroll();
+              return lockStableSelectScrollIntoView(repeat ? 1200 : 700), restoreStableSelectScroll(scrollState, repeat), scrollState;
+            }, "rememberAndSoftRestore"), callHandler = /* @__PURE__ */ __name((name, event) => {
+              if (props && typeof props[name] == "function") return props[name](event);
+            }, "callHandler"), captureOnly = /* @__PURE__ */ __name((_2) => {
+              rememberScroll(), lockStableSelectScrollIntoView(900);
+            }, "captureOnly"), selectProps = Object.assign({
+              menuShouldScrollIntoView: !1,
+              menuShouldBlockScroll: !1,
+              captureMenuScroll: !1,
+              menuPosition: "fixed",
+              menuPlacement: "auto",
+              menuPortalTarget: typeof document < "u" ? document.body : void 0,
+              closeMenuOnSelect: !0,
+              maxMenuHeight: typeof window < "u" ? Math.max(150, Math.min(240, Math.floor(window.innerHeight * 0.36))) : 220
+            }, props);
+            return selectProps.onMouseDown = (event) => {
+              rememberAndSoftRestore(!0), callHandler("onMouseDown", event);
+            }, selectProps.onPointerDown = (event) => {
+              rememberAndSoftRestore(!0), callHandler("onPointerDown", event);
+            }, selectProps.onClick = (event) => {
+              rememberAndSoftRestore(!0), callHandler("onClick", event);
+            }, selectProps.onKeyDown = (event) => {
+              event && ["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key) && rememberAndSoftRestore(!0), callHandler("onKeyDown", event);
+            }, selectProps.onFocus = (event) => {
+              rememberAndSoftRestore(!0), callHandler("onFocus", event);
+            }, selectProps.onMenuOpen = (_2) => {
+              rememberAndSoftRestore(!0), callHandler("onMenuOpen");
+            }, selectProps.onMenuClose = (_2) => {
+              let scrollState = getScrollState();
+              callHandler("onMenuClose"), restoreStableSelectScroll(scrollState, !0), setTimeout((_3) => {
+                stableSelectScrollState = null;
+              }, 450);
+            }, BDFDB.ReactUtils.createElement("div", {
+              className: "translator-stable-select-wrap",
+              onMouseDownCapture: captureOnly,
+              onPointerDownCapture: captureOnly,
+              onFocusCapture: captureOnly,
+              children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Select, selectProps)
+            });
+          }, "createStableSelect"), createSegmentedSelector = /* @__PURE__ */ __name(({ options, value, onChange, className = "" }) => BDFDB.ReactUtils.createElement("div", {
+            className: BDFDB.DOMUtils.formatClassName("translator-segmented-group", className),
+            children: options.map((option) => BDFDB.ReactUtils.createElement("button", {
+              type: "button",
+              disabled: !!option.disabled,
+              className: BDFDB.DOMUtils.formatClassName("translator-segmented-button", option.value == value && "translator-segmented-button-active", option.disabled && "translator-segmented-button-disabled"),
+              onClick: /* @__PURE__ */ __name((_2) => !option.disabled && onChange(option.value), "onClick"),
+              children: option.label
+            }))
+          }), "createSegmentedSelector"), ensureSecretInputState = /* @__PURE__ */ __name(() => (plugin.secretInputState || (plugin.secretInputState = {}), plugin.secretInputState), "ensureSecretInputState"), isSecretFieldVisible = /* @__PURE__ */ __name((fieldKey) => !!ensureSecretInputState()[fieldKey], "isSecretFieldVisible"), toggleSecretFieldVisibility = /* @__PURE__ */ __name((fieldKey) => {
+            let secretState = ensureSecretInputState();
+            secretState[fieldKey] = !secretState[fieldKey], refreshPanel();
+          }, "toggleSecretFieldVisibility"), createSecretToggleIcon = /* @__PURE__ */ __name((visible) => BDFDB.ReactUtils.createElement("svg", {
+            viewBox: "0 0 24 24",
+            width: 18,
+            height: 18,
+            fill: "none",
+            stroke: "currentColor",
+            strokeWidth: 1.8,
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
+            "aria-hidden": !0,
+            children: [
+              BDFDB.ReactUtils.createElement("path", { d: "M2.2 12s3.6-5.8 9.8-5.8S21.8 12 21.8 12 18.2 17.8 12 17.8 2.2 12 2.2 12Z", key: "outline" }),
+              BDFDB.ReactUtils.createElement("circle", { cx: "12", cy: "12", r: "2.6", key: "pupil" }),
+              !visible && BDFDB.ReactUtils.createElement("path", { d: "M4 19.2 19.2 4", key: "slash" })
+            ].filter(Boolean)
+          }), "createSecretToggleIcon"), createSecretInput = /* @__PURE__ */ __name(({ fieldKey, placeholder, value, onChange }) => BDFDB.ReactUtils.createElement("div", {
+            className: "translator-secret-input-row",
+            children: [
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
+                className: "translator-secret-input",
+                type: isSecretFieldVisible(fieldKey) ? "text" : "password",
+                placeholder,
+                value,
+                onChange
+              }),
+              BDFDB.ReactUtils.createElement("button", {
+                type: "button",
+                className: "translator-secret-toggle",
+                "aria-label": isSecretFieldVisible(fieldKey) ? plugin.getCustomText("hide_secret_label") : plugin.getCustomText("show_secret_label"),
+                title: isSecretFieldVisible(fieldKey) ? plugin.getCustomText("hide_secret_label") : plugin.getCustomText("show_secret_label"),
+                onClick: /* @__PURE__ */ __name((_2) => toggleSecretFieldVisibility(fieldKey), "onClick"),
+                children: createSecretToggleIcon(isSecretFieldVisible(fieldKey))
+              })
+            ]
+          }), "createSecretInput"), createExceptionScopeSwitches = /* @__PURE__ */ __name((sentKey, receivedKey, sentLabelKey, receivedLabelKey) => BDFDB.ReactUtils.createElement("div", {
+            className: "translator-settings-switch-group",
+            children: [
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
+                type: "Switch",
+                className: "translator-settings-switch-row",
+                label: plugin.getCustomText(sentLabelKey),
+                tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
+                value: plugin.getExceptionScopeSetting(sentKey, !0),
+                onChange: /* @__PURE__ */ __name((value) => {
+                  plugin.settings.exceptions || (plugin.settings.exceptions = {}), plugin.settings.exceptions[sentKey] = !!value, BDFDB.DataUtils.save(!!value, plugin, "exceptions", sentKey), plugin.SettingsUpdated = !0;
+                }, "onChange")
+              }),
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
+                type: "Switch",
+                className: "translator-settings-switch-row",
+                label: plugin.getCustomText(receivedLabelKey),
+                tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
+                value: plugin.getExceptionScopeSetting(receivedKey, !0),
+                onChange: /* @__PURE__ */ __name((value) => {
+                  plugin.settings.exceptions || (plugin.settings.exceptions = {}), plugin.settings.exceptions[receivedKey] = !!value, BDFDB.DataUtils.save(!!value, plugin, "exceptions", receivedKey), plugin.SettingsUpdated = !0;
+                }, "onChange")
+              })
+            ]
+          }), "createExceptionScopeSwitches"), createStackedTokenInput = /* @__PURE__ */ __name(({ items, maxLength, placeholder, emptyText, onChange }) => BDFDB.ReactUtils.createElement(class extends BdApi.React.Component {
+            constructor(props) {
+              super(props), this.state = {
+                value: "",
+                items: BDFDB.ArrayUtils.is(props.items) ? [].concat(props.items) : []
+              };
+            }
+            componentDidUpdate(prevProps) {
+              let previousItems = BDFDB.ArrayUtils.is(prevProps.items) ? prevProps.items : [], nextItems = BDFDB.ArrayUtils.is(this.props.items) ? this.props.items : [];
+              JSON.stringify(previousItems) != JSON.stringify(nextItems) && this.setState({ items: [].concat(nextItems) });
+            }
+            commitValue(rawValue) {
+              let value = String(rawValue ?? this.state.value).trim();
+              if (!value) return;
+              typeof this.props.maxLength == "number" && this.props.maxLength > 0 && (value = value.slice(0, this.props.maxLength));
+              let currentItems = BDFDB.ArrayUtils.is(this.state.items) ? this.state.items : [];
+              if (currentItems.includes(value)) {
+                this.setState({ value: "" });
+                return;
+              }
+              let nextItems = [].concat(currentItems, value);
+              this.setState({ value: "", items: nextItems }), this.props.onChange(nextItems);
+            }
+            removeItem(targetItem) {
+              let nextItems = (BDFDB.ArrayUtils.is(this.state.items) ? this.state.items : []).filter((item) => item != targetItem);
+              this.setState({ items: nextItems }), this.props.onChange(nextItems);
+            }
+            render() {
+              let currentItems = BDFDB.ArrayUtils.is(this.state.items) ? this.state.items : [];
+              return BDFDB.ReactUtils.createElement("div", {
+                className: "translator-token-editor",
+                children: [
+                  BDFDB.ReactUtils.createElement("div", {
+                    className: "translator-token-list",
+                    children: currentItems.length ? currentItems.map((item) => BDFDB.ReactUtils.createElement("div", {
+                      className: "translator-token-badge",
+                      key: item,
+                      children: [
+                        BDFDB.ReactUtils.createElement("span", {
+                          className: "translator-token-badge-text",
+                          children: item
+                        }),
+                        BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
+                          className: "translator-token-badge-delete",
+                          name: BDFDB.LibraryComponents.SvgIcon.Names.CLOSE,
+                          onClick: /* @__PURE__ */ __name((_2) => this.removeItem(item), "onClick")
+                        })
+                      ]
+                    })) : BDFDB.ReactUtils.createElement("div", {
+                      className: "translator-token-empty",
+                      children: emptyText || placeholder
+                    })
+                  }),
+                  BDFDB.ReactUtils.createElement("div", {
+                    className: "translator-token-input-row",
+                    children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
+                      value: this.state.value,
+                      placeholder,
+                      maxLength,
+                      onChange: /* @__PURE__ */ __name((value) => this.setState({ value }), "onChange"),
+                      onKeyDown: /* @__PURE__ */ __name((event) => {
+                        event.which == 13 && (event.preventDefault(), this.commitValue());
+                      }, "onKeyDown"),
+                      onBlur: /* @__PURE__ */ __name((_2) => this.commitValue(), "onBlur")
+                    })
+                  })
+                ]
+              });
+            }
+          }, { items, maxLength, placeholder, emptyText, onChange }), "createStackedTokenInput"), createDisablePrefixForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title: plugin.getCustomText("disable_prefix_title"),
+            className: BDFDB.disCN.marginbottom8,
+            children: [
+              infoText(plugin.getCustomText("disable_prefix_hint")),
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.ListInput, {
+                placeholder: plugin.getCustomText("disable_prefix_placeholder"),
+                maxLength: plugin.defaults.exceptions.wordStart.max,
+                items: plugin.settings.exceptions.wordStart,
+                onChange: /* @__PURE__ */ __name((value) => {
+                  plugin.SettingsUpdated = !0, BDFDB.DataUtils.save(value, plugin, "exceptions", "wordStart");
+                }, "onChange")
+              })
+            ]
+          }), "createDisablePrefixForm"), createProtectedTermsForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title: plugin.getCustomText("protected_terms_title"),
+            className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.marginbottom8, "translator-advanced-protection-section translator-advanced-protection-terms"),
+            children: [
+              infoText(plugin.getCustomText("protected_terms_hint")),
+              createExceptionScopeSwitches("protectedTermsForSent", "protectedTermsForReceived", "protected_terms_scope_sent", "protected_terms_scope_received"),
+              createStackedTokenInput({
+                placeholder: plugin.getCustomText("protected_terms_placeholder"),
+                emptyText: plugin.getCustomText("protected_terms_placeholder"),
+                maxLength: plugin.defaults.exceptions.protectedTerms.max,
+                items: plugin.settings.exceptions.protectedTerms || [],
+                onChange: /* @__PURE__ */ __name((value) => {
+                  let nextValue = BDFDB.ArrayUtils.is(value) ? [].concat(value) : [];
+                  plugin.settings.exceptions.protectedTerms = nextValue, plugin.SettingsUpdated = !0, BDFDB.DataUtils.save(nextValue, plugin, "exceptions", "protectedTerms");
+                }, "onChange")
+              })
+            ]
+          }), "createProtectedTermsForm"), createWrapperPairsForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title: plugin.getCustomText("wrapper_pairs_title"),
+            className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.marginbottom8, "translator-advanced-protection-section translator-advanced-protection-wrapper"),
+            children: [
+              infoText(plugin.getCustomText("wrapper_pairs_hint")),
+              createExceptionScopeSwitches("wrapperPairsForSent", "wrapperPairsForReceived", "wrapper_pairs_scope_sent", "wrapper_pairs_scope_received"),
+              createStackedTokenInput({
+                placeholder: plugin.getCustomText("wrapper_pairs_placeholder"),
+                emptyText: plugin.getCustomText("wrapper_pairs_placeholder"),
+                maxLength: plugin.defaults.exceptions.wrapperPairs.max,
+                items: plugin.getWrapperPairItemsForSettings(),
+                onChange: /* @__PURE__ */ __name((value) => {
+                  let nextValue = (BDFDB.ArrayUtils.is(value) ? value : []).filter((rule) => !plugin.isDiscordSpoilerWrapperRule(rule));
+                  plugin.settings.exceptions.wrapperPairs = [].concat(nextValue), plugin.SettingsUpdated = !0, BDFDB.DataUtils.save(nextValue, plugin, "exceptions", "wrapperPairs");
+                }, "onChange")
+              })
+            ]
+          }), "createWrapperPairsForm"), createTranslatePrefixForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title: plugin.getCustomText("translate_prefix_title"),
+            className: BDFDB.disCN.marginbottom8,
+            children: [
+              infoText(plugin.getCustomText("translate_prefix_hint")),
+              ...(plugin.settings.prefixes.translationPrefixData || []).map((entry, index) => BDFDB.ReactUtils.createElement("div", {
+                className: "translator-prefix-translation-row",
+                children: [
+                  BDFDB.ReactUtils.createElement("div", {
+                    className: "translator-prefix-translation-cell translator-prefix-input-cell",
+                    children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
+                      placeholder: plugin.getCustomText("translate_prefix_placeholder"),
+                      value: entry.prefix,
+                      onChange: /* @__PURE__ */ __name((value) => {
+                        plugin.settings.prefixes.translationPrefixData[index].prefix = value, BDFDB.DataUtils.save(plugin.settings.prefixes.translationPrefixData, plugin, "prefixes", "translationPrefixData"), plugin.SettingsUpdated = !0;
+                      }, "onChange")
+                    })
+                  }),
+                  BDFDB.ReactUtils.createElement("div", {
+                    className: "translator-prefix-translation-cell translator-prefix-language-cell",
+                    children: createStableSelect({
+                      value: entry.language,
+                      options: plugin.ensureSettingsStore().getLanguageIds().filter((key) => !plugin.ensureSettingsStore().getLanguage(key).auto && !plugin.ensureSettingsStore().getLanguage(key).special).map((key) => ({
+                        value: key,
+                        label: plugin.getLanguageDisplayName(plugin.ensureSettingsStore().getLanguage(key))
+                      })).sort((a, b) => a.label.localeCompare(b.label)),
+                      onChange: /* @__PURE__ */ __name((value) => {
+                        plugin.settings.prefixes.translationPrefixData[index].language = value, BDFDB.DataUtils.save(plugin.settings.prefixes.translationPrefixData, plugin, "prefixes", "translationPrefixData"), plugin.SettingsUpdated = !0;
+                      }, "onChange")
+                    })
+                  }),
+                  BDFDB.ReactUtils.createElement("div", {
+                    className: "translator-prefix-translation-cell translator-prefix-delete-cell",
+                    children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
+                      color: BDFDB.LibraryComponents.Button.Colors.RED,
+                      size: BDFDB.LibraryComponents.Button.Sizes.TINY,
+                      onClick: /* @__PURE__ */ __name((_2) => {
+                        plugin.settings.prefixes.translationPrefixData.splice(index, 1), BDFDB.DataUtils.save(plugin.settings.prefixes.translationPrefixData, plugin, "prefixes", "translationPrefixData"), plugin.SettingsUpdated = !0, refreshPanel();
+                      }, "onClick"),
+                      children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
+                        name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
+                        width: 16,
+                        height: 16
+                      })
+                    })
+                  })
+                ]
+              })),
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
+                type: "Button",
+                color: BDFDB.LibraryComponents.Button.Colors.GREEN,
+                onClick: /* @__PURE__ */ __name((_2) => {
+                  plugin.settings.prefixes.translationPrefixData || (plugin.settings.prefixes.translationPrefixData = []), plugin.settings.prefixes.translationPrefixData.push({
+                    prefix: "$en",
+                    language: "en"
+                  }), BDFDB.DataUtils.save(plugin.settings.prefixes.translationPrefixData, plugin, "prefixes", "translationPrefixData"), plugin.SettingsUpdated = !0, refreshPanel();
+                }, "onClick"),
+                children: plugin.getCustomText("add_prefix_button")
+              })
+            ]
+          }), "createTranslatePrefixForm"), saveTranslatedTextColor = /* @__PURE__ */ __name((color) => {
+            color = (color || "").trim() || "#7cc7ff", plugin.settings.general.translatedTextColor = color, BDFDB.ArrayUtils.is(plugin.settings.general.customTranslatedTextColors) || (plugin.settings.general.customTranslatedTextColors = []), !plugin.getTranslatedTextColorPresets().includes(color) && !plugin.settings.general.customTranslatedTextColors.includes(color) && plugin.settings.general.customTranslatedTextColors.unshift(color), plugin.settings.general.customTranslatedTextColors = plugin.settings.general.customTranslatedTextColors.filter((value, index, array) => value && array.indexOf(value) == index).slice(0, 12), BDFDB.DataUtils.save(plugin.settings.general, plugin, "general"), plugin.SettingsUpdated = !0, refreshPanel();
+          }, "saveTranslatedTextColor"), removeTranslatedTextColor = /* @__PURE__ */ __name((color) => {
+            color = (color || "").trim(), !(!color || plugin.getTranslatedTextColorPresets().includes(color)) && (plugin.settings.general.customTranslatedTextColors = (plugin.settings.general.customTranslatedTextColors || []).filter((savedColor) => savedColor != color), plugin.getTranslatedTextColor() == color && (plugin.settings.general.translatedTextColor = plugin.getTranslatedTextColorPresets()[0] || "#7cc7ff"), BDFDB.DataUtils.save(plugin.settings.general, plugin, "general"), plugin.SettingsUpdated = !0, refreshPanel());
+          }, "removeTranslatedTextColor"), resetTranslatedTextColor = /* @__PURE__ */ __name(() => {
+            let defaultColor = plugin.getTranslatedTextColorPresets()[0] || "#7cc7ff", colorState = ensureTranslatedTextColorState();
+            colorState.showCustom = !1, colorState.customValue = defaultColor, plugin.settings.general.translatedTextColor = defaultColor, BDFDB.DataUtils.save(plugin.settings.general, plugin, "general"), plugin.SettingsUpdated = !0, refreshPanel();
+          }, "resetTranslatedTextColor"), ensureTranslatedTextColorState = /* @__PURE__ */ __name(() => (plugin.translatedTextColorState || (plugin.translatedTextColorState = {
+            showCustom: !1,
+            customValue: plugin.getTranslatedTextColor()
+          }), plugin.translatedTextColorState.customValue || (plugin.translatedTextColorState.customValue = plugin.getTranslatedTextColor()), plugin.translatedTextColorState), "ensureTranslatedTextColorState"), getCustomTranslatedTextColors = /* @__PURE__ */ __name(() => BDFDB.ArrayUtils.is(plugin.settings.general.customTranslatedTextColors) ? plugin.settings.general.customTranslatedTextColors : [], "getCustomTranslatedTextColors"), createColorChip = /* @__PURE__ */ __name((color, active) => {
+            let isCustomColor = getCustomTranslatedTextColors().includes(color) && !plugin.getTranslatedTextColorPresets().includes(color);
+            return BDFDB.ReactUtils.createElement("button", {
+              type: "button",
+              className: BDFDB.DOMUtils.formatClassName("translator-color-chip", active && "translator-color-chip-active"),
+              title: isCustomColor ? `${color} · ${compactText("点击选择，点 × 删除", "Click to select, click × to delete", "Нажмите для выбора, × для удаления")}` : color,
+              onClick: /* @__PURE__ */ __name((_2) => {
+                let colorState = ensureTranslatedTextColorState();
+                colorState.showCustom = !1, colorState.customValue = color, saveTranslatedTextColor(color);
+              }, "onClick"),
+              children: [
+                BDFDB.ReactUtils.createElement("span", {
+                  className: "translator-color-chip-code",
+                  children: color
+                }),
+                BDFDB.ReactUtils.createElement("span", {
+                  className: "translator-settings-color-swatch",
+                  style: { background: color }
+                }),
+                isCustomColor && BDFDB.ReactUtils.createElement("span", {
+                  className: "translator-color-chip-delete",
+                  title: compactText("删除这个自定义颜色", "Delete this custom color", "Удалить этот цвет"),
+                  onClick: /* @__PURE__ */ __name((event) => {
+                    event.preventDefault(), event.stopPropagation(), removeTranslatedTextColor(color);
+                  }, "onClick"),
+                  children: "×"
+                })
+              ].filter(Boolean)
+            });
+          }, "createColorChip"), createColorOptionLabel = /* @__PURE__ */ __name((color) => BDFDB.ReactUtils.createElement("div", {
+            className: "translator-settings-color-option",
+            children: [
+              BDFDB.ReactUtils.createElement("span", {
+                children: color
+              }),
+              BDFDB.ReactUtils.createElement("span", {
+                className: "translator-settings-color-swatch",
+                style: { background: color }
+              })
+            ]
+          }), "createColorOptionLabel"), createInlineHeader = /* @__PURE__ */ __name((title, actions = []) => BDFDB.ReactUtils.createElement("div", {
+            className: "translator-settings-inline-header",
+            children: [
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
+                tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
+                style: { margin: 0 },
+                children: title
+              }),
+              actions.length ? BDFDB.ReactUtils.createElement("div", {
+                className: "translator-settings-inline-actions translator-settings-primary-actions",
+                children: actions
+              }) : null
+            ].filter(Boolean)
+          }), "createInlineHeader"), createSubsectionTitle = /* @__PURE__ */ __name((title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
+            className: BDFDB.disCN.marginbottom8,
+            tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
+            children: title
+          }), "createSubsectionTitle"), createDivider = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
+            className: BDFDB.disCNS.dividerdefault + BDFDB.disCN.marginbottom8
+          }), "createDivider"), createSpaciousDivider = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
+            className: BDFDB.DOMUtils.formatClassName(BDFDB.disCNS.dividerdefault + BDFDB.disCN.marginbottom8, "translator-settings-divider-spacious")
+          }), "createSpaciousDivider"), createEnginePortalButtons = /* @__PURE__ */ __name((engineKey) => {
+            let portal = getEnginePortalConfig(engineKey);
+            return portal ? {
+              portal,
+              buttons: [
+                portal.primaryUrl && createActionButton({
+                  label: portal.primaryLabel,
+                  color: BDFDB.LibraryComponents.Button.Colors.BRAND,
+                  onClick: /* @__PURE__ */ __name((_2) => BDFDB.DiscordUtils.openLink(portal.primaryUrl), "onClick")
+                }),
+                portal.secondaryUrl && portal.secondaryLabel && createActionButton({
+                  label: portal.secondaryLabel,
+                  color: BDFDB.LibraryComponents.Button.Colors.BRAND,
+                  onClick: /* @__PURE__ */ __name((_2) => BDFDB.DiscordUtils.openLink(portal.secondaryUrl), "onClick")
+                })
+              ].filter(Boolean)
+            } : { portal: null, buttons: [] };
+          }, "createEnginePortalButtons"), createEngineSupportPanel = /* @__PURE__ */ __name((engineKey) => {
+            let portalData = createEnginePortalButtons(engineKey);
+            return !portalData.buttons.length ? null : BDFDB.ReactUtils.createElement("div", {
+              className: "translator-settings-support-panel",
+              children: BDFDB.ReactUtils.createElement("div", {
+                className: "translator-settings-support-row",
+                children: portalData.buttons
+              })
+            });
+          }, "createEngineSupportPanel"), createFetchedModelSelector = /* @__PURE__ */ __name((engineKey) => {
+            let state = plugin.modelCatalogState && plugin.modelCatalogState[engineKey];
+            return !state || !state.items || !state.items.length ? null : BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+              title: plugin.getCustomText("model_catalog_title"),
+              className: BDFDB.disCN.marginbottom8,
+              children: [
+                createStableSelect({
+                  value: plugin.ensureSettingsStore().getCredentialField(engineKey, "model") || "",
+                  options: state.items.map((modelId) => ({ value: modelId, label: modelId })),
+                  onChange: /* @__PURE__ */ __name((value) => {
+                    saveAuthField(engineKey, "model", value), refreshPanel();
+                  }, "onChange")
+                }),
+                BDFDB.ReactUtils.createElement("div", {
+                  className: "translator-settings-meta",
+                  children: plugin.getCustomText("model_catalog_loaded").replace("{count}", state.items.length)
+                })
+              ]
+            });
+          }, "createFetchedModelSelector"), updateEngineSetting = /* @__PURE__ */ __name((field, value) => {
+            plugin.settings.engines[field] = value, BDFDB.DataUtils.save(plugin.settings.engines, plugin, "engines"), plugin.setLanguages(), plugin.SettingsUpdated = !0, refreshPanel();
+          }, "updateEngineSetting"), saveFilterSetting = /* @__PURE__ */ __name((key, value) => {
+            plugin.settings.filters || (plugin.settings.filters = {}), plugin.settings.filters[key] = value, BDFDB.DataUtils.save(value, plugin, "filters", key), plugin.SettingsUpdated = !0;
+          }, "saveFilterSetting"), createLanguageOptions = /* @__PURE__ */ __name((direction) => plugin.ensureSettingsStore().getLanguageIds().filter((key) => !plugin.ensureSettingsStore().getLanguage(key).special && (direction == languageTypes.INPUT || !plugin.ensureSettingsStore().getLanguage(key).auto)).map((key) => ({
+            value: key,
+            label: plugin.getLanguageDisplayName(plugin.ensureSettingsStore().getLanguage(key))
+          })).sort((a, b) => a.value == "auto" ? -1 : b.value == "auto" ? 1 : a.label.localeCompare(b.label)), "createLanguageOptions"), createLanguageSelector = /* @__PURE__ */ __name((place, direction, title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title,
+            className: BDFDB.disCN.marginbottom8,
+            children: createStableSelect({
+              value: plugin.settings.choices[place][direction],
+              options: createLanguageOptions(direction),
+              onChange: /* @__PURE__ */ __name((value) => {
+                plugin.settings.choices[place][direction] = value, BDFDB.DataUtils.save(plugin.settings.choices, plugin, "choices"), plugin.setLanguages(), plugin.SettingsUpdated = !0, refreshPanel();
+              }, "onChange")
+            })
+          }), "createLanguageSelector"), createGeneralSwitch = /* @__PURE__ */ __name((key) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsSaveItem, {
+            type: "Switch",
+            plugin,
+            keys: ["general", key],
+            className: "translator-settings-switch-row",
+            label: plugin.getGeneralSettingLabel(key),
+            value: plugin.settings.general[key]
+          }), "createGeneralSwitch"), createGeneralSwitchGroup = /* @__PURE__ */ __name((keys) => BDFDB.ReactUtils.createElement("div", {
+            className: "translator-settings-switch-group",
+            children: keys.map(createGeneralSwitch)
+          }), "createGeneralSwitchGroup"), createUiLanguageSelector = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title: plugin.getCustomText("plugin_language_title"),
+            className: BDFDB.disCN.marginbottom8,
+            children: [
+              infoText(plugin.getCustomText("plugin_language_hint")),
+              createStableSelect({
+                value: plugin.settings.general.interfaceLanguage || "system",
+                options: plugin.getPluginLanguageOptions(),
+                onChange: /* @__PURE__ */ __name((value) => {
+                  plugin.settings.general.interfaceLanguage = value || "system", BDFDB.DataUtils.save(plugin.settings.general, plugin, "general"), plugin.SettingsUpdated = !0, plugin.labels = plugin.setLabelsByLanguage(), refreshPanel();
+                }, "onChange")
+              })
+            ]
+          }), "createUiLanguageSelector"), createTranslatedTextColorInput = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title: plugin.getCustomText("translated_text_color_title"),
+            className: BDFDB.disCN.marginbottom8,
+            children: (() => {
+              let currentColor = plugin.getTranslatedTextColor(), colorState = ensureTranslatedTextColorState(), presetColors = plugin.getTranslatedTextColorPalette(), hasCustomCurrentColor = !plugin.getTranslatedTextColorPresets().includes(currentColor);
+              return [
+                createGeneralSwitch("highlightTranslatedMessages"),
+                infoText(compactText("点色板即可切换，+ 号可自定义颜色。", "Pick a swatch or use + for a custom color.", "Нажмите цвет или используйте + для своего варианта.")),
+                BDFDB.ReactUtils.createElement("div", {
+                  className: "translator-color-palette",
+                  children: [
+                    ...presetColors.map((color) => createColorChip(color, color == currentColor)),
+                    BDFDB.ReactUtils.createElement("button", {
+                      type: "button",
+                      className: "translator-color-chip translator-color-chip-add",
+                      onClick: /* @__PURE__ */ __name((_2) => {
+                        colorState.showCustom = !colorState.showCustom, colorState.customValue = currentColor, refreshPanel();
+                      }, "onClick"),
+                      children: "+"
+                    })
+                  ]
+                }),
+                colorState.showCustom && BDFDB.ReactUtils.createElement("div", {
+                  className: "translator-color-custom-row",
+                  children: [
+                    BDFDB.ReactUtils.createElement("input", {
+                      type: "color",
+                      className: "translator-native-color-input",
+                      defaultValue: /^#[0-9a-f]{6}$/i.test(colorState.customValue || "") ? colorState.customValue : "#7cc7ff",
+                      onInput: /* @__PURE__ */ __name((event) => {
+                        let nextColor = event && event.target && event.target.value || colorState.customValue;
+                        colorState.customValue = nextColor;
+                        let row = event && event.target && event.target.closest && event.target.closest(".translator-color-custom-row"), textInput = row && row.querySelector && row.querySelector(".translator-color-custom-input");
+                        textInput && textInput.value != nextColor && (textInput.value = nextColor);
+                      }, "onInput"),
+                      onChange: /* @__PURE__ */ __name((event) => {
+                        colorState.customValue = event && event.target && event.target.value || colorState.customValue;
+                      }, "onChange")
+                    }),
+                    BDFDB.ReactUtils.createElement("input", {
+                      type: "text",
+                      className: "translator-color-custom-input",
+                      placeholder: "#7cc7ff",
+                      defaultValue: colorState.customValue,
+                      onInput: /* @__PURE__ */ __name((event) => {
+                        colorState.customValue = event && event.target && event.target.value || "";
+                      }, "onInput")
+                    }),
+                    createActionButton({
+                      label: plugin.getCustomText("translated_text_color_save_button"),
+                      look: BDFDB.LibraryComponents.Button.Looks.OUTLINED,
+                      className: "translator-settings-field-action",
+                      onClick: /* @__PURE__ */ __name((_2) => {
+                        let customColor = (colorState.customValue || "").trim();
+                        if (!plugin.isValidCssColorValue(customColor)) return BDFDB.NotificationUtils.toast(plugin.getCustomText("translated_text_color_invalid"), { type: "danger", position: "center" });
+                        colorState.showCustom = !1, colorState.customValue = customColor, saveTranslatedTextColor(customColor);
+                      }, "onClick")
+                    })
+                  ]
+                })
+              ].filter(Boolean);
+            })()
+          }), "createTranslatedTextColorInput"), createSourceLanguageFilter = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title: plugin.getCustomText("source_filter_title"),
+            className: BDFDB.disCN.marginbottom8,
+            children: [
+              infoText(plugin.getCustomText("source_filter_hint")),
+              !(plugin.settings.filters && plugin.settings.filters.autoTranslateSourceLanguages || []).length && infoText(plugin.getCustomText("source_filter_empty_state")),
+              ...(plugin.settings.filters && plugin.settings.filters.autoTranslateSourceLanguages || []).map((languageId, index) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
+                className: BDFDB.disCN.marginbottom8,
+                align: BDFDB.LibraryComponents.Flex.Align.CENTER,
+                children: [
+                  BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
+                    grow: 1,
+                    shrink: 0,
+                    basis: "85%",
+                    children: createStableSelect({
+                      value: languageId,
+                      options: plugin.ensureSettingsStore().getLanguageIds().filter((key) => !plugin.ensureSettingsStore().getLanguage(key).auto && !plugin.ensureSettingsStore().getLanguage(key).special).map((key) => ({
+                        value: key,
+                        label: plugin.getLanguageDisplayName(plugin.ensureSettingsStore().getLanguage(key))
+                      })).sort((a, b) => a.label.localeCompare(b.label)),
+                      onChange: /* @__PURE__ */ __name((value) => {
+                        plugin.settings.filters.autoTranslateSourceLanguages[index] = value, BDFDB.DataUtils.save(plugin.settings.filters.autoTranslateSourceLanguages, plugin, "filters", "autoTranslateSourceLanguages"), plugin.SettingsUpdated = !0;
+                      }, "onChange")
+                    })
+                  }),
+                  BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
+                    grow: 0,
+                    shrink: 0,
+                    basis: "15%",
+                    children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
+                      color: BDFDB.LibraryComponents.Button.Colors.RED,
+                      size: BDFDB.LibraryComponents.Button.Sizes.TINY,
+                      onClick: /* @__PURE__ */ __name((_2) => {
+                        plugin.settings.filters.autoTranslateSourceLanguages.splice(index, 1), BDFDB.DataUtils.save(plugin.settings.filters.autoTranslateSourceLanguages, plugin, "filters", "autoTranslateSourceLanguages"), plugin.SettingsUpdated = !0, refreshPanel();
+                      }, "onClick"),
+                      children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
+                        name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
+                        width: 16,
+                        height: 16
+                      })
+                    })
+                  })
+                ]
+              })),
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
+                type: "Button",
+                color: BDFDB.LibraryComponents.Button.Colors.GREEN,
+                onClick: /* @__PURE__ */ __name((_2) => {
+                  plugin.settings.filters || (plugin.settings.filters = {}), plugin.settings.filters.autoTranslateSourceLanguages || (plugin.settings.filters.autoTranslateSourceLanguages = []), plugin.settings.filters.autoTranslateSourceLanguages.push("en"), BDFDB.DataUtils.save(plugin.settings.filters.autoTranslateSourceLanguages, plugin, "filters", "autoTranslateSourceLanguages"), plugin.SettingsUpdated = !0, refreshPanel();
+                }, "onClick"),
+                children: plugin.getCustomText("source_filter_add")
+              })
+            ]
+          }), "createSourceLanguageFilter"), createReceivedSourceLanguageFilter = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+            title: plugin.getCustomText("received_source_filter_title"),
+            className: BDFDB.disCN.marginbottom8,
+            children: [
+              infoText(plugin.getCustomText("received_source_filter_hint")),
+              !(plugin.settings.filters && plugin.settings.filters.receivedAutoTranslateSourceLanguages || []).length && infoText(plugin.getCustomText("received_source_filter_empty_state")),
+              ...(plugin.settings.filters && plugin.settings.filters.receivedAutoTranslateSourceLanguages || []).map((languageId, index) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
+                className: BDFDB.disCN.marginbottom8,
+                align: BDFDB.LibraryComponents.Flex.Align.CENTER,
+                children: [
+                  BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
+                    grow: 1,
+                    shrink: 0,
+                    basis: "85%",
+                    children: createStableSelect({
+                      value: languageId,
+                      options: plugin.ensureSettingsStore().getLanguageIds().filter((key) => !plugin.ensureSettingsStore().getLanguage(key).auto && !plugin.ensureSettingsStore().getLanguage(key).special).map((key) => ({
+                        value: key,
+                        label: plugin.getLanguageDisplayName(plugin.ensureSettingsStore().getLanguage(key))
+                      })).sort((a, b) => a.label.localeCompare(b.label)),
+                      onChange: /* @__PURE__ */ __name((value) => {
+                        plugin.settings.filters.receivedAutoTranslateSourceLanguages[index] = value, BDFDB.DataUtils.save(plugin.settings.filters.receivedAutoTranslateSourceLanguages, plugin, "filters", "receivedAutoTranslateSourceLanguages"), plugin.SettingsUpdated = !0;
+                      }, "onChange")
+                    })
+                  }),
+                  BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
+                    grow: 0,
+                    shrink: 0,
+                    basis: "15%",
+                    children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
+                      color: BDFDB.LibraryComponents.Button.Colors.RED,
+                      size: BDFDB.LibraryComponents.Button.Sizes.TINY,
+                      onClick: /* @__PURE__ */ __name((_2) => {
+                        plugin.settings.filters.receivedAutoTranslateSourceLanguages.splice(index, 1), BDFDB.DataUtils.save(plugin.settings.filters.receivedAutoTranslateSourceLanguages, plugin, "filters", "receivedAutoTranslateSourceLanguages"), plugin.SettingsUpdated = !0, refreshPanel();
+                      }, "onClick"),
+                      children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
+                        name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
+                        width: 16,
+                        height: 16
+                      })
+                    })
+                  })
+                ]
+              })),
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
+                type: "Button",
+                color: BDFDB.LibraryComponents.Button.Colors.GREEN,
+                onClick: /* @__PURE__ */ __name((_2) => {
+                  plugin.settings.filters || (plugin.settings.filters = {}), plugin.settings.filters.receivedAutoTranslateSourceLanguages || (plugin.settings.filters.receivedAutoTranslateSourceLanguages = []), plugin.settings.filters.receivedAutoTranslateSourceLanguages.push("en"), BDFDB.DataUtils.save(plugin.settings.filters.receivedAutoTranslateSourceLanguages, plugin, "filters", "receivedAutoTranslateSourceLanguages"), plugin.SettingsUpdated = !0, refreshPanel();
+                }, "onClick"),
+                children: plugin.getCustomText("received_source_filter_add")
+              })
+            ]
+          }), "createReceivedSourceLanguageFilter"), createAutoTranslateDecisionSettings = /* @__PURE__ */ __name(() => {
+            let aiCapable = plugin.isAiAutoTranslateDecisionAvailable(), currentMode = plugin.getAutoTranslateDecisionMode();
+            return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+              title: plugin.getCustomText("auto_translate_decision_title"),
+              className: BDFDB.disCN.marginbottom8,
+              children: [
+                infoText(plugin.getCustomText("auto_translate_decision_hint")),
+                createSegmentedSelector({
+                  className: "translator-decision-mode-grid",
+                  value: currentMode,
+                  options: [
+                    { value: "basic", label: plugin.getCustomText("auto_translate_decision_basic") },
+                    { value: "ai", label: aiCapable ? plugin.getCustomText("auto_translate_decision_ai") : plugin.getCustomText("auto_translate_decision_ai_disabled"), disabled: !aiCapable }
+                  ],
+                  onChange: /* @__PURE__ */ __name((value) => {
+                    plugin.settings.filters || (plugin.settings.filters = {}), plugin.settings.filters.autoTranslateDecisionMode = value, BDFDB.DataUtils.save(value, plugin, "filters", "autoTranslateDecisionMode"), plugin.SettingsUpdated = !0, refreshPanel();
+                  }, "onChange")
+                }),
+                BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                  title: compactText("语言检测策略", "Language detection strategy", "Стратегия определения языка"),
+                  className: BDFDB.disCN.marginbottom8,
+                  children: [
+                    createStableSelect({
+                      value: plugin.getLanguageDetectionStrategy(),
+                      options: [
+                        { value: "local_first", label: compactText("本地优先，失败时使用 Google Free", "Local first, then Google Free", "Сначала локально, затем Google Free") },
+                        { value: "google_free", label: compactText("仅 Google Free", "Google Free only", "Только Google Free") },
+                        { value: "local_only", label: compactText("仅本地检测", "Local only", "Только локально") }
+                      ],
+                      onChange: /* @__PURE__ */ __name((value) => {
+                        plugin.settings.filters || (plugin.settings.filters = {}), plugin.settings.filters.languageDetectionStrategy = value, BDFDB.DataUtils.save(value, plugin, "filters", "languageDetectionStrategy"), plugin.SettingsUpdated = !0;
+                      }, "onChange")
+                    }),
+                    infoText(compactText("本地检测只在高置信时返回；默认策略拿不准会回退到免密钥的 Google 检测。", "Local detection returns only high-confidence results; the default falls back to keyless Google detection when uncertain.", "Локальное определение возвращает только уверенные результаты; иначе используется Google без ключа."))
+                  ]
+                }),
+                BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
+                  type: "Switch",
+                  label: compactText("本地预检测:翻前用本地语种识别跳过同语言消息", "Local pre-check: skip same-language messages before requesting translation", "Локальная проверка: пропускать сообщения на целевом языке до запроса"),
+                  tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
+                  value: plugin.useLocalLanguagePrecheck(),
+                  onChange: /* @__PURE__ */ __name((value) => {
+                    saveFilterSetting("useLocalLanguagePrecheck", value), refreshPanel();
+                  }, "onChange")
+                }),
+                infoText(compactText("仅在高置信时跳过,拿不准仍照常翻译;关闭后完全交给翻译服务商判定。", "Only skips when highly confident; uncertain text still gets translated. Turn off to rely entirely on the translation provider.", "Пропускает только при высокой уверенности; иначе переводит как обычно.")),
+                currentMode == "ai" && aiCapable && infoText(plugin.getCustomText("auto_translate_ai_prompt_hint")),
+                currentMode == "ai" && aiCapable && BDFDB.ReactUtils.createElement("textarea", {
+                  className: "translator-ai-prompt-textarea",
+                  defaultValue: plugin.getAiAutoTranslatePrompt(),
+                  onInput: /* @__PURE__ */ __name((event) => {
+                    let value = event && event.target ? event.target.value : "";
+                    plugin.settings.filters || (plugin.settings.filters = {}), plugin.settings.filters.aiAutoTranslatePrompt = value, BDFDB.DataUtils.save(value, plugin, "filters", "aiAutoTranslatePrompt"), plugin.SettingsUpdated = !0;
+                  }, "onInput"),
+                  onChange: /* @__PURE__ */ __name((event) => {
+                    let value = event && event.target ? event.target.value : "";
+                    plugin.settings.filters || (plugin.settings.filters = {}), plugin.settings.filters.aiAutoTranslatePrompt = value, BDFDB.DataUtils.save(value, plugin, "filters", "aiAutoTranslatePrompt"), plugin.SettingsUpdated = !0;
+                  }, "onChange")
+                })
+              ].filter(Boolean)
+            });
+          }, "createAutoTranslateDecisionSettings"), createEngineOptions = /* @__PURE__ */ __name((keys) => keys.filter((key) => translationEngines[key]).map((key) => ({ value: key, label: plugin.getEngineLabel(key) })), "createEngineOptions"), createPrimaryOptions = /* @__PURE__ */ __name(() => createEngineOptions(recommendedEngines.concat(Object.keys(translationEngines).filter((key) => !recommendedEngines.includes(key)))), "createPrimaryOptions"), createBackupOptions = /* @__PURE__ */ __name(() => [{ value: "----", label: plugin.getCustomText("backup_engine_none") }].concat(
+            Object.keys(translationEngines).filter((key) => key != plugin.settings.engines.translator).map((key) => ({ value: key, label: plugin.getEngineLabel(key) }))
+          ), "createBackupOptions"), createEngineFields = /* @__PURE__ */ __name((engineKey) => {
+            let engine = translationEngines[engineKey];
+            if (!engine) return [infoText(plugin.getCustomText("engine_unknown_hint"))];
+            if (engineKey == "googleapi") return [createEngineSupportPanel(engineKey)];
+            let items = [];
+            if (engine.premium && items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
+              type: "Switch",
+              label: plugin.getCustomText("paid_version_label"),
+              tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
+              value: plugin.ensureSettingsStore().getCredentialField(engineKey, "paid"),
+              onChange: /* @__PURE__ */ __name((value) => {
+                plugin.ensureSettingsStore().setCredentialFlag(engineKey, "paid", value), plugin.SettingsUpdated = !0;
+              }, "onChange")
+            })), engine.key && (items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
+              className: BDFDB.disCN.marginbottom8,
+              tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
+              children: plugin.getCustomText("api_key_label")
+            })), items.push(createSecretInput({
+              fieldKey: `${engineKey}-key`,
+              placeholder: engine.key,
+              value: plugin.ensureSettingsStore().getCredentialField(engineKey, "key"),
+              onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "key", value), "onChange")
+            }))), engine.endpoint && (items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
+              className: BDFDB.disCN.marginbottom8,
+              tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
+              children: plugin.getCustomText("api_endpoint_label")
+            })), items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
+              className: BDFDB.disCN.marginbottom8,
+              placeholder: engine.endpoint,
+              value: plugin.ensureSettingsStore().getCredentialField(engineKey, "endpoint"),
+              onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "endpoint", value), "onChange")
+            }))), engine.model) {
+              let modelCatalogState = plugin.modelCatalogState && plugin.modelCatalogState[engineKey], modelActions = [];
+              plugin.isValidatableEngine(engineKey) && modelActions.push(createActionButton({
+                label: plugin.getCustomText("model_detect_button"),
+                color: defaultSecondaryButtonColor,
+                className: "translator-settings-field-action",
+                onClick: /* @__PURE__ */ __name(async (_2) => {
+                  let result = await plugin.validateEngineConfig(engineKey);
+                  result && result.normalized && refreshPanel();
+                }, "onClick")
+              })), plugin.supportsModelCatalog(engineKey) && modelActions.push(createActionButton({
+                label: modelCatalogState && modelCatalogState.loading ? plugin.getCustomText("model_fetch_loading") : plugin.getCustomText("model_fetch_button"),
+                color: defaultSecondaryButtonColor,
+                className: "translator-settings-field-action",
+                onClick: /* @__PURE__ */ __name((_2) => plugin.fetchModelCatalog(engineKey, refreshPanel), "onClick")
+              })), items.push(createInlineHeader(plugin.getCustomText("model_id_label"), modelActions)), items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
+                className: BDFDB.disCN.marginbottom8,
+                placeholder: engine.model,
+                value: plugin.ensureSettingsStore().getCredentialField(engineKey, "model"),
+                onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "model", value), "onChange")
+              })), modelCatalogState && modelCatalogState.loading && items.push(BDFDB.ReactUtils.createElement("div", {
+                className: BDFDB.disCN.marginbottom8,
+                style: { opacity: 0.8, lineHeight: "1.5" },
+                children: plugin.getCustomText("model_fetch_loading")
+              }));
+              let fetchedModelSelector = createFetchedModelSelector(engineKey);
+              fetchedModelSelector && items.push(fetchedModelSelector);
+            }
+            engineKey == "microsoft" && items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+              title: plugin.getCustomText("microsoft_region_label"),
+              className: BDFDB.disCN.marginbottom8,
+              children: createStableSelect({
+                value: plugin.ensureSettingsStore().getCredentialField(engineKey, "region") || "global",
+                options: [
+                  { value: "global", label: "Global" },
+                  { value: "eastasia", label: "East Asia" },
+                  { value: "southeastasia", label: "Southeast Asia" },
+                  { value: "centralus", label: "Central US" },
+                  { value: "eastus", label: "East US" },
+                  { value: "eastus2", label: "East US 2" },
+                  { value: "westus", label: "West US" },
+                  { value: "westeurope", label: "West Europe" },
+                  { value: "japaneast", label: "Japan East" }
+                ],
+                onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "region", value), "onChange")
+              })
+            }));
+            let supportPanel = createEngineSupportPanel(engineKey);
+            return supportPanel && items.push(supportPanel), items.length || items.push(infoText(plugin.getCustomText("engine_no_extra_fields"))), items;
+          }, "createEngineFields"), createOtherServiceAuthSection = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
+            title: plugin.getCustomText("other_service_title"),
+            collapseStates,
+            children: [
+              infoText(compactText("只有切换到这些服务商时再填写。", "Only fill these in if you switch to those providers.", "Заполняйте только если будете переключаться на этих провайдеров.")),
+              ...plugin.getAdditionalCredentialEngineKeys().map((key) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
+                title: plugin.getEngineLabel(key),
+                collapseStates,
+                children: createEngineFields(key)
+              }))
+            ]
+          }), "createOtherServiceAuthSection"), createProtectionSection = /* @__PURE__ */ __name(() => [
+            createProtectedTermsForm(),
+            createSpaciousDivider(),
+            createWrapperPairsForm()
+          ], "createProtectionSection"), createPrefixSection = /* @__PURE__ */ __name(() => [
+            createDisablePrefixForm(),
+            createTranslatePrefixForm()
+          ], "createPrefixSection");
+          return settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
+            title: plugin.getCustomText("section_service_title"),
+            collapseStates,
+            children: [
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                title: plugin.getCustomText("primary_engine_title"),
+                className: BDFDB.disCN.marginbottom8,
+                children: createStableSelect({
+                  value: plugin.settings.engines.translator,
+                  options: createPrimaryOptions(),
+                  onChange: /* @__PURE__ */ __name((value) => updateEngineSetting("translator", value), "onChange")
+                })
+              }),
+              ...createEngineFields(plugin.settings.engines.translator),
+              createDivider(),
+              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
+                title: plugin.getCustomText("backup_engine_title"),
+                collapseStates,
+                children: [
+                  infoText(compactText("主服务失败时才会切到备用服务。", "Used only when the primary provider fails.", "Используется только при сбое основного провайдера.")),
+                  BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
+                    title: plugin.getCustomText("backup_engine_select_title"),
+                    className: BDFDB.disCN.marginbottom8,
+                    children: createStableSelect({
+                      value: plugin.settings.engines.backup,
+                      options: createBackupOptions(),
+                      onChange: /* @__PURE__ */ __name((value) => updateEngineSetting("backup", value), "onChange")
+                    })
+                  }),
+                  plugin.settings.engines.backup == "----" ? infoText(plugin.getCustomText("backup_engine_none_hint")) : createEngineFields(plugin.settings.engines.backup)
+                ]
+              }),
+              createOtherServiceAuthSection()
+            ]
+          })), settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
+            title: plugin.getCustomText("section_language_title"),
+            collapseStates,
+            children: [
+              createSubsectionTitle(plugin.getCustomText("section_message_language_title")),
+              createLanguageSelector(messageTypes.SENT, languageTypes.INPUT, plugin.getCustomText("sent_input_title")),
+              createLanguageSelector(messageTypes.SENT, languageTypes.OUTPUT, plugin.getCustomText("sent_output_title")),
+              createSourceLanguageFilter(),
+              createDivider(),
+              createLanguageSelector(messageTypes.RECEIVED, languageTypes.INPUT, plugin.getCustomText("received_input_title")),
+              createLanguageSelector(messageTypes.RECEIVED, languageTypes.OUTPUT, plugin.getCustomText("received_output_title")),
+              createReceivedSourceLanguageFilter(),
+              createSpaciousDivider(),
+              createAutoTranslateDecisionSettings()
+            ]
+          })), settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
+            title: plugin.getCustomText("section_display_title"),
+            collapseStates,
+            children: [
+              createSubsectionTitle(plugin.getCustomText("section_display_message_title")),
+              createGeneralSwitchGroup([
+                "sendOriginalMessage",
+                "useSpoilerInSentOriginal",
+                "showOriginalMessage",
+                "showOriginalDirectly",
+                "useSpoilerInReceivedOriginal",
+                "showOriginalInReplyPreview"
+              ]),
+              createSpaciousDivider(),
+              createTranslatedTextColorInput(),
+              createSpaciousDivider(),
+              createUiLanguageSelector()
+            ]
+          })), settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
+            title: plugin.getCustomText("section_advanced_title"),
+            collapseStates,
+            children: [
+              ...createProtectionSection(),
+              createSpaciousDivider(),
+              ...createPrefixSection()
+            ]
+          })), BDFDB.ReactUtils.createElement("div", {
+            className: "translator-settings-panel-root",
+            children: settingsItems.flat(10).filter((n) => n)
+          });
+        }, "children")
+      });
+    }
+    __name(renderSettingsPanel, "renderSettingsPanel");
+    module2.exports = { renderSettingsPanel };
+  }
+});
+
+// src/channel-title/channel-title-store.js
+var require_channel_title_store = __commonJS({
+  "src/channel-title/channel-title-store.js"(exports2, module2) {
+    function createChannelTitleStore({ now = Date.now } = {}) {
+      let translated = {}, pending = {}, failed = {}, requestSequence = 0;
+      function normalizeChannelId(channelId) {
+        return channelId == null ? "" : String(channelId);
+      }
+      return __name(normalizeChannelId, "normalizeChannelId"), Object.freeze({
+        // A translated title only counts while its signature still matches the current
+        // configuration; a stale entry is dropped on read so it cannot resurface.
+        getTranslatedTitle(channelId, signature) {
+          let key = normalizeChannelId(channelId), entry = translated[key];
+          return entry ? entry.signature !== signature ? (delete translated[key], null) : entry.text : null;
+        },
+        hasTranslatedTitle(channelId) {
+          let key = normalizeChannelId(channelId);
+          return key ? !!translated[key] : !!Object.keys(translated).length;
+        },
+        // Returns null when a request for this exact signature is already settled,
+        // in flight, or inside its failure cooldown.
+        beginRequest(channelId, signature) {
+          let key = normalizeChannelId(channelId);
+          if (!key || !signature || translated[key] && translated[key].signature === signature || pending[key] && pending[key].signature === signature) return null;
+          let failure = failed[key];
+          if (failure && failure.signature === signature && failure.retryAfter > now()) return null;
+          let request = { id: ++requestSequence, channelId: key, signature };
+          return pending[key] = request, request;
+        },
+        isRequestCurrent(request) {
+          return !!request && pending[normalizeChannelId(request.channelId)] === request;
+        },
+        completeRequest(request, text) {
+          let key = normalizeChannelId(request && request.channelId);
+          return !key || pending[key] !== request ? !1 : (delete pending[key], translated[key] = { signature: request.signature, text }, delete failed[key], !0);
+        },
+        failRequest(request) {
+          let key = normalizeChannelId(request && request.channelId);
+          return !key || pending[key] !== request ? !1 : (delete pending[key], failed[key] = { signature: request.signature, retryAfter: now() + 3e4 }, !0);
+        },
+        // Drops an in-flight request without recording a failure, so the next render
+        // may retry immediately.
+        abandonRequest(request) {
+          let key = normalizeChannelId(request && request.channelId);
+          return !key || pending[key] !== request ? !1 : (delete pending[key], !0);
+        },
+        cancelPending(channelId = null) {
+          let key = normalizeChannelId(channelId);
+          if (!key) {
+            pending = {}, failed = {};
+            return;
+          }
+          delete pending[key], delete failed[key];
+        },
+        // Returns whether a visible title was actually removed, so the caller knows
+        // if a component refresh is warranted.
+        clear(channelId = null) {
+          let key = normalizeChannelId(channelId), hadTranslatedTitle = this.hasTranslatedTitle(channelId);
+          return this.cancelPending(channelId), key ? delete translated[key] : translated = {}, hadTranslatedTitle;
+        },
+        // Invalidates every in-flight request without touching displayed titles;
+        // used when the plugin stops so late callbacks cannot commit.
+        invalidateInFlight() {
+          requestSequence++, pending = {};
+        }
+      });
+    }
+    __name(createChannelTitleStore, "createChannelTitleStore");
+    module2.exports = { CHANNEL_TITLE_FAILURE_RETRY_MS: 3e4, createChannelTitleStore };
+  }
+});
+
+// src/viewport/message-viewport-store.js
+var require_message_viewport_store = __commonJS({
+  "src/viewport/message-viewport-store.js"(exports2, module2) {
+    var MANUAL_TRANSLATION_ANCHOR_RESTORE_DELAYS = [60, 180, 420, 900], SCROLL_INTENT_KEYS = ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "], SCROLL_INTENT_EVENTS = ["wheel", "touchmove", "pointerdown", "keydown"], SCROLL_INTENT_END_EVENTS = ["pointerup", "pointercancel"], INPUT_ACTIVITY_EVENTS = ["beforeinput", "input", "keydown"], MESSAGE_ELEMENT_SELECTOR = '[id^="chat-messages-"], [data-list-item-id*="chat-messages"]', TEXT_INPUT_SELECTOR = "textarea, input, [contenteditable='true']";
+    function createMessageViewportStore({
+      getDocument = /* @__PURE__ */ __name(() => null, "getDocument"),
+      setTimeout: setTimeout2,
+      clearTimeout: clearTimeout2,
+      requestAnimationFrame: requestAnimationFrame2,
+      now = Date.now,
+      getSelectedChannelId = /* @__PURE__ */ __name(() => null, "getSelectedChannelId"),
+      getMessagesScrollerSelector = /* @__PURE__ */ __name(() => null, "getMessagesScrollerSelector"),
+      getChannelTextAreaSelector = /* @__PURE__ */ __name(() => null, "getChannelTextAreaSelector"),
+      escapeSelectorValue = null,
+      // Finishing a scroll is the moment the legacy runtime is allowed to close a
+      // historical snapshot; the store must not know what that means.
+      onScrollActivityFinished = /* @__PURE__ */ __name(() => {
+      }, "onScrollActivityFinished")
+    } = {}) {
+      let userScrollTime = 0, userScrollChannelId = "", userScrollIntentSequence = 0, programmaticScrollWriteTime = 0, scrollWatcherAttached = !1, scrollWatcherElement = null, scrollActivityHandler = null, scrollIntentHandler = null, scrollIntentEndHandler = null, scrollEndHandler = null, scrollIntentPending = !1, scrollIntentTimer = null, scrollIdleTimer = null, inputActivityTime = 0, inputActivityHandler = null, manualScrollAnchor = null, manualScrollLockTimer = null;
+      function normalizeChannelId(channelId) {
+        return channelId == null ? "" : String(channelId);
+      }
+      __name(normalizeChannelId, "normalizeChannelId");
+      function escapeSelector(value) {
+        return escapeSelectorValue ? escapeSelectorValue(String(value)) : String(value).replace(/(["\\])/g, "\\$1");
+      }
+      __name(escapeSelector, "escapeSelector");
+      function getMessagesScroller() {
+        let documentRef = getDocument(), selector = getMessagesScrollerSelector();
+        return !documentRef || !selector ? null : documentRef.querySelector(selector);
+      }
+      __name(getMessagesScroller, "getMessagesScroller");
+      function extractMessageIdFromElement(element) {
+        if (!element) return null;
+        let values = [
+          element.getAttribute && element.getAttribute("data-list-item-id"),
+          element.getAttribute && element.getAttribute("aria-labelledby"),
+          element.id
+        ].filter(Boolean);
+        for (let value of values) {
+          let match = String(value).match(/(\d{15,25})(?!.*\d)/);
+          if (match) return match[1];
+        }
+        return null;
+      }
+      __name(extractMessageIdFromElement, "extractMessageIdFromElement");
+      function findMessageElementById(messageId) {
+        let documentRef = getDocument();
+        if (!messageId || !documentRef) return null;
+        let escapedId = escapeSelector(messageId), selectors = [
+          `[id="chat-messages-${escapedId}"]`,
+          `[id$="-${escapedId}"]`,
+          `[data-list-item-id$="-${escapedId}"]`,
+          `[data-list-item-id*="${escapedId}"]`,
+          `[aria-labelledby*="${escapedId}"]`
+        ];
+        for (let selector of selectors)
+          try {
+            let element = documentRef.querySelector(selector);
+            if (element) return element.closest && element.closest(MESSAGE_ELEMENT_SELECTOR) || element;
+          } catch {
+          }
+        return null;
+      }
+      __name(findMessageElementById, "findMessageElementById");
+      function findVisibleMessageAnchor(messagesScroller = null) {
+        if (messagesScroller = messagesScroller || getMessagesScroller(), !messagesScroller || !getDocument()) return null;
+        let scrollerRect = messagesScroller.getBoundingClientRect(), candidates = [];
+        try {
+          candidates = Array.from(messagesScroller.querySelectorAll(MESSAGE_ELEMENT_SELECTOR));
+        } catch {
+          candidates = [];
+        }
+        let seen = /* @__PURE__ */ new Set();
+        for (let element of candidates) {
+          if (!element || seen.has(element)) continue;
+          seen.add(element);
+          let messageId = extractMessageIdFromElement(element);
+          if (!messageId) continue;
+          let rect = element.getBoundingClientRect();
+          if (!(!rect || rect.height <= 0) && !(rect.bottom <= scrollerRect.top + 8 || rect.top >= scrollerRect.bottom - 8))
+            return { messageId, element };
+        }
+        return null;
+      }
+      __name(findVisibleMessageAnchor, "findVisibleMessageAnchor");
+      function captureAnchorState(messageId = null) {
+        let messagesScroller = getMessagesScroller(), element = messageId ? findMessageElementById(messageId) : null;
+        if (!element) {
+          let visibleAnchor = findVisibleMessageAnchor(messagesScroller);
+          visibleAnchor && (messageId = visibleAnchor.messageId, element = visibleAnchor.element);
+        }
+        if (!messagesScroller || !element || !messageId) return null;
+        let elementRect = element.getBoundingClientRect(), scrollerRect = messagesScroller.getBoundingClientRect();
+        return {
+          messageId,
+          scrollTop: messagesScroller.scrollTop,
+          elementTop: elementRect.top,
+          relativeTop: elementRect.top - scrollerRect.top,
+          expiresAt: now() + 4500
+        };
+      }
+      __name(captureAnchorState, "captureAnchorState");
+      function restoreAnchorPosition(anchorState) {
+        if (!anchorState) return;
+        let messagesScroller = getMessagesScroller(), element = findMessageElementById(anchorState.messageId);
+        if (!messagesScroller || !element) return;
+        let scrollerRect = messagesScroller.getBoundingClientRect(), elementRect = element.getBoundingClientRect(), desiredTop = scrollerRect.top + (typeof anchorState.relativeTop == "number" ? anchorState.relativeTop : elementRect.top - scrollerRect.top), delta = elementRect.top - desiredTop;
+        if (Math.abs(delta) < 1) return;
+        let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
+        programmaticScrollWriteTime = now(), messagesScroller.scrollTop = Math.max(0, Math.min(messagesScroller.scrollTop + delta, maxScrollTop));
+      }
+      __name(restoreAnchorPosition, "restoreAnchorPosition");
+      function restoreAnchorState(anchorState) {
+        if (!anchorState) return;
+        let restore = /* @__PURE__ */ __name(() => restoreAnchorPosition(anchorState), "restore");
+        requestAnimationFrame2(() => requestAnimationFrame2(restore));
+        for (let delay of MANUAL_TRANSLATION_ANCHOR_RESTORE_DELAYS) setTimeout2(restore, delay);
+      }
+      __name(restoreAnchorState, "restoreAnchorState");
+      function lockManualScroll(messageId) {
+        let anchorState = captureAnchorState(messageId);
+        anchorState && (manualScrollAnchor = anchorState, manualScrollLockTimer && clearTimeout2(manualScrollLockTimer), manualScrollLockTimer = setTimeout2((_) => {
+          manualScrollLockTimer = null, manualScrollAnchor = null;
+        }, 4500));
+      }
+      __name(lockManualScroll, "lockManualScroll");
+      function getActiveManualScrollAnchor() {
+        return manualScrollAnchor ? now() > manualScrollAnchor.expiresAt ? (manualScrollAnchor = null, null) : manualScrollAnchor : null;
+      }
+      __name(getActiveManualScrollAnchor, "getActiveManualScrollAnchor");
+      function clearManualScrollLock() {
+        manualScrollLockTimer && clearTimeout2(manualScrollLockTimer), manualScrollLockTimer = null, manualScrollAnchor = null;
+      }
+      __name(clearManualScrollLock, "clearManualScrollLock");
+      function captureScrollerState() {
+        let messagesScroller = getMessagesScroller();
+        if (!messagesScroller) return null;
+        let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight), keepBottom = Math.max(0, maxScrollTop - messagesScroller.scrollTop) <= 80;
+        return {
+          scrollTop: messagesScroller.scrollTop,
+          keepBottom,
+          userScrollIntentSequence,
+          anchor: keepBottom ? null : captureAnchorState()
+        };
+      }
+      __name(captureScrollerState, "captureScrollerState");
+      function restoreScrollerState(scrollerState) {
+        if (!scrollerState) return;
+        let restore = /* @__PURE__ */ __name(() => {
+          if (scrollerState.userScrollIntentSequence !== userScrollIntentSequence) return;
+          let messagesScroller = getMessagesScroller();
+          if (!messagesScroller) return;
+          if (scrollerState.keepBottom) {
+            programmaticScrollWriteTime = now(), messagesScroller.scrollTop = messagesScroller.scrollHeight;
+            return;
+          }
+          if (scrollerState.anchor) {
+            restoreAnchorPosition(scrollerState.anchor);
+            return;
+          }
+          let maxScrollTop = Math.max(0, messagesScroller.scrollHeight - messagesScroller.clientHeight);
+          programmaticScrollWriteTime = now(), messagesScroller.scrollTop = Math.max(0, Math.min(scrollerState.scrollTop, maxScrollTop));
+        }, "restore");
+        requestAnimationFrame2(() => requestAnimationFrame2(restore));
+      }
+      __name(restoreScrollerState, "restoreScrollerState");
+      function isViewingMessageHistory() {
+        let scrollerState = captureScrollerState();
+        return !!(scrollerState && !scrollerState.keepBottom);
+      }
+      __name(isViewingMessageHistory, "isViewingMessageHistory");
+      function clearScrollIntent() {
+        scrollIntentTimer && clearTimeout2(scrollIntentTimer), scrollIntentTimer = null, scrollIntentPending = !1;
+      }
+      __name(clearScrollIntent, "clearScrollIntent");
+      function markScrollIntent() {
+        clearScrollIntent(), scrollIntentPending = !0, scrollIntentTimer = setTimeout2(() => {
+          scrollIntentTimer = null, scrollIntentPending = !1;
+        }, 300);
+      }
+      __name(markScrollIntent, "markScrollIntent");
+      function finishScrollActivity(channelId) {
+        scrollIdleTimer && clearTimeout2(scrollIdleTimer), scrollIdleTimer = null, clearScrollIntent();
+        let key = normalizeChannelId(channelId);
+        (!key || userScrollChannelId === key) && (userScrollTime = 0, userScrollChannelId = ""), key && onScrollActivityFinished(channelId);
+      }
+      __name(finishScrollActivity, "finishScrollActivity");
+      function scheduleScrollIdleFinish(channelId, delay = 900) {
+        channelId && (scrollIdleTimer && clearTimeout2(scrollIdleTimer), scrollIdleTimer = setTimeout2(() => {
+          scrollIdleTimer = null, finishScrollActivity(channelId);
+        }, delay));
+      }
+      __name(scheduleScrollIdleFinish, "scheduleScrollIdleFinish");
+      function isUserScrollingChannel(channelId) {
+        return userScrollChannelId === normalizeChannelId(channelId) && now() - userScrollTime < 900;
+      }
+      __name(isUserScrollingChannel, "isUserScrollingChannel");
+      function isUserActivelyScrolling(channelId = null) {
+        let key = normalizeChannelId(channelId || getSelectedChannelId());
+        return !!key && userScrollChannelId === key && !!userScrollTime && now() - userScrollTime < 900;
+      }
+      __name(isUserActivelyScrolling, "isUserActivelyScrolling");
+      function handleScrollActivity() {
+        let timestamp = now();
+        if (timestamp - programmaticScrollWriteTime < 150) return;
+        let channelId = getSelectedChannelId(), key = normalizeChannelId(channelId);
+        scrollIntentPending ? (clearScrollIntent(), userScrollChannelId = key, userScrollTime = timestamp, scheduleScrollIdleFinish(channelId)) : key && userScrollChannelId === key && userScrollTime && timestamp - userScrollTime < 900 && (userScrollTime = timestamp, scheduleScrollIdleFinish(channelId));
+      }
+      __name(handleScrollActivity, "handleScrollActivity");
+      function attachScrollWatcher() {
+        if (!getDocument()) return;
+        let messagesScroller = getMessagesScroller();
+        if (messagesScroller && !(scrollWatcherAttached && scrollWatcherElement === messagesScroller)) {
+          detachScrollWatcher(), scrollActivityHandler = /* @__PURE__ */ __name((_) => handleScrollActivity(), "scrollActivityHandler"), scrollIntentHandler = /* @__PURE__ */ __name((event) => {
+            event && event.type === "keydown" && !SCROLL_INTENT_KEYS.includes(event.key) || (userScrollIntentSequence++, markScrollIntent());
+          }, "scrollIntentHandler"), scrollIntentEndHandler = /* @__PURE__ */ __name((_) => {
+            clearScrollIntent();
+          }, "scrollIntentEndHandler"), scrollEndHandler = /* @__PURE__ */ __name((_) => {
+            finishScrollActivity(userScrollChannelId || getSelectedChannelId());
+          }, "scrollEndHandler"), scrollWatcherElement = messagesScroller, scrollWatcherAttached = !0, messagesScroller.addEventListener("scroll", scrollActivityHandler, { passive: !0 }), messagesScroller.addEventListener("scrollend", scrollEndHandler, { passive: !0 });
+          for (let eventName of SCROLL_INTENT_EVENTS) messagesScroller.addEventListener(eventName, scrollIntentHandler, { passive: eventName !== "keydown" });
+          for (let eventName of SCROLL_INTENT_END_EVENTS) messagesScroller.addEventListener(eventName, scrollIntentEndHandler, { passive: !0 });
+        }
+      }
+      __name(attachScrollWatcher, "attachScrollWatcher");
+      function detachScrollWatcher() {
+        if (scrollIdleTimer && clearTimeout2(scrollIdleTimer), scrollIdleTimer = null, clearScrollIntent(), userScrollTime = 0, userScrollChannelId = "", scrollWatcherElement) {
+          if (scrollActivityHandler && scrollWatcherElement.removeEventListener("scroll", scrollActivityHandler), scrollEndHandler && scrollWatcherElement.removeEventListener("scrollend", scrollEndHandler), scrollIntentHandler) for (let eventName of SCROLL_INTENT_EVENTS) scrollWatcherElement.removeEventListener(eventName, scrollIntentHandler);
+          if (scrollIntentEndHandler) for (let eventName of SCROLL_INTENT_END_EVENTS) scrollWatcherElement.removeEventListener(eventName, scrollIntentEndHandler);
+        }
+        scrollWatcherAttached = !1, scrollWatcherElement = null, scrollActivityHandler = null, scrollIntentHandler = null, scrollIntentEndHandler = null, scrollEndHandler = null;
+      }
+      __name(detachScrollWatcher, "detachScrollWatcher");
+      function attachInputActivityWatcher() {
+        let documentRef = getDocument();
+        if (!(inputActivityHandler || !documentRef)) {
+          inputActivityHandler = /* @__PURE__ */ __name((event) => {
+            let target = event && event.target;
+            if (!target) return;
+            let isTextInput = !1;
+            try {
+              isTextInput = !!(target.matches && target.matches(TEXT_INPUT_SELECTOR) || target.closest && target.closest(TEXT_INPUT_SELECTOR));
+            } catch {
+            }
+            isTextInput && (inputActivityTime = now());
+          }, "inputActivityHandler");
+          for (let eventName of INPUT_ACTIVITY_EVENTS) documentRef.addEventListener(eventName, inputActivityHandler, !0);
+        }
+      }
+      __name(attachInputActivityWatcher, "attachInputActivityWatcher");
+      function detachInputActivityWatcher() {
+        let documentRef = getDocument();
+        if (!inputActivityHandler || !documentRef) {
+          inputActivityHandler = null;
+          return;
+        }
+        for (let eventName of INPUT_ACTIVITY_EVENTS) documentRef.removeEventListener(eventName, inputActivityHandler, !0);
+        inputActivityHandler = null;
+      }
+      __name(detachInputActivityWatcher, "detachInputActivityWatcher");
+      function isChannelTextAreaFocused() {
+        let documentRef = getDocument();
+        if (!documentRef) return !1;
+        let activeElement = documentRef.activeElement;
+        return !activeElement || activeElement === documentRef.body || !(activeElement.tagName === "TEXTAREA" || activeElement.tagName === "INPUT" || activeElement.getAttribute && activeElement.getAttribute("role") === "textbox" || activeElement.isContentEditable) ? !1 : [getChannelTextAreaSelector(), '[class*="channelTextArea"]', "form"].some((selector) => {
+          if (!selector) return !1;
+          try {
+            return !!(activeElement.matches && activeElement.matches(selector) || activeElement.closest && activeElement.closest(selector));
+          } catch {
+            return !1;
+          }
+        });
+      }
+      __name(isChannelTextAreaFocused, "isChannelTextAreaFocused");
+      function pauseForNavigation(duration = 1800) {
+        let channelId = getSelectedChannelId();
+        userScrollChannelId = normalizeChannelId(channelId), userScrollTime = now() + Math.max(0, duration - 900), channelId && scheduleScrollIdleFinish(channelId, duration);
+      }
+      return __name(pauseForNavigation, "pauseForNavigation"), Object.freeze({
+        getMessagesScroller,
+        extractMessageIdFromElement,
+        findMessageElementById,
+        findVisibleMessageAnchor,
+        captureAnchorState,
+        restoreAnchorPosition,
+        restoreAnchorState,
+        lockManualScroll,
+        getActiveManualScrollAnchor,
+        clearManualScrollLock,
+        captureScrollerState,
+        restoreScrollerState,
+        isViewingMessageHistory,
+        attachScrollWatcher,
+        detachScrollWatcher,
+        markScrollIntent,
+        clearScrollIntent,
+        finishScrollActivity,
+        scheduleScrollIdleFinish,
+        isUserActivelyScrolling,
+        // Narrower than isUserActivelyScrolling: no fallback to the selected channel and
+        // no truthiness check on the timestamp, matching the historical commit gate.
+        isUserScrollingChannel,
+        getUserScrollIntentSequence: /* @__PURE__ */ __name(() => userScrollIntentSequence, "getUserScrollIntentSequence"),
+        attachInputActivityWatcher,
+        detachInputActivityWatcher,
+        getTimeSinceInputActivity: /* @__PURE__ */ __name(() => now() - inputActivityTime, "getTimeSinceInputActivity"),
+        isChannelTextAreaFocused,
+        pauseForNavigation
+      });
+    }
+    __name(createMessageViewportStore, "createMessageViewportStore");
+    module2.exports = {
+      AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE: 150,
+      AUTO_TRANSLATION_SCROLL_IDLE_DELAY: 900,
+      AUTO_TRANSLATION_SCROLL_INTENT_WINDOW: 300,
+      AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD: 80,
+      MANUAL_TRANSLATION_SCROLL_LOCK_MS: 4500,
+      MANUAL_TRANSLATION_ANCHOR_RESTORE_DELAYS,
+      createMessageViewportStore
+    };
+  }
+});
+
+// src/status/loaded-translation-status-store.js
+var require_loaded_translation_status_store = __commonJS({
+  "src/status/loaded-translation-status-store.js"(exports2, module2) {
+    var LOADED_STATUS_PHASES = Object.freeze(["collecting", "requesting", "repairing", "committing", "done", "failed"]), LOADED_STATUS_PHASE_SET = new Set(LOADED_STATUS_PHASES), LOADED_STATUS_TERMINAL_PHASES = /* @__PURE__ */ new Set(["done", "failed"]), LOADED_STATUS_PHASE_BY_JOB_STATE = Object.freeze({
+      collecting: "collecting",
+      translating: "requesting",
+      repairing: "repairing",
+      ready: "committing",
+      committed: "done",
+      cancelled: null
+    }), LOADED_STATUS_PROGRESS_FIELDS = Object.freeze(["total", "processed", "displayed", "skipped", "failed"]);
+    function createEmptyStatus() {
+      return {
+        active: !1,
+        collecting: !1,
+        done: !1,
+        channelId: null,
+        total: 0,
+        processed: 0,
+        batch: 0,
+        displayed: 0,
+        skipped: 0,
+        failed: 0,
+        retryable: 0,
+        aiDropped: 0,
+        lastSkipReason: "",
+        lastSkipPreview: "",
+        phase: null,
+        phaseStartedAt: 0,
+        progressAt: 0
+      };
+    }
+    __name(createEmptyStatus, "createEmptyStatus");
+    function normalizeChannelId(channelId) {
+      return channelId == null ? "" : String(channelId);
+    }
+    __name(normalizeChannelId, "normalizeChannelId");
+    function formatSeconds(ms) {
+      return `${Math.max(0, Math.floor((ms || 0) / 1e3))}s`;
+    }
+    __name(formatSeconds, "formatSeconds");
+    function getPhaseLabel(phase, chinese) {
+      switch (phase) {
+        case "collecting":
+          return chinese ? "收集中" : "collecting";
+        case "requesting":
+          return chinese ? "请求中" : "requesting";
+        case "repairing":
+          return chinese ? "修复中" : "repairing";
+        case "committing":
+          return chinese ? "提交中" : "committing";
+        case "done":
+          return chinese ? "已完成" : "done";
+        case "failed":
+          return chinese ? "已失败" : "failed";
+        default:
+          return "";
+      }
+    }
+    __name(getPhaseLabel, "getPhaseLabel");
+    function hasCounterMoved(previous, next) {
+      return LOADED_STATUS_PROGRESS_FIELDS.some((field) => (previous[field] || 0) !== (next[field] || 0));
+    }
+    __name(hasCounterMoved, "hasCounterMoved");
+    function renderPhaseSegment(status, chinese, currentTime, stalledAfterMs) {
+      let phase = status && status.phase;
+      if (!phase || LOADED_STATUS_TERMINAL_PHASES.has(phase)) return "";
+      let label = getPhaseLabel(phase, chinese);
+      if (!label) return "";
+      let progressAt = status.progressAt || status.phaseStartedAt || 0, sinceProgressMs = progressAt ? Math.max(0, currentTime - progressAt) : 0;
+      if (progressAt && sinceProgressMs >= stalledAfterMs)
+        return chinese ? `，${label} ${formatSeconds(sinceProgressMs)} 无进展` : `, ${label} ${formatSeconds(sinceProgressMs)} no progress`;
+      let phaseStartedAt = status.phaseStartedAt || 0;
+      return phaseStartedAt ? chinese ? `，${label} ${formatSeconds(currentTime - phaseStartedAt)}` : `, ${label} ${formatSeconds(currentTime - phaseStartedAt)}` : chinese ? `，${label}` : `, ${label}`;
+    }
+    __name(renderPhaseSegment, "renderPhaseSegment");
+    function renderStatusText(status, chinese, phaseSegment) {
+      let total = Math.max(0, status && status.total || 0), processed = Math.max(0, Math.min(total || 0, status && status.processed || 0)), displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0)), skipped = Math.max(0, Math.min(total || 0, status && status.skipped || 0)), failedValue = status && status.failed != null ? status.failed : status && status.aiDropped, failed = Math.max(0, failedValue || 0), retryable = Math.max(0, status && status.retryable || 0), batch = Math.max(1, status && status.batch || 1), extraText = `${skipped ? chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}` : ""}${failed ? chinese ? `，失败 ${failed}` : `, failed ${failed}` : ""}${retryable && retryable != failed ? chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}` : ""}`;
+      return status && status.done ? total ? chinese ? `已加载翻译：第 ${batch} 批完成，显示 ${displayed}/${total}${extraText}` : `Loaded translation: batch ${batch} done, shown ${displayed}/${total}${extraText}` : failed || retryable ? chinese ? `已加载翻译：失败 ${failed}，待重试 ${retryable}` : `Loaded translation: ${failed} failed, ${retryable} retry pending` : chinese ? "已加载翻译：开启，暂无待翻译" : "Loaded translation: on, no pending messages" : status && status.collecting ? chinese ? `收集已加载：第 ${batch} 批 ${processed}/${total}${extraText}${phaseSegment}` : `Collecting loaded: batch ${batch} ${processed}/${total}${extraText}${phaseSegment}` : total ? chinese ? `翻译已加载：第 ${batch} 批 ${processed}/${total}，显示 ${displayed}${extraText}${phaseSegment}` : `Translating loaded: batch ${batch} ${processed}/${total}, shown ${displayed}${extraText}${phaseSegment}` : chinese ? "已加载翻译：开启，等待消息" : "Loaded translation: on, waiting";
+    }
+    __name(renderStatusText, "renderStatusText");
+    function createLoadedTranslationStatusStore({
+      now = Date.now,
+      setTimeout: scheduleTimer = null,
+      clearTimeout: cancelTimer = null,
+      isChineseUiLanguage = /* @__PURE__ */ __name(() => !1, "isChineseUiLanguage"),
+      stalledAfterMs = 45e3
+    } = {}) {
+      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), status = createEmptyStatus(), hideTimer = null, seenMessages = {};
+      function resolvePhase(previous, next, updates) {
+        if (updates && typeof updates.phase == "string" && LOADED_STATUS_PHASE_SET.has(updates.phase)) return updates.phase;
+        if (next.done) return "done";
+        if (next.collecting) return "collecting";
+        if (!next.active) return null;
+        let carried = previous.phase;
+        return !carried || carried === "collecting" || LOADED_STATUS_TERMINAL_PHASES.has(carried) ? "requesting" : carried;
+      }
+      __name(resolvePhase, "resolvePhase");
+      function readStatus(statusOverride) {
+        return statusOverride === void 0 ? status : statusOverride;
+      }
+      return __name(readStatus, "readStatus"), Object.freeze({
+        getStatus() {
+          return Object.assign({}, status);
+        },
+        getChannelId() {
+          return status.channelId;
+        },
+        isForChannel(channelId) {
+          return normalizeChannelId(status.channelId) === normalizeChannelId(channelId);
+        },
+        isActive() {
+          return !!status.active;
+        },
+        isDone() {
+          return !!status.done;
+        },
+        // The batch label shown for the batch already running.
+        getCurrentBatchNumber() {
+          return status.batch || 1;
+        },
+        // Without a channel the counter simply advances. With one it restarts at 1 when
+        // the status belongs to a different channel, so a channel switch never inherits
+        // another channel's batch number.
+        getNextBatchNumber(channelId = null) {
+          return channelId == null ? (status.batch || 0) + 1 : (this.isForChannel(channelId) && status.batch || 0) + 1;
+        },
+        getPhaseForJobState(jobState) {
+          return LOADED_STATUS_PHASE_BY_JOB_STATE[jobState] || null;
+        },
+        update(updates = {}) {
+          let previous = status, next = Object.assign({}, previous, updates);
+          return next.phase = resolvePhase(previous, next, updates), next.phase !== previous.phase ? (next.phaseStartedAt = now(), next.progressAt = next.phaseStartedAt) : (next.phaseStartedAt = previous.phaseStartedAt, next.progressAt = hasCounterMoved(previous, next) ? now() : previous.progressAt), status = next, this.getStatus();
+        },
+        clear() {
+          return this.cancelHide(), status = createEmptyStatus(), this.getStatus();
+        },
+        // Reports whether the phase is progressing, so a caller can log or diagnose
+        // without parsing the rendered text.
+        getPhaseSnapshot(statusOverride) {
+          let target = readStatus(statusOverride), phase = target && target.phase || null, currentTime = now(), phaseStartedAt = target && target.phaseStartedAt || 0, progressAt = target && target.progressAt || phaseStartedAt, terminal = LOADED_STATUS_TERMINAL_PHASES.has(phase), sinceProgressMs = progressAt ? Math.max(0, currentTime - progressAt) : 0, stalled = !!phase && !terminal && !!progressAt && sinceProgressMs >= stalledAfterMs;
+          return {
+            phase,
+            label: getPhaseLabel(phase, !!isChineseUiLanguage()),
+            phaseStartedAt,
+            phaseElapsedMs: phaseStartedAt ? Math.max(0, currentTime - phaseStartedAt) : 0,
+            progressAt,
+            sinceProgressMs,
+            stalled,
+            working: !!phase && !terminal && !stalled
+          };
+        },
+        getStatusText(statusOverride) {
+          let target = readStatus(statusOverride), chinese = !!isChineseUiLanguage();
+          return renderStatusText(target, chinese, renderPhaseSegment(target, chinese, now(), stalledAfterMs));
+        },
+        getPreviewText(text) {
+          return text = (text || "").replace(/\s+/g, " ").trim(), text ? text.length > 24 ? `${text.slice(0, 24)}...` : text : "";
+        },
+        // The inline variant falls back to a generic sentence whenever the record belongs
+        // to another channel, so a channel switch never shows the previous channel's counts.
+        getInlineStatusText(selectedChannelId) {
+          let statusChannelId = status.channelId, matchesChannel = !statusChannelId || statusChannelId == "__global" || normalizeChannelId(statusChannelId) === normalizeChannelId(selectedChannelId);
+          return (status.active || status.done) && matchesChannel ? this.getStatusText(status) : isChineseUiLanguage() ? "已加载消息自动翻译已开启，等待当前批次…" : "Loaded-message auto-translate is on; waiting for the current batch…";
+        },
+        hasPendingHide() {
+          return hideTimer !== null;
+        },
+        cancelHide() {
+          hideTimer !== null && stopTimer(hideTimer), hideTimer = null;
+        },
+        // The handle is cleared before the callback runs, so the callback may schedule
+        // another hide without cancelling itself.
+        scheduleHide(delay, onHide) {
+          return this.cancelHide(), hideTimer = startTimer(() => {
+            hideTimer = null, typeof onHide == "function" && onHide();
+          }, delay), hideTimer;
+        },
+        getSeenCount(channelId) {
+          let key = normalizeChannelId(channelId), seen = key && seenMessages[key];
+          return seen ? Object.keys(seen).length : 0;
+        },
+        // Returns whether this message had already been seen in this channel session,
+        // which is what the boundary dedup decides on.
+        markMessageSeen(channelId, messageId) {
+          let key = normalizeChannelId(channelId), messageKey = normalizeChannelId(messageId);
+          if (!key || !messageKey) return !1;
+          seenMessages[key] || (seenMessages[key] = {});
+          let wasSeen = !!seenMessages[key][messageKey];
+          return seenMessages[key][messageKey] = !0, wasSeen;
+        },
+        // The seen map only serves boundary dedup inside the active channel session;
+        // keeping it for left channels grows memory for the whole Discord session.
+        resetSeen(channelId = null) {
+          let key = normalizeChannelId(channelId);
+          if (!key) {
+            seenMessages = {};
+            return;
+          }
+          delete seenMessages[key];
+        }
+      });
+    }
+    __name(createLoadedTranslationStatusStore, "createLoadedTranslationStatusStore");
+    module2.exports = {
+      LOADED_STATUS_STALLED_AFTER_MS: 45e3,
+      LOADED_STATUS_PREVIEW_MAX_LENGTH: 24,
+      LOADED_STATUS_PHASES,
+      LOADED_STATUS_PHASE_BY_JOB_STATE,
+      createLoadedTranslationStatusStore
+    };
+  }
+});
+
+// src/cache/translation-cache-store.js
+var require_translation_cache_store = __commonJS({
+  "src/cache/translation-cache-store.js"(exports2, module2) {
+    var PERSISTED_RECEIVED_SKIP_REASONS = Object.freeze(["same_language", "too_similar", "ai_skip_signal", "source_filter"]), SIGNATURE_DIGEST_PREFIX = "h1:";
+    function createTranslationCacheStore({
+      now = Date.now,
+      setTimeout: setTimeout2,
+      clearTimeout: clearTimeout2,
+      // Persistence. loadCache returns whatever is on disk, including garbage.
+      loadCache = /* @__PURE__ */ __name(() => null, "loadCache"),
+      saveCache = /* @__PURE__ */ __name(() => {
+      }, "saveCache"),
+      // Message shape helpers owned by the received-translation runtime.
+      extractOriginalContentData = /* @__PURE__ */ __name(() => ({}), "extractOriginalContentData"),
+      createSignature = /* @__PURE__ */ __name(() => "", "createSignature"),
+      normalizeStoredTranslation = /* @__PURE__ */ __name((translation) => translation, "normalizeStoredTranslation"),
+      extractLegacyDisplayedParts = /* @__PURE__ */ __name(() => ({}), "extractLegacyDisplayedParts"),
+      // Policy and display seams. A cache lookup has no business deciding any of these,
+      // but the lookup it replaces did, so they are injected rather than reimplemented.
+      refreshTranslationDisplay = /* @__PURE__ */ __name((translation) => translation, "refreshTranslationDisplay"),
+      isTranslationResultTooSimilar = /* @__PURE__ */ __name(() => !1, "isTranslationResultTooSimilar"),
+      shouldSkipBeforeRequest = /* @__PURE__ */ __name(() => !1, "shouldSkipBeforeRequest"),
+      shouldKeepAutoTranslatedResult = /* @__PURE__ */ __name(() => !0, "shouldKeepAutoTranslatedResult"),
+      getSkipPreviewText = /* @__PURE__ */ __name((text) => text == null ? "" : String(text), "getSkipPreviewText")
+    } = {}) {
+      let cache = {}, saveTimer = null;
+      function hashSignature(signature) {
+        let text = String(signature ?? ""), hash = 2166136261;
+        for (let index = 0; index < text.length; index++)
+          hash ^= text.charCodeAt(index), hash = Math.imul(hash, 16777619) >>> 0;
+        return `${SIGNATURE_DIGEST_PREFIX}${hash.toString(36)}:${text.length.toString(36)}`;
+      }
+      __name(hashSignature, "hashSignature");
+      function matchesSignature(entry, signature) {
+        return !entry || entry.signature == null ? !1 : String(entry.signature).indexOf(SIGNATURE_DIGEST_PREFIX) !== 0 ? entry.signature == signature : entry.signature == hashSignature(signature);
+      }
+      __name(matchesSignature, "matchesSignature");
+      function scheduleSave() {
+        saveTimer && clearTimeout2(saveTimer), saveTimer = setTimeout2((_) => {
+          saveCache(cache), saveTimer = null;
+        }, 300);
+      }
+      __name(scheduleSave, "scheduleSave");
+      function cancelPendingSave() {
+        saveTimer && clearTimeout2(saveTimer), saveTimer = null;
+      }
+      __name(cancelPendingSave, "cancelPendingSave");
+      function evictOldestBeyondLimit() {
+        let cacheKeys = Object.keys(cache);
+        cacheKeys.length <= 500 || cacheKeys.sort((keyA, keyB) => (cache[keyA].cachedAt || 0) - (cache[keyB].cachedAt || 0)).slice(0, cacheKeys.length - 500).forEach((key) => delete cache[key]);
+      }
+      __name(evictOldestBeyondLimit, "evictOldestBeyondLimit");
+      function dropEntry(messageId) {
+        delete cache[messageId], scheduleSave();
+      }
+      __name(dropEntry, "dropEntry");
+      function getCachedTranslation(message, channelId, originalContentData = null) {
+        if (!message || !cache[message.id]) return null;
+        let sourceData = originalContentData || extractOriginalContentData(message), signature = createSignature(message, channelId, sourceData);
+        if (!matchesSignature(cache[message.id], signature) || cache[message.id].skipped) return null;
+        let cachedTranslation = Object.assign({ signature, channelId }, cache[message.id].translation), beforeSerialized = JSON.stringify(cachedTranslation || {});
+        if (cachedTranslation = normalizeStoredTranslation(cachedTranslation), !cachedTranslation.originalContent && sourceData && sourceData.content && (cachedTranslation.originalContent = String(sourceData.content)), !cachedTranslation.translatedContent && cachedTranslation.content && (cachedTranslation.translatedContent = extractLegacyDisplayedParts(cachedTranslation.content).translatedContent || cachedTranslation.content), !cachedTranslation.translatedContent || (sourceData && sourceData.content || "").trim() && !String(cachedTranslation.originalContent || "").trim()) return null;
+        if (cachedTranslation = refreshTranslationDisplay(cachedTranslation), isTranslationResultTooSimilar(cachedTranslation) || shouldSkipBeforeRequest(sourceData, channelId) || !shouldKeepAutoTranslatedResult(cachedTranslation, channelId))
+          return dropEntry(message.id), null;
+        if (JSON.stringify(cachedTranslation || {}) != beforeSerialized) {
+          let upgradedTranslation = Object.assign({}, cachedTranslation);
+          delete upgradedTranslation.signature, cache[message.id].translation = upgradedTranslation, cache[message.id].signature = hashSignature(signature), cache[message.id].cachedAt = cache[message.id].cachedAt || now(), scheduleSave();
+        }
+        return cachedTranslation;
+      }
+      __name(getCachedTranslation, "getCachedTranslation");
+      function getCachedSkipDecision(message, channelId, originalContentData = null) {
+        if (!message || !cache[message.id]) return null;
+        let sourceData = originalContentData || extractOriginalContentData(message), signature = createSignature(message, channelId, sourceData);
+        if (!matchesSignature(cache[message.id], signature)) return null;
+        let skipped = cache[message.id].skipped;
+        return !skipped || !skipped.reason ? null : skipped.policyVersion !== 2 ? (dropEntry(message.id), null) : Object.assign({ signature, channelId }, skipped);
+      }
+      __name(getCachedSkipDecision, "getCachedSkipDecision");
+      function shouldPersistSkipDecision(reason) {
+        return PERSISTED_RECEIVED_SKIP_REASONS.includes(reason);
+      }
+      __name(shouldPersistSkipDecision, "shouldPersistSkipDecision");
+      function persistTranslation(messageId, signature, translation) {
+        let storedTranslation = Object.assign({}, translation);
+        delete storedTranslation.signature, cache[messageId] = {
+          signature: hashSignature(signature),
+          cachedAt: now(),
+          translation: storedTranslation
+        }, evictOldestBeyondLimit(), scheduleSave();
+      }
+      __name(persistTranslation, "persistTranslation");
+      function persistSkipDecision(messageId, signature, reason, preview = "") {
+        !messageId || !signature || !reason || !shouldPersistSkipDecision(reason) || (cache[messageId] = {
+          signature: hashSignature(signature),
+          cachedAt: now(),
+          skipped: {
+            policyVersion: 2,
+            reason,
+            preview: getSkipPreviewText(preview)
+          }
+        }, evictOldestBeyondLimit(), scheduleSave());
+      }
+      __name(persistSkipDecision, "persistSkipDecision");
+      function clear(messageId) {
+        !messageId || !cache[messageId] || dropEntry(messageId);
+      }
+      __name(clear, "clear");
+      function loadPersisted() {
+        let loaded = loadCache();
+        return cache = loaded && typeof loaded == "object" && !Array.isArray(loaded) ? loaded : {}, cache;
+      }
+      return __name(loadPersisted, "loadPersisted"), Object.freeze({
+        getCachedTranslation,
+        getCachedSkipDecision,
+        persistTranslation,
+        persistSkipDecision,
+        shouldPersistSkipDecision,
+        clear,
+        hasEntry(messageId) {
+          return !!(messageId && cache[messageId]);
+        },
+        getEntry(messageId) {
+          return messageId && cache[messageId] || null;
+        },
+        scheduleSave,
+        // Used when the plugin stops: the pending save is abandoned, not flushed, which
+        // is what the legacy shutdown did.
+        cancelPendingSave,
+        loadPersisted,
+        hashSignature,
+        matchesSignature,
+        // Writes an entry with a raw, undigested signature, the shape a pre-digest install
+        // has on disk. Only the compatibility tests need it.
+        seedRawEntryForTest(messageId, signature, translation) {
+          cache[messageId] = { signature, cachedAt: now(), translation: Object.assign({}, translation) };
+        }
+      });
+    }
+    __name(createTranslationCacheStore, "createTranslationCacheStore");
+    module2.exports = {
+      MAX_TRANSLATION_CACHE_ENTRIES: 500,
+      RECEIVED_SKIP_CACHE_POLICY_VERSION: 2,
+      TRANSLATION_CACHE_SAVE_DEBOUNCE_MS: 300,
+      PERSISTED_RECEIVED_SKIP_REASONS,
+      SIGNATURE_DIGEST_PREFIX,
+      createTranslationCacheStore
     };
   }
 });
@@ -6431,7 +7395,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a, _b, _c;
-        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), {
+        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), {
           createSettingsStore,
           createEmptyChannelEnablementState,
           normalizeStoredChannelEnablementState,
@@ -7915,959 +8879,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), this.ensureSentTranslationStore().clearPendingOriginals(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.ensureLiveTranslationQueue().cancelQueueRetry(), this.ensureMessageViewportStore().clearManualScrollLock(), this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), this.ensureHistoricalJobRegistry().clearFailedSnapshots(), this.ensureSentTranslationStore().clearManualRequests(), this.ensureReceivedDisplayRuntime().clearAllSuppression(), this.ensureLiveTranslationQueue().clearAllQueuedMessages(), this.ensureReceivedDisplayRuntime().clearPreviews(null), this.ensureReceivedDisplayRuntime().clearPreviewEligibility(null), this.ensureLiveTranslationQueue().setBusyTranslating(!1), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
-            let settingsPanel;
-            return settingsPanel = BDFDB.PluginUtils.createSettingsPanel(this, {
-              collapseStates,
-              children: /* @__PURE__ */ __name((_2) => {
-                let settingsItems = [], recommendedEngines = ["microsoft", "googlecloud", "googleapi", "deepseek", "openai", "gemini", "oaicompat"], getSettingsPanelRoot = /* @__PURE__ */ __name(() => document.querySelector(".translator-settings-panel-root"), "getSettingsPanelRoot"), isScrollableElement = /* @__PURE__ */ __name((node) => {
-                  if (!node || node == document || node == document.body || node == document.documentElement || typeof node.scrollTop != "number" || typeof node.scrollHeight != "number" || typeof node.clientHeight != "number" || node.scrollHeight <= node.clientHeight + 1) return !1;
-                  let overflowY = "";
-                  try {
-                    let style = window.getComputedStyle(node);
-                    overflowY = style && style.overflowY || "";
-                  } catch {
-                  }
-                  return overflowY != "visible" && overflowY != "clip" || node.scrollTop > 0;
-                }, "isScrollableElement"), getSettingsPanelScrollElements = /* @__PURE__ */ __name((root) => {
-                  let scrollers = [], addScroller = /* @__PURE__ */ __name((node) => {
-                    node && isScrollableElement(node) && !scrollers.includes(node) && scrollers.push(node);
-                  }, "addScroller"), current = root;
-                  for (; current && current.parentElement; )
-                    addScroller(current), current = current.parentElement;
-                  addScroller(current);
-                  try {
-                    for (let node of document.querySelectorAll("div"))
-                      node.scrollTop > 0 && addScroller(node);
-                  } catch {
-                  }
-                  return scrollers;
-                }, "getSettingsPanelScrollElements"), captureSettingsPanelScrollState = /* @__PURE__ */ __name(() => {
-                  let root = getSettingsPanelRoot();
-                  if (!root) return null;
-                  let scrollers = getSettingsPanelScrollElements(root);
-                  return scrollers.length ? {
-                    items: scrollers.map((scroller) => ({
-                      scroller,
-                      scrollTop: scroller.scrollTop,
-                      scrollLeft: scroller.scrollLeft
-                    })),
-                    windowX: typeof window < "u" ? window.scrollX : 0,
-                    windowY: typeof window < "u" ? window.scrollY : 0
-                  } : null;
-                }, "captureSettingsPanelScrollState"), applySettingsPanelScrollState = /* @__PURE__ */ __name((scrollState) => {
-                  if (!(!scrollState || !scrollState.items)) {
-                    for (let item of scrollState.items) {
-                      if (!item || !item.scroller) continue;
-                      let maxScrollTop = Math.max(0, item.scroller.scrollHeight - item.scroller.clientHeight), maxScrollLeft = Math.max(0, item.scroller.scrollWidth - item.scroller.clientWidth);
-                      item.scroller.scrollTop = Math.max(0, Math.min(item.scrollTop, maxScrollTop)), item.scroller.scrollLeft = Math.max(0, Math.min(item.scrollLeft || 0, maxScrollLeft));
-                    }
-                    typeof window < "u" && window.scrollTo(scrollState.windowX || 0, scrollState.windowY || 0);
-                  }
-                }, "applySettingsPanelScrollState"), restoreSettingsPanelScrollState = /* @__PURE__ */ __name((scrollState) => {
-                  scrollState && (applySettingsPanelScrollState(scrollState), requestAnimationFrame(() => {
-                    applySettingsPanelScrollState(scrollState), requestAnimationFrame(() => applySettingsPanelScrollState(scrollState));
-                  }));
-                }, "restoreSettingsPanelScrollState"), refreshPanel = /* @__PURE__ */ __name(() => {
-                  let scrollState = captureSettingsPanelScrollState();
-                  BDFDB.PluginUtils.refreshSettingsPanel(this, settingsPanel, collapseStates), restoreSettingsPanelScrollState(scrollState);
-                }, "refreshPanel"), saveAuthField = /* @__PURE__ */ __name((engineKey, field, value) => {
-                  this.ensureSettingsStore().setCredentialField(engineKey, field, value), this.SettingsUpdated = !0;
-                }, "saveAuthField"), saveReceivedFilterSetting = /* @__PURE__ */ __name((key, value) => {
-                  saveFilterSetting(key, value);
-                }, "saveReceivedFilterSetting"), infoText = /* @__PURE__ */ __name((text) => BDFDB.ReactUtils.createElement("div", {
-                  className: "translator-settings-note",
-                  children: text
-                }), "infoText"), isChineseUi = this.isChineseUiLanguage(), isRussianUi = this.isRussianUiLanguage(), compactText = /* @__PURE__ */ __name((zh, en, ru = null) => isChineseUi ? zh : isRussianUi && ru || en, "compactText"), getEnginePortalConfig = /* @__PURE__ */ __name((engineKey) => {
-                  let portal = enginePortals[engineKey];
-                  return portal ? {
-                    primaryUrl: portal.primaryUrl,
-                    primaryLabel: isChineseUi ? portal.primaryLabelZh : portal.primaryLabelEn,
-                    secondaryUrl: portal.secondaryUrl,
-                    secondaryLabel: isChineseUi ? portal.secondaryLabelZh : portal.secondaryLabelEn,
-                    hint: isChineseUi ? portal.hintZh : portal.hintEn
-                  } : null;
-                }, "getEnginePortalConfig"), defaultSecondaryButtonColor = BDFDB.LibraryComponents.Button.Colors.PRIMARY || BDFDB.LibraryComponents.Button.Colors.GREY || void 0, createActionButton = /* @__PURE__ */ __name(({ label, onClick, color = void 0, look = null, className = null }) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
-                  size: BDFDB.LibraryComponents.Button.Sizes.SMALL,
-                  color: color === null ? void 0 : color || defaultSecondaryButtonColor,
-                  look: look || void 0,
-                  className,
-                  onClick,
-                  children: label
-                }), "createActionButton"), stableSelectScrollState = null, stableSelectScrollIntoViewOriginal = null, stableSelectScrollLockTimer = null, restoreStableSelectScrollIntoView = /* @__PURE__ */ __name((_3) => {
-                  try {
-                    stableSelectScrollIntoViewOriginal && typeof Element < "u" && Element.prototype.scrollIntoView != stableSelectScrollIntoViewOriginal && (Element.prototype.scrollIntoView = stableSelectScrollIntoViewOriginal);
-                  } catch {
-                  }
-                  stableSelectScrollIntoViewOriginal = null;
-                }, "restoreStableSelectScrollIntoView"), lockStableSelectScrollIntoView = /* @__PURE__ */ __name((duration = 900) => {
-                  try {
-                    if (typeof Element > "u" || !Element.prototype || typeof Element.prototype.scrollIntoView != "function") return;
-                    stableSelectScrollIntoViewOriginal || (stableSelectScrollIntoViewOriginal = Element.prototype.scrollIntoView, Element.prototype.scrollIntoView = function() {
-                      if (!(this && this.closest && this.closest(".translator-settings-panel-root")))
-                        return stableSelectScrollIntoViewOriginal.apply(this, arguments);
-                    }), stableSelectScrollLockTimer && clearTimeout(stableSelectScrollLockTimer), stableSelectScrollLockTimer = setTimeout(restoreStableSelectScrollIntoView, duration);
-                  } catch {
-                  }
-                }, "lockStableSelectScrollIntoView"), restoreStableSelectScroll = /* @__PURE__ */ __name((scrollState, repeat = !1) => {
-                  if (!scrollState) return;
-                  let apply = /* @__PURE__ */ __name((_3) => restoreSettingsPanelScrollState(scrollState), "apply");
-                  requestAnimationFrame(apply), setTimeout(apply, 0), repeat && [16, 40, 80, 160, 320, 520].forEach((delay) => setTimeout(apply, delay));
-                }, "restoreStableSelectScroll"), createStableSelect = /* @__PURE__ */ __name((props) => {
-                  let getScrollState = /* @__PURE__ */ __name((_3) => stableSelectScrollState || captureSettingsPanelScrollState(), "getScrollState"), rememberScroll = /* @__PURE__ */ __name((_3) => (stableSelectScrollState = captureSettingsPanelScrollState(), stableSelectScrollState), "rememberScroll"), rememberAndSoftRestore = /* @__PURE__ */ __name((repeat = !1) => {
-                    let scrollState = rememberScroll();
-                    return lockStableSelectScrollIntoView(repeat ? 1200 : 700), restoreStableSelectScroll(scrollState, repeat), scrollState;
-                  }, "rememberAndSoftRestore"), callHandler = /* @__PURE__ */ __name((name, event) => {
-                    if (props && typeof props[name] == "function") return props[name](event);
-                  }, "callHandler"), captureOnly = /* @__PURE__ */ __name((_3) => {
-                    rememberScroll(), lockStableSelectScrollIntoView(900);
-                  }, "captureOnly"), selectProps = Object.assign({
-                    menuShouldScrollIntoView: !1,
-                    menuShouldBlockScroll: !1,
-                    captureMenuScroll: !1,
-                    menuPosition: "fixed",
-                    menuPlacement: "auto",
-                    menuPortalTarget: typeof document < "u" ? document.body : void 0,
-                    closeMenuOnSelect: !0,
-                    maxMenuHeight: typeof window < "u" ? Math.max(150, Math.min(240, Math.floor(window.innerHeight * 0.36))) : 220
-                  }, props);
-                  return selectProps.onMouseDown = (event) => {
-                    rememberAndSoftRestore(!0), callHandler("onMouseDown", event);
-                  }, selectProps.onPointerDown = (event) => {
-                    rememberAndSoftRestore(!0), callHandler("onPointerDown", event);
-                  }, selectProps.onClick = (event) => {
-                    rememberAndSoftRestore(!0), callHandler("onClick", event);
-                  }, selectProps.onKeyDown = (event) => {
-                    event && ["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key) && rememberAndSoftRestore(!0), callHandler("onKeyDown", event);
-                  }, selectProps.onFocus = (event) => {
-                    rememberAndSoftRestore(!0), callHandler("onFocus", event);
-                  }, selectProps.onMenuOpen = (_3) => {
-                    rememberAndSoftRestore(!0), callHandler("onMenuOpen");
-                  }, selectProps.onMenuClose = (_3) => {
-                    let scrollState = getScrollState();
-                    callHandler("onMenuClose"), restoreStableSelectScroll(scrollState, !0), setTimeout((_4) => {
-                      stableSelectScrollState = null;
-                    }, 450);
-                  }, BDFDB.ReactUtils.createElement("div", {
-                    className: "translator-stable-select-wrap",
-                    onMouseDownCapture: captureOnly,
-                    onPointerDownCapture: captureOnly,
-                    onFocusCapture: captureOnly,
-                    children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Select, selectProps)
-                  });
-                }, "createStableSelect"), createSegmentedSelector = /* @__PURE__ */ __name(({ options, value, onChange, className = "" }) => BDFDB.ReactUtils.createElement("div", {
-                  className: BDFDB.DOMUtils.formatClassName("translator-segmented-group", className),
-                  children: options.map((option) => BDFDB.ReactUtils.createElement("button", {
-                    type: "button",
-                    disabled: !!option.disabled,
-                    className: BDFDB.DOMUtils.formatClassName("translator-segmented-button", option.value == value && "translator-segmented-button-active", option.disabled && "translator-segmented-button-disabled"),
-                    onClick: /* @__PURE__ */ __name((_3) => !option.disabled && onChange(option.value), "onClick"),
-                    children: option.label
-                  }))
-                }), "createSegmentedSelector"), ensureSecretInputState = /* @__PURE__ */ __name(() => (this.secretInputState || (this.secretInputState = {}), this.secretInputState), "ensureSecretInputState"), isSecretFieldVisible = /* @__PURE__ */ __name((fieldKey) => !!ensureSecretInputState()[fieldKey], "isSecretFieldVisible"), toggleSecretFieldVisibility = /* @__PURE__ */ __name((fieldKey) => {
-                  let secretState = ensureSecretInputState();
-                  secretState[fieldKey] = !secretState[fieldKey], refreshPanel();
-                }, "toggleSecretFieldVisibility"), createSecretToggleIcon = /* @__PURE__ */ __name((visible) => BDFDB.ReactUtils.createElement("svg", {
-                  viewBox: "0 0 24 24",
-                  width: 18,
-                  height: 18,
-                  fill: "none",
-                  stroke: "currentColor",
-                  strokeWidth: 1.8,
-                  strokeLinecap: "round",
-                  strokeLinejoin: "round",
-                  "aria-hidden": !0,
-                  children: [
-                    BDFDB.ReactUtils.createElement("path", { d: "M2.2 12s3.6-5.8 9.8-5.8S21.8 12 21.8 12 18.2 17.8 12 17.8 2.2 12 2.2 12Z", key: "outline" }),
-                    BDFDB.ReactUtils.createElement("circle", { cx: "12", cy: "12", r: "2.6", key: "pupil" }),
-                    !visible && BDFDB.ReactUtils.createElement("path", { d: "M4 19.2 19.2 4", key: "slash" })
-                  ].filter(Boolean)
-                }), "createSecretToggleIcon"), createSecretInput = /* @__PURE__ */ __name(({ fieldKey, placeholder, value, onChange }) => BDFDB.ReactUtils.createElement("div", {
-                  className: "translator-secret-input-row",
-                  children: [
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
-                      className: "translator-secret-input",
-                      type: isSecretFieldVisible(fieldKey) ? "text" : "password",
-                      placeholder,
-                      value,
-                      onChange
-                    }),
-                    BDFDB.ReactUtils.createElement("button", {
-                      type: "button",
-                      className: "translator-secret-toggle",
-                      "aria-label": isSecretFieldVisible(fieldKey) ? this.getCustomText("hide_secret_label") : this.getCustomText("show_secret_label"),
-                      title: isSecretFieldVisible(fieldKey) ? this.getCustomText("hide_secret_label") : this.getCustomText("show_secret_label"),
-                      onClick: /* @__PURE__ */ __name((_3) => toggleSecretFieldVisibility(fieldKey), "onClick"),
-                      children: createSecretToggleIcon(isSecretFieldVisible(fieldKey))
-                    })
-                  ]
-                }), "createSecretInput"), createExceptionScopeSwitches = /* @__PURE__ */ __name((sentKey, receivedKey, sentLabelKey, receivedLabelKey) => BDFDB.ReactUtils.createElement("div", {
-                  className: "translator-settings-switch-group",
-                  children: [
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
-                      type: "Switch",
-                      className: "translator-settings-switch-row",
-                      label: this.getCustomText(sentLabelKey),
-                      tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                      value: this.getExceptionScopeSetting(sentKey, !0),
-                      onChange: /* @__PURE__ */ __name((value) => {
-                        this.settings.exceptions || (this.settings.exceptions = {}), this.settings.exceptions[sentKey] = !!value, BDFDB.DataUtils.save(!!value, this, "exceptions", sentKey), this.SettingsUpdated = !0;
-                      }, "onChange")
-                    }),
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
-                      type: "Switch",
-                      className: "translator-settings-switch-row",
-                      label: this.getCustomText(receivedLabelKey),
-                      tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                      value: this.getExceptionScopeSetting(receivedKey, !0),
-                      onChange: /* @__PURE__ */ __name((value) => {
-                        this.settings.exceptions || (this.settings.exceptions = {}), this.settings.exceptions[receivedKey] = !!value, BDFDB.DataUtils.save(!!value, this, "exceptions", receivedKey), this.SettingsUpdated = !0;
-                      }, "onChange")
-                    })
-                  ]
-                }), "createExceptionScopeSwitches"), createStackedTokenInput = /* @__PURE__ */ __name(({ items, maxLength, placeholder, emptyText, onChange }) => BDFDB.ReactUtils.createElement(class extends BdApi.React.Component {
-                  constructor(props) {
-                    super(props), this.state = {
-                      value: "",
-                      items: BDFDB.ArrayUtils.is(props.items) ? [].concat(props.items) : []
-                    };
-                  }
-                  componentDidUpdate(prevProps) {
-                    let previousItems = BDFDB.ArrayUtils.is(prevProps.items) ? prevProps.items : [], nextItems = BDFDB.ArrayUtils.is(this.props.items) ? this.props.items : [];
-                    JSON.stringify(previousItems) != JSON.stringify(nextItems) && this.setState({ items: [].concat(nextItems) });
-                  }
-                  commitValue(rawValue) {
-                    let value = String(rawValue ?? this.state.value).trim();
-                    if (!value) return;
-                    typeof this.props.maxLength == "number" && this.props.maxLength > 0 && (value = value.slice(0, this.props.maxLength));
-                    let currentItems = BDFDB.ArrayUtils.is(this.state.items) ? this.state.items : [];
-                    if (currentItems.includes(value)) {
-                      this.setState({ value: "" });
-                      return;
-                    }
-                    let nextItems = [].concat(currentItems, value);
-                    this.setState({ value: "", items: nextItems }), this.props.onChange(nextItems);
-                  }
-                  removeItem(targetItem) {
-                    let nextItems = (BDFDB.ArrayUtils.is(this.state.items) ? this.state.items : []).filter((item) => item != targetItem);
-                    this.setState({ items: nextItems }), this.props.onChange(nextItems);
-                  }
-                  render() {
-                    let currentItems = BDFDB.ArrayUtils.is(this.state.items) ? this.state.items : [];
-                    return BDFDB.ReactUtils.createElement("div", {
-                      className: "translator-token-editor",
-                      children: [
-                        BDFDB.ReactUtils.createElement("div", {
-                          className: "translator-token-list",
-                          children: currentItems.length ? currentItems.map((item) => BDFDB.ReactUtils.createElement("div", {
-                            className: "translator-token-badge",
-                            key: item,
-                            children: [
-                              BDFDB.ReactUtils.createElement("span", {
-                                className: "translator-token-badge-text",
-                                children: item
-                              }),
-                              BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
-                                className: "translator-token-badge-delete",
-                                name: BDFDB.LibraryComponents.SvgIcon.Names.CLOSE,
-                                onClick: /* @__PURE__ */ __name((_3) => this.removeItem(item), "onClick")
-                              })
-                            ]
-                          })) : BDFDB.ReactUtils.createElement("div", {
-                            className: "translator-token-empty",
-                            children: emptyText || placeholder
-                          })
-                        }),
-                        BDFDB.ReactUtils.createElement("div", {
-                          className: "translator-token-input-row",
-                          children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
-                            value: this.state.value,
-                            placeholder,
-                            maxLength,
-                            onChange: /* @__PURE__ */ __name((value) => this.setState({ value }), "onChange"),
-                            onKeyDown: /* @__PURE__ */ __name((event) => {
-                              event.which == 13 && (event.preventDefault(), this.commitValue());
-                            }, "onKeyDown"),
-                            onBlur: /* @__PURE__ */ __name((_3) => this.commitValue(), "onBlur")
-                          })
-                        })
-                      ]
-                    });
-                  }
-                }, { items, maxLength, placeholder, emptyText, onChange }), "createStackedTokenInput"), createDisablePrefixForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title: this.getCustomText("disable_prefix_title"),
-                  className: BDFDB.disCN.marginbottom8,
-                  children: [
-                    infoText(this.getCustomText("disable_prefix_hint")),
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.ListInput, {
-                      placeholder: this.getCustomText("disable_prefix_placeholder"),
-                      maxLength: this.defaults.exceptions.wordStart.max,
-                      items: this.settings.exceptions.wordStart,
-                      onChange: /* @__PURE__ */ __name((value) => {
-                        this.SettingsUpdated = !0, BDFDB.DataUtils.save(value, this, "exceptions", "wordStart");
-                      }, "onChange")
-                    })
-                  ]
-                }), "createDisablePrefixForm"), createProtectedTermsForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title: this.getCustomText("protected_terms_title"),
-                  className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.marginbottom8, "translator-advanced-protection-section translator-advanced-protection-terms"),
-                  children: [
-                    infoText(this.getCustomText("protected_terms_hint")),
-                    createExceptionScopeSwitches("protectedTermsForSent", "protectedTermsForReceived", "protected_terms_scope_sent", "protected_terms_scope_received"),
-                    createStackedTokenInput({
-                      placeholder: this.getCustomText("protected_terms_placeholder"),
-                      emptyText: this.getCustomText("protected_terms_placeholder"),
-                      maxLength: this.defaults.exceptions.protectedTerms.max,
-                      items: this.settings.exceptions.protectedTerms || [],
-                      onChange: /* @__PURE__ */ __name((value) => {
-                        let nextValue = BDFDB.ArrayUtils.is(value) ? [].concat(value) : [];
-                        this.settings.exceptions.protectedTerms = nextValue, this.SettingsUpdated = !0, BDFDB.DataUtils.save(nextValue, this, "exceptions", "protectedTerms");
-                      }, "onChange")
-                    })
-                  ]
-                }), "createProtectedTermsForm"), createWrapperPairsForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title: this.getCustomText("wrapper_pairs_title"),
-                  className: BDFDB.DOMUtils.formatClassName(BDFDB.disCN.marginbottom8, "translator-advanced-protection-section translator-advanced-protection-wrapper"),
-                  children: [
-                    infoText(this.getCustomText("wrapper_pairs_hint")),
-                    createExceptionScopeSwitches("wrapperPairsForSent", "wrapperPairsForReceived", "wrapper_pairs_scope_sent", "wrapper_pairs_scope_received"),
-                    createStackedTokenInput({
-                      placeholder: this.getCustomText("wrapper_pairs_placeholder"),
-                      emptyText: this.getCustomText("wrapper_pairs_placeholder"),
-                      maxLength: this.defaults.exceptions.wrapperPairs.max,
-                      items: this.getWrapperPairItemsForSettings(),
-                      onChange: /* @__PURE__ */ __name((value) => {
-                        let nextValue = (BDFDB.ArrayUtils.is(value) ? value : []).filter((rule) => !this.isDiscordSpoilerWrapperRule(rule));
-                        this.settings.exceptions.wrapperPairs = [].concat(nextValue), this.SettingsUpdated = !0, BDFDB.DataUtils.save(nextValue, this, "exceptions", "wrapperPairs");
-                      }, "onChange")
-                    })
-                  ]
-                }), "createWrapperPairsForm"), createTranslatePrefixForm = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title: this.getCustomText("translate_prefix_title"),
-                  className: BDFDB.disCN.marginbottom8,
-                  children: [
-                    infoText(this.getCustomText("translate_prefix_hint")),
-                    ...(this.settings.prefixes.translationPrefixData || []).map((entry, index) => BDFDB.ReactUtils.createElement("div", {
-                      className: "translator-prefix-translation-row",
-                      children: [
-                        BDFDB.ReactUtils.createElement("div", {
-                          className: "translator-prefix-translation-cell translator-prefix-input-cell",
-                          children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
-                            placeholder: this.getCustomText("translate_prefix_placeholder"),
-                            value: entry.prefix,
-                            onChange: /* @__PURE__ */ __name((value) => {
-                              this.settings.prefixes.translationPrefixData[index].prefix = value, BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0;
-                            }, "onChange")
-                          })
-                        }),
-                        BDFDB.ReactUtils.createElement("div", {
-                          className: "translator-prefix-translation-cell translator-prefix-language-cell",
-                          children: createStableSelect({
-                            value: entry.language,
-                            options: this.ensureSettingsStore().getLanguageIds().filter((key) => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special).map((key) => ({
-                              value: key,
-                              label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
-                            })).sort((a, b) => a.label.localeCompare(b.label)),
-                            onChange: /* @__PURE__ */ __name((value) => {
-                              this.settings.prefixes.translationPrefixData[index].language = value, BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0;
-                            }, "onChange")
-                          })
-                        }),
-                        BDFDB.ReactUtils.createElement("div", {
-                          className: "translator-prefix-translation-cell translator-prefix-delete-cell",
-                          children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
-                            color: BDFDB.LibraryComponents.Button.Colors.RED,
-                            size: BDFDB.LibraryComponents.Button.Sizes.TINY,
-                            onClick: /* @__PURE__ */ __name((_3) => {
-                              this.settings.prefixes.translationPrefixData.splice(index, 1), BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0, refreshPanel();
-                            }, "onClick"),
-                            children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
-                              name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
-                              width: 16,
-                              height: 16
-                            })
-                          })
-                        })
-                      ]
-                    })),
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
-                      type: "Button",
-                      color: BDFDB.LibraryComponents.Button.Colors.GREEN,
-                      onClick: /* @__PURE__ */ __name((_3) => {
-                        this.settings.prefixes.translationPrefixData || (this.settings.prefixes.translationPrefixData = []), this.settings.prefixes.translationPrefixData.push({
-                          prefix: "$en",
-                          language: "en"
-                        }), BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0, refreshPanel();
-                      }, "onClick"),
-                      children: this.getCustomText("add_prefix_button")
-                    })
-                  ]
-                }), "createTranslatePrefixForm"), saveTranslatedTextColor = /* @__PURE__ */ __name((color) => {
-                  color = (color || "").trim() || "#7cc7ff", this.settings.general.translatedTextColor = color, BDFDB.ArrayUtils.is(this.settings.general.customTranslatedTextColors) || (this.settings.general.customTranslatedTextColors = []), !this.getTranslatedTextColorPresets().includes(color) && !this.settings.general.customTranslatedTextColors.includes(color) && this.settings.general.customTranslatedTextColors.unshift(color), this.settings.general.customTranslatedTextColors = this.settings.general.customTranslatedTextColors.filter((value, index, array) => value && array.indexOf(value) == index).slice(0, 12), BDFDB.DataUtils.save(this.settings.general, this, "general"), this.SettingsUpdated = !0, refreshPanel();
-                }, "saveTranslatedTextColor"), removeTranslatedTextColor = /* @__PURE__ */ __name((color) => {
-                  color = (color || "").trim(), !(!color || this.getTranslatedTextColorPresets().includes(color)) && (this.settings.general.customTranslatedTextColors = (this.settings.general.customTranslatedTextColors || []).filter((savedColor) => savedColor != color), this.getTranslatedTextColor() == color && (this.settings.general.translatedTextColor = this.getTranslatedTextColorPresets()[0] || "#7cc7ff"), BDFDB.DataUtils.save(this.settings.general, this, "general"), this.SettingsUpdated = !0, refreshPanel());
-                }, "removeTranslatedTextColor"), resetTranslatedTextColor = /* @__PURE__ */ __name(() => {
-                  let defaultColor = this.getTranslatedTextColorPresets()[0] || "#7cc7ff", colorState = ensureTranslatedTextColorState();
-                  colorState.showCustom = !1, colorState.customValue = defaultColor, this.settings.general.translatedTextColor = defaultColor, BDFDB.DataUtils.save(this.settings.general, this, "general"), this.SettingsUpdated = !0, refreshPanel();
-                }, "resetTranslatedTextColor"), ensureTranslatedTextColorState = /* @__PURE__ */ __name(() => (this.translatedTextColorState || (this.translatedTextColorState = {
-                  showCustom: !1,
-                  customValue: this.getTranslatedTextColor()
-                }), this.translatedTextColorState.customValue || (this.translatedTextColorState.customValue = this.getTranslatedTextColor()), this.translatedTextColorState), "ensureTranslatedTextColorState"), getCustomTranslatedTextColors = /* @__PURE__ */ __name(() => BDFDB.ArrayUtils.is(this.settings.general.customTranslatedTextColors) ? this.settings.general.customTranslatedTextColors : [], "getCustomTranslatedTextColors"), createColorChip = /* @__PURE__ */ __name((color, active) => {
-                  let isCustomColor = getCustomTranslatedTextColors().includes(color) && !this.getTranslatedTextColorPresets().includes(color);
-                  return BDFDB.ReactUtils.createElement("button", {
-                    type: "button",
-                    className: BDFDB.DOMUtils.formatClassName("translator-color-chip", active && "translator-color-chip-active"),
-                    title: isCustomColor ? `${color} · ${compactText("点击选择，点 × 删除", "Click to select, click × to delete", "Нажмите для выбора, × для удаления")}` : color,
-                    onClick: /* @__PURE__ */ __name((_3) => {
-                      let colorState = ensureTranslatedTextColorState();
-                      colorState.showCustom = !1, colorState.customValue = color, saveTranslatedTextColor(color);
-                    }, "onClick"),
-                    children: [
-                      BDFDB.ReactUtils.createElement("span", {
-                        className: "translator-color-chip-code",
-                        children: color
-                      }),
-                      BDFDB.ReactUtils.createElement("span", {
-                        className: "translator-settings-color-swatch",
-                        style: { background: color }
-                      }),
-                      isCustomColor && BDFDB.ReactUtils.createElement("span", {
-                        className: "translator-color-chip-delete",
-                        title: compactText("删除这个自定义颜色", "Delete this custom color", "Удалить этот цвет"),
-                        onClick: /* @__PURE__ */ __name((event) => {
-                          event.preventDefault(), event.stopPropagation(), removeTranslatedTextColor(color);
-                        }, "onClick"),
-                        children: "×"
-                      })
-                    ].filter(Boolean)
-                  });
-                }, "createColorChip"), createColorOptionLabel = /* @__PURE__ */ __name((color) => BDFDB.ReactUtils.createElement("div", {
-                  className: "translator-settings-color-option",
-                  children: [
-                    BDFDB.ReactUtils.createElement("span", {
-                      children: color
-                    }),
-                    BDFDB.ReactUtils.createElement("span", {
-                      className: "translator-settings-color-swatch",
-                      style: { background: color }
-                    })
-                  ]
-                }), "createColorOptionLabel"), createInlineHeader = /* @__PURE__ */ __name((title, actions = []) => BDFDB.ReactUtils.createElement("div", {
-                  className: "translator-settings-inline-header",
-                  children: [
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
-                      tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                      style: { margin: 0 },
-                      children: title
-                    }),
-                    actions.length ? BDFDB.ReactUtils.createElement("div", {
-                      className: "translator-settings-inline-actions translator-settings-primary-actions",
-                      children: actions
-                    }) : null
-                  ].filter(Boolean)
-                }), "createInlineHeader"), createSubsectionTitle = /* @__PURE__ */ __name((title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
-                  className: BDFDB.disCN.marginbottom8,
-                  tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                  children: title
-                }), "createSubsectionTitle"), createDivider = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
-                  className: BDFDB.disCNS.dividerdefault + BDFDB.disCN.marginbottom8
-                }), "createDivider"), createSpaciousDivider = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormDivider, {
-                  className: BDFDB.DOMUtils.formatClassName(BDFDB.disCNS.dividerdefault + BDFDB.disCN.marginbottom8, "translator-settings-divider-spacious")
-                }), "createSpaciousDivider"), createEnginePortalButtons = /* @__PURE__ */ __name((engineKey) => {
-                  let portal = getEnginePortalConfig(engineKey);
-                  return portal ? {
-                    portal,
-                    buttons: [
-                      portal.primaryUrl && createActionButton({
-                        label: portal.primaryLabel,
-                        color: BDFDB.LibraryComponents.Button.Colors.BRAND,
-                        onClick: /* @__PURE__ */ __name((_3) => BDFDB.DiscordUtils.openLink(portal.primaryUrl), "onClick")
-                      }),
-                      portal.secondaryUrl && portal.secondaryLabel && createActionButton({
-                        label: portal.secondaryLabel,
-                        color: BDFDB.LibraryComponents.Button.Colors.BRAND,
-                        onClick: /* @__PURE__ */ __name((_3) => BDFDB.DiscordUtils.openLink(portal.secondaryUrl), "onClick")
-                      })
-                    ].filter(Boolean)
-                  } : { portal: null, buttons: [] };
-                }, "createEnginePortalButtons"), createEngineSupportPanel = /* @__PURE__ */ __name((engineKey) => {
-                  let portalData = createEnginePortalButtons(engineKey);
-                  return !portalData.buttons.length ? null : BDFDB.ReactUtils.createElement("div", {
-                    className: "translator-settings-support-panel",
-                    children: BDFDB.ReactUtils.createElement("div", {
-                      className: "translator-settings-support-row",
-                      children: portalData.buttons
-                    })
-                  });
-                }, "createEngineSupportPanel"), createFetchedModelSelector = /* @__PURE__ */ __name((engineKey) => {
-                  let state = this.modelCatalogState && this.modelCatalogState[engineKey];
-                  return !state || !state.items || !state.items.length ? null : BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                    title: this.getCustomText("model_catalog_title"),
-                    className: BDFDB.disCN.marginbottom8,
-                    children: [
-                      createStableSelect({
-                        value: this.ensureSettingsStore().getCredentialField(engineKey, "model") || "",
-                        options: state.items.map((modelId) => ({ value: modelId, label: modelId })),
-                        onChange: /* @__PURE__ */ __name((value) => {
-                          saveAuthField(engineKey, "model", value), refreshPanel();
-                        }, "onChange")
-                      }),
-                      BDFDB.ReactUtils.createElement("div", {
-                        className: "translator-settings-meta",
-                        children: this.getCustomText("model_catalog_loaded").replace("{count}", state.items.length)
-                      })
-                    ]
-                  });
-                }, "createFetchedModelSelector"), updateEngineSetting = /* @__PURE__ */ __name((field, value) => {
-                  this.settings.engines[field] = value, BDFDB.DataUtils.save(this.settings.engines, this, "engines"), this.setLanguages(), this.SettingsUpdated = !0, refreshPanel();
-                }, "updateEngineSetting"), saveFilterSetting = /* @__PURE__ */ __name((key, value) => {
-                  this.settings.filters || (this.settings.filters = {}), this.settings.filters[key] = value, BDFDB.DataUtils.save(value, this, "filters", key), this.SettingsUpdated = !0;
-                }, "saveFilterSetting"), createLanguageOptions = /* @__PURE__ */ __name((direction) => this.ensureSettingsStore().getLanguageIds().filter((key) => !this.ensureSettingsStore().getLanguage(key).special && (direction == languageTypes.INPUT || !this.ensureSettingsStore().getLanguage(key).auto)).map((key) => ({
-                  value: key,
-                  label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
-                })).sort((a, b) => a.value == "auto" ? -1 : b.value == "auto" ? 1 : a.label.localeCompare(b.label)), "createLanguageOptions"), createLanguageSelector = /* @__PURE__ */ __name((place, direction, title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title,
-                  className: BDFDB.disCN.marginbottom8,
-                  children: createStableSelect({
-                    value: this.settings.choices[place][direction],
-                    options: createLanguageOptions(direction),
-                    onChange: /* @__PURE__ */ __name((value) => {
-                      this.settings.choices[place][direction] = value, BDFDB.DataUtils.save(this.settings.choices, this, "choices"), this.setLanguages(), this.SettingsUpdated = !0, refreshPanel();
-                    }, "onChange")
-                  })
-                }), "createLanguageSelector"), createGeneralSwitch = /* @__PURE__ */ __name((key) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsSaveItem, {
-                  type: "Switch",
-                  plugin: this,
-                  keys: ["general", key],
-                  className: "translator-settings-switch-row",
-                  label: this.getGeneralSettingLabel(key),
-                  value: this.settings.general[key]
-                }), "createGeneralSwitch"), createGeneralSwitchGroup = /* @__PURE__ */ __name((keys) => BDFDB.ReactUtils.createElement("div", {
-                  className: "translator-settings-switch-group",
-                  children: keys.map(createGeneralSwitch)
-                }), "createGeneralSwitchGroup"), createUiLanguageSelector = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title: this.getCustomText("plugin_language_title"),
-                  className: BDFDB.disCN.marginbottom8,
-                  children: [
-                    infoText(this.getCustomText("plugin_language_hint")),
-                    createStableSelect({
-                      value: this.settings.general.interfaceLanguage || "system",
-                      options: this.getPluginLanguageOptions(),
-                      onChange: /* @__PURE__ */ __name((value) => {
-                        this.settings.general.interfaceLanguage = value || "system", BDFDB.DataUtils.save(this.settings.general, this, "general"), this.SettingsUpdated = !0, this.labels = this.setLabelsByLanguage(), refreshPanel();
-                      }, "onChange")
-                    })
-                  ]
-                }), "createUiLanguageSelector"), createTranslatedTextColorInput = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title: this.getCustomText("translated_text_color_title"),
-                  className: BDFDB.disCN.marginbottom8,
-                  children: (() => {
-                    let currentColor = this.getTranslatedTextColor(), colorState = ensureTranslatedTextColorState(), presetColors = this.getTranslatedTextColorPalette(), hasCustomCurrentColor = !this.getTranslatedTextColorPresets().includes(currentColor);
-                    return [
-                      createGeneralSwitch("highlightTranslatedMessages"),
-                      infoText(compactText("点色板即可切换，+ 号可自定义颜色。", "Pick a swatch or use + for a custom color.", "Нажмите цвет или используйте + для своего варианта.")),
-                      BDFDB.ReactUtils.createElement("div", {
-                        className: "translator-color-palette",
-                        children: [
-                          ...presetColors.map((color) => createColorChip(color, color == currentColor)),
-                          BDFDB.ReactUtils.createElement("button", {
-                            type: "button",
-                            className: "translator-color-chip translator-color-chip-add",
-                            onClick: /* @__PURE__ */ __name((_3) => {
-                              colorState.showCustom = !colorState.showCustom, colorState.customValue = currentColor, refreshPanel();
-                            }, "onClick"),
-                            children: "+"
-                          })
-                        ]
-                      }),
-                      colorState.showCustom && BDFDB.ReactUtils.createElement("div", {
-                        className: "translator-color-custom-row",
-                        children: [
-                          BDFDB.ReactUtils.createElement("input", {
-                            type: "color",
-                            className: "translator-native-color-input",
-                            defaultValue: /^#[0-9a-f]{6}$/i.test(colorState.customValue || "") ? colorState.customValue : "#7cc7ff",
-                            onInput: /* @__PURE__ */ __name((event) => {
-                              let nextColor = event && event.target && event.target.value || colorState.customValue;
-                              colorState.customValue = nextColor;
-                              let row = event && event.target && event.target.closest && event.target.closest(".translator-color-custom-row"), textInput = row && row.querySelector && row.querySelector(".translator-color-custom-input");
-                              textInput && textInput.value != nextColor && (textInput.value = nextColor);
-                            }, "onInput"),
-                            onChange: /* @__PURE__ */ __name((event) => {
-                              colorState.customValue = event && event.target && event.target.value || colorState.customValue;
-                            }, "onChange")
-                          }),
-                          BDFDB.ReactUtils.createElement("input", {
-                            type: "text",
-                            className: "translator-color-custom-input",
-                            placeholder: "#7cc7ff",
-                            defaultValue: colorState.customValue,
-                            onInput: /* @__PURE__ */ __name((event) => {
-                              colorState.customValue = event && event.target && event.target.value || "";
-                            }, "onInput")
-                          }),
-                          createActionButton({
-                            label: this.getCustomText("translated_text_color_save_button"),
-                            look: BDFDB.LibraryComponents.Button.Looks.OUTLINED,
-                            className: "translator-settings-field-action",
-                            onClick: /* @__PURE__ */ __name((_3) => {
-                              let customColor = (colorState.customValue || "").trim();
-                              if (!this.isValidCssColorValue(customColor)) return BDFDB.NotificationUtils.toast(this.getCustomText("translated_text_color_invalid"), { type: "danger", position: "center" });
-                              colorState.showCustom = !1, colorState.customValue = customColor, saveTranslatedTextColor(customColor);
-                            }, "onClick")
-                          })
-                        ]
-                      })
-                    ].filter(Boolean);
-                  })()
-                }), "createTranslatedTextColorInput"), createSourceLanguageFilter = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title: this.getCustomText("source_filter_title"),
-                  className: BDFDB.disCN.marginbottom8,
-                  children: [
-                    infoText(this.getCustomText("source_filter_hint")),
-                    !(this.settings.filters && this.settings.filters.autoTranslateSourceLanguages || []).length && infoText(this.getCustomText("source_filter_empty_state")),
-                    ...(this.settings.filters && this.settings.filters.autoTranslateSourceLanguages || []).map((languageId, index) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
-                      className: BDFDB.disCN.marginbottom8,
-                      align: BDFDB.LibraryComponents.Flex.Align.CENTER,
-                      children: [
-                        BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
-                          grow: 1,
-                          shrink: 0,
-                          basis: "85%",
-                          children: createStableSelect({
-                            value: languageId,
-                            options: this.ensureSettingsStore().getLanguageIds().filter((key) => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special).map((key) => ({
-                              value: key,
-                              label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
-                            })).sort((a, b) => a.label.localeCompare(b.label)),
-                            onChange: /* @__PURE__ */ __name((value) => {
-                              this.settings.filters.autoTranslateSourceLanguages[index] = value, BDFDB.DataUtils.save(this.settings.filters.autoTranslateSourceLanguages, this, "filters", "autoTranslateSourceLanguages"), this.SettingsUpdated = !0;
-                            }, "onChange")
-                          })
-                        }),
-                        BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
-                          grow: 0,
-                          shrink: 0,
-                          basis: "15%",
-                          children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
-                            color: BDFDB.LibraryComponents.Button.Colors.RED,
-                            size: BDFDB.LibraryComponents.Button.Sizes.TINY,
-                            onClick: /* @__PURE__ */ __name((_3) => {
-                              this.settings.filters.autoTranslateSourceLanguages.splice(index, 1), BDFDB.DataUtils.save(this.settings.filters.autoTranslateSourceLanguages, this, "filters", "autoTranslateSourceLanguages"), this.SettingsUpdated = !0, refreshPanel();
-                            }, "onClick"),
-                            children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
-                              name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
-                              width: 16,
-                              height: 16
-                            })
-                          })
-                        })
-                      ]
-                    })),
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
-                      type: "Button",
-                      color: BDFDB.LibraryComponents.Button.Colors.GREEN,
-                      onClick: /* @__PURE__ */ __name((_3) => {
-                        this.settings.filters || (this.settings.filters = {}), this.settings.filters.autoTranslateSourceLanguages || (this.settings.filters.autoTranslateSourceLanguages = []), this.settings.filters.autoTranslateSourceLanguages.push("en"), BDFDB.DataUtils.save(this.settings.filters.autoTranslateSourceLanguages, this, "filters", "autoTranslateSourceLanguages"), this.SettingsUpdated = !0, refreshPanel();
-                      }, "onClick"),
-                      children: this.getCustomText("source_filter_add")
-                    })
-                  ]
-                }), "createSourceLanguageFilter"), createReceivedSourceLanguageFilter = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                  title: this.getCustomText("received_source_filter_title"),
-                  className: BDFDB.disCN.marginbottom8,
-                  children: [
-                    infoText(this.getCustomText("received_source_filter_hint")),
-                    !(this.settings.filters && this.settings.filters.receivedAutoTranslateSourceLanguages || []).length && infoText(this.getCustomText("received_source_filter_empty_state")),
-                    ...(this.settings.filters && this.settings.filters.receivedAutoTranslateSourceLanguages || []).map((languageId, index) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
-                      className: BDFDB.disCN.marginbottom8,
-                      align: BDFDB.LibraryComponents.Flex.Align.CENTER,
-                      children: [
-                        BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
-                          grow: 1,
-                          shrink: 0,
-                          basis: "85%",
-                          children: createStableSelect({
-                            value: languageId,
-                            options: this.ensureSettingsStore().getLanguageIds().filter((key) => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special).map((key) => ({
-                              value: key,
-                              label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
-                            })).sort((a, b) => a.label.localeCompare(b.label)),
-                            onChange: /* @__PURE__ */ __name((value) => {
-                              this.settings.filters.receivedAutoTranslateSourceLanguages[index] = value, BDFDB.DataUtils.save(this.settings.filters.receivedAutoTranslateSourceLanguages, this, "filters", "receivedAutoTranslateSourceLanguages"), this.SettingsUpdated = !0;
-                            }, "onChange")
-                          })
-                        }),
-                        BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
-                          grow: 0,
-                          shrink: 0,
-                          basis: "15%",
-                          children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Button, {
-                            color: BDFDB.LibraryComponents.Button.Colors.RED,
-                            size: BDFDB.LibraryComponents.Button.Sizes.TINY,
-                            onClick: /* @__PURE__ */ __name((_3) => {
-                              this.settings.filters.receivedAutoTranslateSourceLanguages.splice(index, 1), BDFDB.DataUtils.save(this.settings.filters.receivedAutoTranslateSourceLanguages, this, "filters", "receivedAutoTranslateSourceLanguages"), this.SettingsUpdated = !0, refreshPanel();
-                            }, "onClick"),
-                            children: BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SvgIcon, {
-                              name: BDFDB.LibraryComponents.SvgIcon.Names.TRASH,
-                              width: 16,
-                              height: 16
-                            })
-                          })
-                        })
-                      ]
-                    })),
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
-                      type: "Button",
-                      color: BDFDB.LibraryComponents.Button.Colors.GREEN,
-                      onClick: /* @__PURE__ */ __name((_3) => {
-                        this.settings.filters || (this.settings.filters = {}), this.settings.filters.receivedAutoTranslateSourceLanguages || (this.settings.filters.receivedAutoTranslateSourceLanguages = []), this.settings.filters.receivedAutoTranslateSourceLanguages.push("en"), BDFDB.DataUtils.save(this.settings.filters.receivedAutoTranslateSourceLanguages, this, "filters", "receivedAutoTranslateSourceLanguages"), this.SettingsUpdated = !0, refreshPanel();
-                      }, "onClick"),
-                      children: this.getCustomText("received_source_filter_add")
-                    })
-                  ]
-                }), "createReceivedSourceLanguageFilter"), createAutoTranslateDecisionSettings = /* @__PURE__ */ __name(() => {
-                  let aiCapable = this.isAiAutoTranslateDecisionAvailable(), currentMode = this.getAutoTranslateDecisionMode();
-                  return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                    title: this.getCustomText("auto_translate_decision_title"),
-                    className: BDFDB.disCN.marginbottom8,
-                    children: [
-                      infoText(this.getCustomText("auto_translate_decision_hint")),
-                      createSegmentedSelector({
-                        className: "translator-decision-mode-grid",
-                        value: currentMode,
-                        options: [
-                          { value: "basic", label: this.getCustomText("auto_translate_decision_basic") },
-                          { value: "ai", label: aiCapable ? this.getCustomText("auto_translate_decision_ai") : this.getCustomText("auto_translate_decision_ai_disabled"), disabled: !aiCapable }
-                        ],
-                        onChange: /* @__PURE__ */ __name((value) => {
-                          this.settings.filters || (this.settings.filters = {}), this.settings.filters.autoTranslateDecisionMode = value, BDFDB.DataUtils.save(value, this, "filters", "autoTranslateDecisionMode"), this.SettingsUpdated = !0, refreshPanel();
-                        }, "onChange")
-                      }),
-                      BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                        title: compactText("语言检测策略", "Language detection strategy", "Стратегия определения языка"),
-                        className: BDFDB.disCN.marginbottom8,
-                        children: [
-                          createStableSelect({
-                            value: this.getLanguageDetectionStrategy(),
-                            options: [
-                              { value: "local_first", label: compactText("本地优先，失败时使用 Google Free", "Local first, then Google Free", "Сначала локально, затем Google Free") },
-                              { value: "google_free", label: compactText("仅 Google Free", "Google Free only", "Только Google Free") },
-                              { value: "local_only", label: compactText("仅本地检测", "Local only", "Только локально") }
-                            ],
-                            onChange: /* @__PURE__ */ __name((value) => {
-                              this.settings.filters || (this.settings.filters = {}), this.settings.filters.languageDetectionStrategy = value, BDFDB.DataUtils.save(value, this, "filters", "languageDetectionStrategy"), this.SettingsUpdated = !0;
-                            }, "onChange")
-                          }),
-                          infoText(compactText("本地检测只在高置信时返回；默认策略拿不准会回退到免密钥的 Google 检测。", "Local detection returns only high-confidence results; the default falls back to keyless Google detection when uncertain.", "Локальное определение возвращает только уверенные результаты; иначе используется Google без ключа."))
-                        ]
-                      }),
-                      BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
-                        type: "Switch",
-                        label: compactText("本地预检测:翻前用本地语种识别跳过同语言消息", "Local pre-check: skip same-language messages before requesting translation", "Локальная проверка: пропускать сообщения на целевом языке до запроса"),
-                        tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                        value: this.useLocalLanguagePrecheck(),
-                        onChange: /* @__PURE__ */ __name((value) => {
-                          saveFilterSetting("useLocalLanguagePrecheck", value), refreshPanel();
-                        }, "onChange")
-                      }),
-                      infoText(compactText("仅在高置信时跳过,拿不准仍照常翻译;关闭后完全交给翻译服务商判定。", "Only skips when highly confident; uncertain text still gets translated. Turn off to rely entirely on the translation provider.", "Пропускает только при высокой уверенности; иначе переводит как обычно.")),
-                      currentMode == "ai" && aiCapable && infoText(this.getCustomText("auto_translate_ai_prompt_hint")),
-                      currentMode == "ai" && aiCapable && BDFDB.ReactUtils.createElement("textarea", {
-                        className: "translator-ai-prompt-textarea",
-                        defaultValue: this.getAiAutoTranslatePrompt(),
-                        onInput: /* @__PURE__ */ __name((event) => {
-                          let value = event && event.target ? event.target.value : "";
-                          this.settings.filters || (this.settings.filters = {}), this.settings.filters.aiAutoTranslatePrompt = value, BDFDB.DataUtils.save(value, this, "filters", "aiAutoTranslatePrompt"), this.SettingsUpdated = !0;
-                        }, "onInput"),
-                        onChange: /* @__PURE__ */ __name((event) => {
-                          let value = event && event.target ? event.target.value : "";
-                          this.settings.filters || (this.settings.filters = {}), this.settings.filters.aiAutoTranslatePrompt = value, BDFDB.DataUtils.save(value, this, "filters", "aiAutoTranslatePrompt"), this.SettingsUpdated = !0;
-                        }, "onChange")
-                      })
-                    ].filter(Boolean)
-                  });
-                }, "createAutoTranslateDecisionSettings"), createEngineOptions = /* @__PURE__ */ __name((keys) => keys.filter((key) => translationEngines[key]).map((key) => ({ value: key, label: this.getEngineLabel(key) })), "createEngineOptions"), createPrimaryOptions = /* @__PURE__ */ __name(() => createEngineOptions(recommendedEngines.concat(Object.keys(translationEngines).filter((key) => !recommendedEngines.includes(key)))), "createPrimaryOptions"), createBackupOptions = /* @__PURE__ */ __name(() => [{ value: "----", label: this.getCustomText("backup_engine_none") }].concat(
-                  Object.keys(translationEngines).filter((key) => key != this.settings.engines.translator).map((key) => ({ value: key, label: this.getEngineLabel(key) }))
-                ), "createBackupOptions"), createEngineFields = /* @__PURE__ */ __name((engineKey) => {
-                  let engine = translationEngines[engineKey];
-                  if (!engine) return [infoText(this.getCustomText("engine_unknown_hint"))];
-                  if (engineKey == "googleapi") return [createEngineSupportPanel(engineKey)];
-                  let items = [];
-                  if (engine.premium && items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.SettingsItem, {
-                    type: "Switch",
-                    label: this.getCustomText("paid_version_label"),
-                    tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                    value: this.ensureSettingsStore().getCredentialField(engineKey, "paid"),
-                    onChange: /* @__PURE__ */ __name((value) => {
-                      this.ensureSettingsStore().setCredentialFlag(engineKey, "paid", value), this.SettingsUpdated = !0;
-                    }, "onChange")
-                  })), engine.key && (items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
-                    className: BDFDB.disCN.marginbottom8,
-                    tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                    children: this.getCustomText("api_key_label")
-                  })), items.push(createSecretInput({
-                    fieldKey: `${engineKey}-key`,
-                    placeholder: engine.key,
-                    value: this.ensureSettingsStore().getCredentialField(engineKey, "key"),
-                    onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "key", value), "onChange")
-                  }))), engine.endpoint && (items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
-                    className: BDFDB.disCN.marginbottom8,
-                    tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                    children: this.getCustomText("api_endpoint_label")
-                  })), items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
-                    className: BDFDB.disCN.marginbottom8,
-                    placeholder: engine.endpoint,
-                    value: this.ensureSettingsStore().getCredentialField(engineKey, "endpoint"),
-                    onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "endpoint", value), "onChange")
-                  }))), engine.model) {
-                    let modelCatalogState = this.modelCatalogState && this.modelCatalogState[engineKey], modelActions = [];
-                    this.isValidatableEngine(engineKey) && modelActions.push(createActionButton({
-                      label: this.getCustomText("model_detect_button"),
-                      color: defaultSecondaryButtonColor,
-                      className: "translator-settings-field-action",
-                      onClick: /* @__PURE__ */ __name(async (_3) => {
-                        let result = await this.validateEngineConfig(engineKey);
-                        result && result.normalized && refreshPanel();
-                      }, "onClick")
-                    })), this.supportsModelCatalog(engineKey) && modelActions.push(createActionButton({
-                      label: modelCatalogState && modelCatalogState.loading ? this.getCustomText("model_fetch_loading") : this.getCustomText("model_fetch_button"),
-                      color: defaultSecondaryButtonColor,
-                      className: "translator-settings-field-action",
-                      onClick: /* @__PURE__ */ __name((_3) => this.fetchModelCatalog(engineKey, refreshPanel), "onClick")
-                    })), items.push(createInlineHeader(this.getCustomText("model_id_label"), modelActions)), items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
-                      className: BDFDB.disCN.marginbottom8,
-                      placeholder: engine.model,
-                      value: this.ensureSettingsStore().getCredentialField(engineKey, "model"),
-                      onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "model", value), "onChange")
-                    })), modelCatalogState && modelCatalogState.loading && items.push(BDFDB.ReactUtils.createElement("div", {
-                      className: BDFDB.disCN.marginbottom8,
-                      style: { opacity: 0.8, lineHeight: "1.5" },
-                      children: this.getCustomText("model_fetch_loading")
-                    }));
-                    let fetchedModelSelector = createFetchedModelSelector(engineKey);
-                    fetchedModelSelector && items.push(fetchedModelSelector);
-                  }
-                  engineKey == "microsoft" && items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                    title: this.getCustomText("microsoft_region_label"),
-                    className: BDFDB.disCN.marginbottom8,
-                    children: createStableSelect({
-                      value: this.ensureSettingsStore().getCredentialField(engineKey, "region") || "global",
-                      options: [
-                        { value: "global", label: "Global" },
-                        { value: "eastasia", label: "East Asia" },
-                        { value: "southeastasia", label: "Southeast Asia" },
-                        { value: "centralus", label: "Central US" },
-                        { value: "eastus", label: "East US" },
-                        { value: "eastus2", label: "East US 2" },
-                        { value: "westus", label: "West US" },
-                        { value: "westeurope", label: "West Europe" },
-                        { value: "japaneast", label: "Japan East" }
-                      ],
-                      onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "region", value), "onChange")
-                    })
-                  }));
-                  let supportPanel = createEngineSupportPanel(engineKey);
-                  return supportPanel && items.push(supportPanel), items.length || items.push(infoText(this.getCustomText("engine_no_extra_fields"))), items;
-                }, "createEngineFields"), createOtherServiceAuthSection = /* @__PURE__ */ __name(() => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
-                  title: this.getCustomText("other_service_title"),
-                  collapseStates,
-                  children: [
-                    infoText(compactText("只有切换到这些服务商时再填写。", "Only fill these in if you switch to those providers.", "Заполняйте только если будете переключаться на этих провайдеров.")),
-                    ...this.getAdditionalCredentialEngineKeys().map((key) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
-                      title: this.getEngineLabel(key),
-                      collapseStates,
-                      children: createEngineFields(key)
-                    }))
-                  ]
-                }), "createOtherServiceAuthSection"), createProtectionSection = /* @__PURE__ */ __name(() => [
-                  createProtectedTermsForm(),
-                  createSpaciousDivider(),
-                  createWrapperPairsForm()
-                ], "createProtectionSection"), createPrefixSection = /* @__PURE__ */ __name(() => [
-                  createDisablePrefixForm(),
-                  createTranslatePrefixForm()
-                ], "createPrefixSection");
-                return settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
-                  title: this.getCustomText("section_service_title"),
-                  collapseStates,
-                  children: [
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                      title: this.getCustomText("primary_engine_title"),
-                      className: BDFDB.disCN.marginbottom8,
-                      children: createStableSelect({
-                        value: this.settings.engines.translator,
-                        options: createPrimaryOptions(),
-                        onChange: /* @__PURE__ */ __name((value) => updateEngineSetting("translator", value), "onChange")
-                      })
-                    }),
-                    ...createEngineFields(this.settings.engines.translator),
-                    createDivider(),
-                    BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
-                      title: this.getCustomText("backup_engine_title"),
-                      collapseStates,
-                      children: [
-                        infoText(compactText("主服务失败时才会切到备用服务。", "Used only when the primary provider fails.", "Используется только при сбое основного провайдера.")),
-                        BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
-                          title: this.getCustomText("backup_engine_select_title"),
-                          className: BDFDB.disCN.marginbottom8,
-                          children: createStableSelect({
-                            value: this.settings.engines.backup,
-                            options: createBackupOptions(),
-                            onChange: /* @__PURE__ */ __name((value) => updateEngineSetting("backup", value), "onChange")
-                          })
-                        }),
-                        this.settings.engines.backup == "----" ? infoText(this.getCustomText("backup_engine_none_hint")) : createEngineFields(this.settings.engines.backup)
-                      ]
-                    }),
-                    createOtherServiceAuthSection()
-                  ]
-                })), settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
-                  title: this.getCustomText("section_language_title"),
-                  collapseStates,
-                  children: [
-                    createSubsectionTitle(this.getCustomText("section_message_language_title")),
-                    createLanguageSelector(messageTypes.SENT, languageTypes.INPUT, this.getCustomText("sent_input_title")),
-                    createLanguageSelector(messageTypes.SENT, languageTypes.OUTPUT, this.getCustomText("sent_output_title")),
-                    createSourceLanguageFilter(),
-                    createDivider(),
-                    createLanguageSelector(messageTypes.RECEIVED, languageTypes.INPUT, this.getCustomText("received_input_title")),
-                    createLanguageSelector(messageTypes.RECEIVED, languageTypes.OUTPUT, this.getCustomText("received_output_title")),
-                    createReceivedSourceLanguageFilter(),
-                    createSpaciousDivider(),
-                    createAutoTranslateDecisionSettings()
-                  ]
-                })), settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
-                  title: this.getCustomText("section_display_title"),
-                  collapseStates,
-                  children: [
-                    createSubsectionTitle(this.getCustomText("section_display_message_title")),
-                    createGeneralSwitchGroup([
-                      "sendOriginalMessage",
-                      "useSpoilerInSentOriginal",
-                      "showOriginalMessage",
-                      "showOriginalDirectly",
-                      "useSpoilerInReceivedOriginal",
-                      "showOriginalInReplyPreview"
-                    ]),
-                    createSpaciousDivider(),
-                    createTranslatedTextColorInput(),
-                    createSpaciousDivider(),
-                    createUiLanguageSelector()
-                  ]
-                })), settingsItems.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.CollapseContainer, {
-                  title: this.getCustomText("section_advanced_title"),
-                  collapseStates,
-                  children: [
-                    ...createProtectionSection(),
-                    createSpaciousDivider(),
-                    ...createPrefixSection()
-                  ]
-                })), BDFDB.ReactUtils.createElement("div", {
-                  className: "translator-settings-panel-root",
-                  children: settingsItems.flat(10).filter((n) => n)
-                });
-              }, "children")
-            });
+            return renderSettingsPanel(this, collapseStates, { BDFDB });
           }
           onSettingsClosed() {
             this.ensureReceivedDisplayRepaintScheduler().hasDeferredFullRepaint() && this.flushDeferredTranslationRerender(), this.SettingsUpdated && (delete this.SettingsUpdated, this.forceUpdateAll());
