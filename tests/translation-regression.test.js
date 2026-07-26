@@ -2155,3 +2155,49 @@ test("manual untranslate works on an automatically translated message", () => {
 	assert.equal(translateAttempted, false, "cancelling a translation must not ask the provider for another one");
 	assert.equal(display.isSuppressed(message.id), true, "the message must be suppressed so the automatic path leaves it alone");
 });
+
+test("cancelling an automatic translation paints the original back", () => {
+	// The cancel used to leave the painted translation on screen forever: the cancelled
+	// record dropped its translation object, so nothing could prove the on-screen text
+	// was our paint rather than an edit, the next pass captured the translation as a new
+	// source, and the original was gone. restoredTranslation is that proof, and both
+	// render paths use it - the stream pass and the content component, which can
+	// re-render without a stream pass.
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+	plugin.lockManualTranslationScroll = () => {};
+
+	const message = {id: "cancel-restore-1", channel_id: "channel-cancel", content: "Good evening", embeds: [], attachments: [], author: {id: "other-user"}};
+	commitAutomaticTranslation(plugin, message, "channel-cancel", "晚上好");
+	// The stream pass paints the translation onto the message the stream holds.
+	message.content = "晚上好";
+
+	plugin.translateMessage(message, {id: "channel-cancel"}, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false});
+
+	const streamEntry = {type: "MESSAGE", content: message};
+	plugin.processMessages({instance: {props: {channelStream: [streamEntry], channel: {id: "channel-cancel"}}}});
+	assert.equal(streamEntry.content.content, "Good evening", "the stream pass must paint the original back");
+
+	// A second pass must not undo the restore or re-queue the message.
+	plugin.processMessages({instance: {props: {channelStream: [streamEntry], channel: {id: "channel-cancel"}}}});
+	assert.equal(streamEntry.content.content, "Good evening");
+});
+
+test("cancelling and then genuinely editing the message keeps the edit", () => {
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+	plugin.lockManualTranslationScroll = () => {};
+
+	const message = {id: "cancel-restore-2", channel_id: "channel-cancel", content: "Good evening", embeds: [], attachments: [], author: {id: "other-user"}};
+	commitAutomaticTranslation(plugin, message, "channel-cancel", "晚上好");
+	message.content = "晚上好";
+	plugin.translateMessage(message, {id: "channel-cancel"}, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false});
+
+	// The author edits before the restore pass runs. The edit must win.
+	message.content = "Good evening, edited";
+	const streamEntry = {type: "MESSAGE", content: message};
+	plugin.processMessages({instance: {props: {channelStream: [streamEntry], channel: {id: "channel-cancel"}}}});
+	assert.equal(streamEntry.content.content, "Good evening, edited", "a real edit must never be overwritten by the restore");
+});

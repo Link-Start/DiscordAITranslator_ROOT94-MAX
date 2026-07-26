@@ -17,7 +17,11 @@ function createHarness({confirmDirectly = true, confirmAfterFallback = true} = {
 	global.document = {
 		querySelector(selector) {
 			if (selector === ".messages-scroller") return scroller;
-			if (typeof selector == "string" && selector.includes("message-")) return messageElement;
+			// Must match the adapter selectors ([id="chat-messages-<id>"], ...). The old
+		// "message-" needle never did, so the element read as unmounted and every
+		// refresh in this harness leaned on the full-list fallback - which stopped
+		// matching reality once virtualised rows no longer trigger that fallback.
+		if (typeof selector == "string" && selector.includes("chat-messages")) return messageElement;
 			return null;
 		},
 		getElementById: () => null

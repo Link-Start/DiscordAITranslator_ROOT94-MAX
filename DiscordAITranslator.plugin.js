@@ -111,6 +111,7 @@ var require_message_state_store = __commonJS({
         archive: null,
         status: MESSAGE_STATUSES.IDLE,
         translation: null,
+        restoredTranslation: null,
         reason: null,
         origin: null,
         manualOptions: null,
@@ -199,6 +200,13 @@ var require_message_state_store = __commonJS({
         return recordsToRestore.filter((record) => record && record.origin && allowedOrigins.has(record.origin) && record.status !== MESSAGE_STATUSES.CANCELLED).map((record) => recordTransition(update(record.messageId, {
           status: MESSAGE_STATUSES.CANCELLED,
           translation: null,
+          // The message on screen still carries the painted translation, and the render
+          // pass that restores the original needs to recognise that paint as our own
+          // output - the automatic path has no source archive to anchor on. Dropping
+          // the translation outright left the cancelled record unable to prove the
+          // painted text was ours, so the next pass captured the translation as a new
+          // source and the original was never painted back.
+          restoredTranslation: record.translation ? freezeValue(record.translation) : record.restoredTranslation || null,
           reason,
           requestIdentity: null,
           renderStatus: RENDER_STATUSES.PENDING,
@@ -552,6 +560,7 @@ var require_translation_display_controller = __commonJS({
         renderStatus: state.renderStatus,
         renderReason: state.renderReason,
         translation: state.translation,
+        restoredTranslation: state.restoredTranslation || null,
         source: state.source,
         origin: state.origin,
         generation: state.generation,
@@ -735,12 +744,12 @@ var require_discord_render_adapter = __commonJS({
           try {
             let owner = scroller && findStreamOwner(scroller);
             owner && BDFDB.ReactUtils.forceUpdate(owner), await waitForPaint();
-            let confirmedIds = confirmViews(uniqueMessageIds, viewsByMessageId), fallbackUsed = !1;
-            confirmedIds.length !== uniqueMessageIds.length && (fallbackUsed = !0, BDFDB.MessageUtils.rerenderAll(!0), await waitForFallbackPaint(), confirmedIds = confirmViews(uniqueMessageIds, viewsByMessageId));
-            let confirmedIdSet = new Set(confirmedIds.map(String));
+            let presentIds = uniqueMessageIds.filter((messageId) => findMessageElement(messageId)), confirmedIds = confirmViews(presentIds, viewsByMessageId), fallbackUsed = !1;
+            confirmedIds.length !== presentIds.length && (fallbackUsed = !0, BDFDB.MessageUtils.rerenderAll(!0), await waitForFallbackPaint(), confirmedIds = confirmViews(presentIds, viewsByMessageId));
+            let confirmedIdSet = new Set(confirmedIds.map(String)), virtualisedIds = uniqueMessageIds.filter((messageId) => !presentIds.includes(messageId));
             outcome = {
-              confirmedIds,
-              missingIds: uniqueMessageIds.filter((messageId) => !confirmedIdSet.has(String(messageId))),
+              confirmedIds: confirmedIds.concat(virtualisedIds),
+              missingIds: presentIds.filter((messageId) => !confirmedIdSet.has(String(messageId))),
               fallbackUsed
             };
           } catch (err) {
@@ -963,7 +972,11 @@ var require_translation_display_logic = __commonJS({
         },
         prepareMessageContentDisplay(plugin, e) {
           let message = e.instance.props.message, channelId = plugin.getMessageChannelId(message), translation = translationDisplayLogic.getActiveMessageTranslation(plugin, message, channelId);
-          return !translation && plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (message = e.instance.props.message = new BDFDB.DiscordObjects.Message(plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message)), translation || (translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId)), { message, channelId, translation };
+          if (!translation && plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (message = e.instance.props.message = new BDFDB.DiscordObjects.Message(plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message)), !translation && message.id) {
+            let state = plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id);
+            state && state.status == "cancelled" && state.restoredTranslation && state.source && state.source.content && message.content !== state.source.content && plugin.matchesPaintedTranslationContent(message.content, state.restoredTranslation) && (message.content = state.source.content);
+          }
+          return translation || (translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId)), { message, channelId, translation };
         },
         createTranslationWatermarkNode(plugin, translation, key) {
           return !translation || !translation.content ? null : BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TooltipContainer, {
@@ -6679,17 +6692,23 @@ var require_received_translation_runtime = __commonJS({
         // translated text while losing the translation - and with it the accent class that
         // carries the whole colour treatment. It is also re-queued and re-translated, because
         // as far as the plugin can tell the author just edited the message into Chinese.
-        resolveOriginalContentDataAnchor(plugin, message) {
-          let archive = message && message.id && plugin.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
-          if (archive && archive.originalContentData) return archive.originalContentData;
-          let record = message && message.id && plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id), translation = record && record.status == "translated" && record.translation;
-          if (!translation || !record.source || !record.source.content) return null;
-          let painted = plugin.normalizeExtractedMessageText(message.content || "").trim();
-          return painted && [
+        // The shapes we could have painted for this translation. Recomposed at render time
+        // from the current display settings, so a settings change made after the commit must
+        // still read as our own output rather than as a user edit.
+        matchesPaintedTranslation(plugin, paintedText, translation) {
+          if (!translation) return !1;
+          let painted = plugin.normalizeExtractedMessageText(paintedText || "").trim();
+          return painted ? [
             translation.content,
             translation.translatedContent,
             plugin.buildReceivedDisplayContent(translation.translatedContent || translation.content, translation.originalContent || "")
-          ].map((value) => plugin.normalizeExtractedMessageText(value || "").trim()).filter(Boolean).includes(painted) ? record.source : null;
+          ].map((value) => plugin.normalizeExtractedMessageText(value || "").trim()).filter(Boolean).includes(painted) : !1;
+        },
+        resolveOriginalContentDataAnchor(plugin, message) {
+          let archive = message && message.id && plugin.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
+          if (archive && archive.originalContentData) return archive.originalContentData;
+          let record = message && message.id && plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id), translation = record && (record.status == "translated" && record.translation || record.status == "cancelled" && record.restoredTranslation);
+          return !translation || !record.source || !record.source.content ? null : receivedTranslationRuntime.matchesPaintedTranslation(plugin, message.content, translation) ? record.source : null;
         },
         createCheckMessageContext(plugin, message, channel, options = {}) {
           let channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), sourceChanged = plugin.refreshReceivedMessageSourceState(message, channelId), originalContentData = plugin.extractOriginalContentData(message), channelState = plugin.getAutoTranslationChannelState(channelId), autoTranslateBoundaryId = options.autoTranslateBoundaryId != null ? options.autoTranslateBoundaryId : channelState && channelState.boundaryMessageId, expectedSignature = plugin.createReceivedTranslationSignature(message, channelId, originalContentData), pendingSourceChanged = plugin.invalidateHistoricalTranslationMessage(message.id, channelId, expectedSignature), liveSourceChanged = plugin.invalidateLiveTranslationMessage(message.id, channelId, expectedSignature);
@@ -6734,7 +6753,7 @@ var require_received_translation_runtime = __commonJS({
           let hadDisplayedTranslation = !!plugin.ensureReceivedDisplayRuntime().getDisplayView(message.id), translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature), messageChanged = hadDisplayedTranslation && !translation, canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id), canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary), cachedTranslation = null, storeCommitted = !1;
           canAutoTranslateReplyPreviewForBase && plugin.markAutoTranslationEligibleReplyPreviewMessage(context.channelId, message.id), !translation && canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad || context.forceQueue || messageChanged || context.isNewerThanBoundary) && (cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData), cachedTranslation && !context.historicalLoad && (storeCommitted = receivedTranslationRuntime.commitCachedDisplayResult(plugin, message, context, cachedTranslation)));
           let storeView = !translation && plugin.getReceivedDisplayRuntimeView(message.id);
-          return translation ? (plugin.refreshTranslationDisplay(translation), stream.content.content = translation.content) : storeView && storeView.translated ? plugin.applyReceivedDisplayViewToStream(stream, storeView) : plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (stream.content.content = plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message.content, messageChanged = !0), { translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage };
+          return translation ? (plugin.refreshTranslationDisplay(translation), stream.content.content = translation.content) : storeView && storeView.translated ? plugin.applyReceivedDisplayViewToStream(stream, storeView) : plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) ? (stream.content.content = plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message.content, messageChanged = !0) : storeView && storeView.status == "cancelled" && storeView.restoredTranslation && storeView.content && stream.content.content !== storeView.content && receivedTranslationRuntime.matchesPaintedTranslation(plugin, stream.content.content, storeView.restoredTranslation) && (stream.content.content = storeView.content, messageChanged = !0), { translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage };
         },
         queueCheckMessageTranslation(plugin, message, channel, context, outcome) {
           if (!(outcome.translation || outcome.storeCommitted || context.skipAutoQueue || !outcome.canAutoTranslateMessage) && (context.channelState && (context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, message.id)), context.forceQueue || outcome.messageChanged || context.isNewerThanBoundary || context.historicalLoad)) {
@@ -9388,6 +9407,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               translation.translatedContent,
               translation.content
             ].map((value) => this.normalizeExtractedMessageText(value).trim()).filter(Boolean).includes(currentContent) ? !1 : (this.ensureReceivedDisplayRuntime().dropSourceArchive(message.id), this.clearDisplayedTranslationState(message.id, { clearReplyPreview: !0 }), this.clearCachedTranslation(message.id), !0);
+          }
+          matchesPaintedTranslationContent(paintedText, translation) {
+            return receivedTranslationRuntime.matchesPaintedTranslation(this, paintedText, translation);
           }
           extractOriginalContentData(message, options = {}) {
             let storedOriginalContentData = receivedTranslationRuntime.resolveOriginalContentDataAnchor(this, message);

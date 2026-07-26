@@ -770,6 +770,8 @@ module.exports = (_ => {
 				return true;
 			}
 
+			matchesPaintedTranslationContent (paintedText, translation) {return receivedTranslationRuntime.matchesPaintedTranslation(this, paintedText, translation);}
+
 			extractOriginalContentData (message, options = {}) {
 				const storedOriginalContentData = receivedTranslationRuntime.resolveOriginalContentDataAnchor(this, message);
 				if (storedOriginalContentData) return this.cloneOriginalContentData(storedOriginalContentData);
@@ -4316,7 +4318,6 @@ module.exports = (_ => {
 				return null;
 			}
 
-
 			string2binary (string) {
 				let binary = "";
 				for (let character of string) binary += parseInt(character.charCodeAt(0).toString(2)).toPrecision(8).split(".").reverse().join("").toString() + " ";
@@ -4451,11 +4452,9 @@ module.exports = (_ => {
 				return protectionLogic.protectAutoTechnicalTerms(this, string, protectedSegments, count);
 			}
 
-
 			protectMixedLanguageLatinTokens (string, protectedSegments = {}, count = 0) {
 				return protectionLogic.protectMixedLanguageLatinTokens(this, string, protectedSegments, count);
 			}
-
 
 			getUnicodeEmojiDetector () {
 				return protectionLogic.getUnicodeEmojiDetector();

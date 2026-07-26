@@ -15,6 +15,7 @@ function createDisplayView(state) {
 		renderStatus: state.renderStatus,
 		renderReason: state.renderReason,
 		translation: state.translation,
+		restoredTranslation: state.restoredTranslation || null,
 		source: state.source,
 		origin: state.origin,
 		generation: state.generation,

@@ -162,9 +162,13 @@ test("a user scroll after capture prevents anchor correction", async () => {
 test("message lookup does not acknowledge a colliding snowflake", async () => {
 	const requestedId = "123456789012345678";
 	const collidingId = `9${requestedId}`;
+	// The collider carries the WRONG revision on purpose: if the adapter matched it,
+	// the requested id would read as mounted-but-stale and the fallback would fire.
+	// Correctly refusing the collision leaves the requested id unmounted, which is a
+	// virtualised row - confirmed by the store, no fallback.
 	const {adapter, calls} = createHarness({
 		availableMessageIds: [collidingId],
-		directRevisions: [[collidingId, 31]],
+		directRevisions: [[collidingId, 99]],
 		fallbackRevisions: []
 	});
 	const outcome = await adapter.refreshMessages({
@@ -174,10 +178,10 @@ test("message lookup does not acknowledge a colliding snowflake", async () => {
 		views: [{messageId: requestedId, revision: 31}]
 	});
 
-	assert.deepEqual(outcome.confirmedIds, []);
-	assert.deepEqual(outcome.missingIds, [requestedId]);
-	assert.equal(outcome.fallbackUsed, true);
-	assert.equal(calls.rerenderAll, 1);
+	assert.deepEqual(outcome.confirmedIds, [requestedId]);
+	assert.deepEqual(outcome.missingIds, []);
+	assert.equal(outcome.fallbackUsed, false);
+	assert.equal(calls.rerenderAll, 0);
 });
 
 test("message lookup ignores a same-ID node outside supported Discord roots", async () => {
@@ -278,9 +282,48 @@ test("missing DOM state returns stable unique IDs after one fallback", async () 
 	assert.equal(calls.capture, 0);
 	assert.equal(calls.findOwner, 0);
 	assert.equal(calls.forceUpdate, 0);
+	// m2 is mounted with no revision painted, so the fallback is genuinely owed; m1 is
+	// virtualised and rides along as confirmed instead of being reported missing.
 	assert.equal(calls.rerenderAll, 1);
 	assert.equal(calls.restored, 0);
-	assert.deepEqual(outcome.confirmedIds, ["m2"]);
-	assert.deepEqual(outcome.missingIds, ["m1"]);
+	assert.deepEqual(outcome.confirmedIds, ["m2", "m1"]);
+	assert.deepEqual(outcome.missingIds, []);
 	assert.equal(outcome.fallbackUsed, true);
+});
+
+test("virtualised rows do not trigger the full-list fallback", async () => {
+	// Discord virtualises the message list, so most of a historical batch has no DOM
+	// node. A row that is not mounted has nothing to confirm - the store is its source
+	// of truth and it paints on mount. Counting those rows as failures fired
+	// rerenderAll(true), which unmounts and rebuilds the whole chat layer, on
+	// essentially every batch commit. That was the freeze.
+	const {adapter, calls} = createHarness({
+		availableMessageIds: ["m1"],
+		directRevisions: [["m1", 11]]
+	});
+	const outcome = await adapter.refreshMessages(request);
+
+	assert.equal(calls.rerenderAll, 0, "an off-screen row must never cost a full remount");
+	assert.equal(outcome.fallbackUsed, false);
+	// The mounted row is confirmed by its revision; the virtualised one counts as
+	// confirmed because its paint happens on mount, and reporting it missing would
+	// push callers toward exactly the repaint this rule forbids.
+	assert.deepEqual(outcome.confirmedIds.sort(), ["m1", "m2"]);
+	assert.deepEqual(outcome.missingIds, []);
+});
+
+test("a mounted row with a stale revision still gets the fallback", async () => {
+	// The narrowing must not swallow real failures: this row IS on screen and shows
+	// the wrong revision, so the paint genuinely did not land.
+	const {adapter, calls} = createHarness({
+		availableMessageIds: ["m1"],
+		confirmDirectly: false,
+		fallbackRevisions: [["m1", 11]]
+	});
+	const outcome = await adapter.refreshMessages(request);
+
+	assert.equal(calls.rerenderAll, 1);
+	assert.equal(outcome.fallbackUsed, true);
+	assert.deepEqual(outcome.confirmedIds.sort(), ["m1", "m2"]);
+	assert.deepEqual(outcome.missingIds, []);
 });
