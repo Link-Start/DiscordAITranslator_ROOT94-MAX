@@ -4309,6 +4309,353 @@ var require_historical_job_registry = __commonJS({
   }
 });
 
+// src/settings/settings-store.js
+var require_settings_store = __commonJS({
+  "src/settings/settings-store.js"(exports2, module2) {
+    var LANGUAGE_DIRECTIONS = Object.freeze({ INPUT: "input", OUTPUT: "output" });
+    function isRecord(value) {
+      return !!value && typeof value == "object" && !Array.isArray(value);
+    }
+    __name(isRecord, "isRecord");
+    function isEmptyRecord(value) {
+      return !value || !Object.keys(value).length;
+    }
+    __name(isEmptyRecord, "isEmptyRecord");
+    function createEmptyChannelEnablementState(globalDefault = !1) {
+      return {
+        globalDefault: !!globalDefault,
+        channelOverrides: {}
+      };
+    }
+    __name(createEmptyChannelEnablementState, "createEmptyChannelEnablementState");
+    function normalizeStoredChannelEnablementState(state) {
+      if (!isRecord(state)) return null;
+      let normalizedState = createEmptyChannelEnablementState(state.globalDefault), overrides = state.channelOverrides;
+      if (!isRecord(overrides)) return normalizedState;
+      for (let channelId in overrides)
+        channelId && typeof overrides[channelId] == "boolean" && (normalizedState.channelOverrides[channelId] = overrides[channelId]);
+      return normalizedState;
+    }
+    __name(normalizeStoredChannelEnablementState, "normalizeStoredChannelEnablementState");
+    function migrateLegacyChannelEnablementState(stateKeys) {
+      let normalizedState = createEmptyChannelEnablementState(!1);
+      for (let stateKey of stateKeys || [])
+        typeof stateKey != "string" || !stateKey || stateKey == "global" || (normalizedState.channelOverrides[stateKey] = !0);
+      return normalizedState;
+    }
+    __name(migrateLegacyChannelEnablementState, "migrateLegacyChannelEnablementState");
+    function loadChannelEnablementState(primaryStoredState, secondaryStoredState) {
+      let normalizedPrimaryState = normalizeStoredChannelEnablementState(primaryStoredState) || (Array.isArray(primaryStoredState) ? migrateLegacyChannelEnablementState(primaryStoredState) : null), normalizedSecondaryState = normalizeStoredChannelEnablementState(secondaryStoredState) || (Array.isArray(secondaryStoredState) ? migrateLegacyChannelEnablementState(secondaryStoredState) : null);
+      return {
+        globalDefault: !1,
+        channelOverrides: Object.assign({}, normalizedSecondaryState && normalizedSecondaryState.channelOverrides, normalizedPrimaryState && normalizedPrimaryState.channelOverrides)
+      };
+    }
+    __name(loadChannelEnablementState, "loadChannelEnablementState");
+    function getChannelEnablementStateValue(channelId, state) {
+      let normalizedState = normalizeStoredChannelEnablementState(state) || createEmptyChannelEnablementState(!1);
+      return channelId && Object.prototype.hasOwnProperty.call(normalizedState.channelOverrides, channelId) ? normalizedState.channelOverrides[channelId] : normalizedState.globalDefault;
+    }
+    __name(getChannelEnablementStateValue, "getChannelEnablementStateValue");
+    function channelEnablementStatesEqual(leftState, rightState) {
+      let normalizedLeftState = normalizeStoredChannelEnablementState(leftState) || createEmptyChannelEnablementState(!1), normalizedRightState = normalizeStoredChannelEnablementState(rightState) || createEmptyChannelEnablementState(!1);
+      if (normalizedLeftState.globalDefault != normalizedRightState.globalDefault) return !1;
+      let leftChannelIds = Object.keys(normalizedLeftState.channelOverrides), rightChannelIds = Object.keys(normalizedRightState.channelOverrides);
+      if (leftChannelIds.length != rightChannelIds.length) return !1;
+      for (let channelId of leftChannelIds) if (normalizedLeftState.channelOverrides[channelId] != normalizedRightState.channelOverrides[channelId]) return !1;
+      return !0;
+    }
+    __name(channelEnablementStatesEqual, "channelEnablementStatesEqual");
+    function createSettingsStore({
+      // The engine catalogue. Defaults to "no engine exists" rather than "every engine
+      // exists": with no catalogue injected a stored override can never resolve to an
+      // engine that is not installed, which is the direction that cannot corrupt state.
+      isKnownEngine = /* @__PURE__ */ __name(() => !1, "isKnownEngine"),
+      // The legacy table is ordered by favourite through BDFDB; the ordering is a
+      // presentation concern, so it stays a hook instead of being reimplemented here.
+      sortLanguages = /* @__PURE__ */ __name((table) => table, "sortLanguages"),
+      // Channel to guild resolution lives in the Discord stores, and "@me" is the guild
+      // id the legacy runtime uses for direct messages.
+      resolveGuildId = /* @__PURE__ */ __name(() => null, "resolveGuildId"),
+      // Persistence. Every loader may return anything the profile happens to hold,
+      // including nothing at all.
+      loadFavorites = /* @__PURE__ */ __name(() => [], "loadFavorites"),
+      persistFavorites = /* @__PURE__ */ __name(() => {
+      }, "persistFavorites"),
+      loadAuthKeys = /* @__PURE__ */ __name(() => ({}), "loadAuthKeys"),
+      persistAuthKeys = /* @__PURE__ */ __name(() => {
+      }, "persistAuthKeys"),
+      loadChannelLanguages = /* @__PURE__ */ __name(() => ({}), "loadChannelLanguages"),
+      persistChannelLanguages = /* @__PURE__ */ __name(() => {
+      }, "persistChannelLanguages"),
+      loadGuildLanguages = /* @__PURE__ */ __name(() => ({}), "loadGuildLanguages"),
+      persistGuildLanguages = /* @__PURE__ */ __name(() => {
+      }, "persistGuildLanguages"),
+      loadChannelPrimaryEngineOverrides = /* @__PURE__ */ __name(() => ({}), "loadChannelPrimaryEngineOverrides"),
+      persistChannelPrimaryEngineOverrides = /* @__PURE__ */ __name(() => {
+      }, "persistChannelPrimaryEngineOverrides"),
+      loadTranslationEnabledStates = /* @__PURE__ */ __name(() => null, "loadTranslationEnabledStates"),
+      loadReceivedAutoTranslationEnabledStates = /* @__PURE__ */ __name(() => null, "loadReceivedAutoTranslationEnabledStates"),
+      // One callback because the two enablement keys are always written together; the
+      // compatibility key is what lets an older build of the plugin still read the state.
+      persistChannelEnablementState = /* @__PURE__ */ __name(() => {
+      }, "persistChannelEnablementState"),
+      // The global fallback lives in the plugin settings, not in this store.
+      loadGlobalLanguageChoice = /* @__PURE__ */ __name(() => null, "loadGlobalLanguageChoice"),
+      persistGlobalLanguageChoice = /* @__PURE__ */ __name(() => {
+      }, "persistGlobalLanguageChoice")
+    } = {}) {
+      let languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = createEmptyChannelEnablementState(!1);
+      function getChannelLanguageScope(channelId, place) {
+        let record = channelLanguages[channelId];
+        return record && record[place] || null;
+      }
+      __name(getChannelLanguageScope, "getChannelLanguageScope");
+      function getGuildLanguageScope(guildId, place) {
+        let record = guildLanguages[guildId];
+        return record && record[place] || null;
+      }
+      __name(getGuildLanguageScope, "getGuildLanguageScope");
+      function resolveLanguageChoice(direction, place, channelId) {
+        let guildId = resolveGuildId(channelId), choice, channelScope = getChannelLanguageScope(channelId, place), guildScope = guildId ? getGuildLanguageScope(guildId, place) : null;
+        return channelScope ? choice = channelScope[direction] : guildScope ? choice = guildScope[direction] : choice = loadGlobalLanguageChoice(place, direction), choice = languages[choice] ? choice : Object.keys(languages)[0], direction == LANGUAGE_DIRECTIONS.OUTPUT && choice == "auto" ? "en" : choice;
+      }
+      __name(resolveLanguageChoice, "resolveLanguageChoice");
+      function createInheritedLanguageScope(place) {
+        let scope = {};
+        for (let direction of Object.values(LANGUAGE_DIRECTIONS)) scope[direction] = resolveLanguageChoice(direction, place, null);
+        return scope;
+      }
+      __name(createInheritedLanguageScope, "createInheritedLanguageScope");
+      function ensureChannelLanguageChoiceScope(channelId, place) {
+        if (!channelId || !place) return null;
+        if (channelLanguages[channelId] || (channelLanguages[channelId] = {}), !channelLanguages[channelId][place]) {
+          channelLanguages[channelId][place] = {};
+          for (let direction of Object.values(LANGUAGE_DIRECTIONS)) channelLanguages[channelId][place][direction] = resolveLanguageChoice(direction, place, channelId);
+        }
+        return channelLanguages[channelId][place];
+      }
+      __name(ensureChannelLanguageChoiceScope, "ensureChannelLanguageChoiceScope");
+      function normalizeStoredChannelPrimaryEngineOverrides(overrides) {
+        if (!isRecord(overrides)) return {};
+        let normalizedOverrides = {};
+        for (let channelId in overrides) {
+          let engineKey = overrides[channelId];
+          !channelId || typeof engineKey != "string" || !isKnownEngine(engineKey) || (normalizedOverrides[channelId] = engineKey);
+        }
+        return normalizedOverrides;
+      }
+      __name(normalizeStoredChannelPrimaryEngineOverrides, "normalizeStoredChannelPrimaryEngineOverrides");
+      function saveChannelEnablementState(nextState) {
+        return translationEnabledStates = nextState, persistChannelEnablementState(nextState), translationEnabledStates;
+      }
+      return __name(saveChannelEnablementState, "saveChannelEnablementState"), Object.freeze({
+        // --- language table -------------------------------------------------------
+        // The live table, not a copy: the provider client holds this seam and reads it
+        // on every request to name a detected language.
+        getLanguages() {
+          return languages;
+        },
+        getLanguage(languageId) {
+          return languages[languageId] || null;
+        },
+        hasLanguage(languageId) {
+          return !!languages[languageId];
+        },
+        getLanguageIds() {
+          return Object.keys(languages);
+        },
+        // The fallback target when a stored choice no longer exists.
+        getFirstLanguageId() {
+          return Object.keys(languages)[0];
+        },
+        // The single writer. The caller builds the table because that needs BDFDB and
+        // the engine catalogue; the store stamps the favourite flags and orders it.
+        setLanguages(builtLanguages) {
+          let table = isRecord(builtLanguages) ? builtLanguages : {};
+          for (let languageId in table) isRecord(table[languageId]) && (table[languageId].fav = favorites.includes(languageId) ? 0 : 1);
+          return languages = sortLanguages(table) || table, languages;
+        },
+        // --- favourites -----------------------------------------------------------
+        getFavorites() {
+          return favorites;
+        },
+        isFavorite(languageId) {
+          return favorites.includes(languageId);
+        },
+        // Persists immediately; the caller still has to rebuild the language table for
+        // the new flags to show up in it.
+        setFavorite(languageId, isFavorite) {
+          if (!languageId) return favorites;
+          let index = favorites.indexOf(languageId);
+          return isFavorite ? index < 0 && favorites.push(languageId) : index >= 0 && (favorites = favorites.filter((id) => id != languageId)), favorites.sort(), persistFavorites(favorites), favorites;
+        },
+        // --- credentials ----------------------------------------------------------
+        // The live record, for the provider client seam only. Every other caller should
+        // use the accessors below so the write is persisted with it.
+        getAuthKeys() {
+          return authKeys;
+        },
+        getCredential(engineKey) {
+          return engineKey && authKeys[engineKey] || null;
+        },
+        getCredentialField(engineKey, field) {
+          let credential = engineKey && authKeys[engineKey];
+          return credential ? credential[field] : void 0;
+        },
+        // Replaces one engine's whole credential record, which is what the provider
+        // client does after it normalises an endpoint or resolves a model id.
+        setCredential(engineKey, credential) {
+          return engineKey ? (authKeys[engineKey] = credential, persistAuthKeys(authKeys), authKeys[engineKey]) : null;
+        },
+        // Text fields: key, endpoint, model, region. The trim rule is the legacy one -
+        // a value with no trim method is stored as-is - so a field that was never a
+        // string keeps whatever the panel passed.
+        setCredentialField(engineKey, field, value) {
+          return !engineKey || !field ? null : (authKeys[engineKey] || (authKeys[engineKey] = {}), authKeys[engineKey][field] = (value || "").trim ? (value || "").trim() : value, persistAuthKeys(authKeys), authKeys[engineKey]);
+        },
+        // Non-text fields, currently only the premium "paid" switch. Kept separate
+        // because trimming would turn a false switch into an empty string.
+        setCredentialFlag(engineKey, field, value) {
+          return !engineKey || !field ? null : (authKeys[engineKey] || (authKeys[engineKey] = {}), authKeys[engineKey][field] = value, persistAuthKeys(authKeys), authKeys[engineKey]);
+        },
+        // The write half of the provider client seam: it mutates the record it got from
+        // getAuthKeys and then hands the whole table back here to be persisted.
+        replaceAuthKeys(nextAuthKeys) {
+          return authKeys = isRecord(nextAuthKeys) ? nextAuthKeys : {}, persistAuthKeys(authKeys), authKeys;
+        },
+        // --- language choices -----------------------------------------------------
+        getChannelLanguages() {
+          return channelLanguages;
+        },
+        getGuildLanguages() {
+          return guildLanguages;
+        },
+        hasChannelLanguageScope(channelId, place) {
+          return !!getChannelLanguageScope(channelId, place);
+        },
+        hasGuildLanguageScope(guildId, place) {
+          return !!getGuildLanguageScope(guildId, place);
+        },
+        getLanguageChoice(direction, place, channelId) {
+          return resolveLanguageChoice(direction, place, channelId);
+        },
+        // Writes into the narrowest scope that already exists, so saving a choice never
+        // silently promotes a global setting into a channel-specific one. Returns which
+        // scope took the write.
+        saveLanguageChoice(choice, direction, place, channelId) {
+          let guildId = resolveGuildId(channelId), channelScope = getChannelLanguageScope(channelId, place);
+          if (channelScope)
+            return channelScope[direction] = choice, persistChannelLanguages(channelLanguages), "channel";
+          let guildScope = guildId ? getGuildLanguageScope(guildId, place) : null;
+          return guildScope ? (guildScope[direction] = choice, persistGuildLanguages(guildLanguages), "guild") : (persistGlobalLanguageChoice(place, direction, choice), "global");
+        },
+        ensureChannelLanguageChoiceScope,
+        // Pins one direction to a channel, creating the scope when needed. Used when a
+        // reply target language is detected for a channel.
+        setChannelLanguageChoice(channelId, place, direction, choice) {
+          if (!channelId || !place || !direction) return null;
+          let scope = ensureChannelLanguageChoiceScope(channelId, place);
+          return scope ? (scope[direction] = choice, persistChannelLanguages(channelLanguages), scope) : null;
+        },
+        // The settings surface offers one control that walks the scope of a place:
+        // global -> guild -> channel -> global. Each step seeds the new scope from the
+        // choice that was in effect, and an emptied guild or channel record is removed
+        // so the stored file does not accumulate empty objects. Returns the new scope.
+        cycleLanguageChoiceScope(channelId, guildId, place) {
+          if (!place) return null;
+          let nextScope;
+          return getChannelLanguageScope(channelId, place) ? (delete channelLanguages[channelId][place], isEmptyRecord(channelLanguages[channelId]) && delete channelLanguages[channelId], nextScope = "global") : getGuildLanguageScope(guildId, place) ? (delete guildLanguages[guildId][place], isEmptyRecord(guildLanguages[guildId]) && delete guildLanguages[guildId], channelLanguages[channelId] || (channelLanguages[channelId] = {}), channelLanguages[channelId][place] = createInheritedLanguageScope(place), nextScope = "channel") : (guildLanguages[guildId] || (guildLanguages[guildId] = {}), guildLanguages[guildId][place] = createInheritedLanguageScope(place), nextScope = "guild"), persistChannelLanguages(channelLanguages), persistGuildLanguages(guildLanguages), nextScope;
+        },
+        // --- channel primary engine overrides -------------------------------------
+        normalizeStoredChannelPrimaryEngineOverrides,
+        getChannelPrimaryEngineOverrides() {
+          return channelPrimaryEngineOverrides;
+        },
+        // Only an override that still points at an installed engine counts; the caller
+        // falls back to the globally selected engine when this returns null.
+        getChannelPrimaryEngineOverride(channelId) {
+          if (!channelId) return null;
+          let engineKey = channelPrimaryEngineOverrides[channelId];
+          return isKnownEngine(engineKey) ? engineKey : null;
+        },
+        hasChannelPrimaryEngineOverride(channelId) {
+          return !!channelId && Object.prototype.hasOwnProperty.call(channelPrimaryEngineOverrides, channelId) && isKnownEngine(channelPrimaryEngineOverrides[channelId]);
+        },
+        listChannelPrimaryEngines() {
+          return Object.values(channelPrimaryEngineOverrides);
+        },
+        saveChannelPrimaryEngineOverrides() {
+          persistChannelPrimaryEngineOverrides(channelPrimaryEngineOverrides);
+        },
+        // Pinning the engine that happens to be the global one is meaningful: it stays
+        // pinned when the user later changes the global engine.
+        setChannelPrimaryEngine(channelId, engineKey) {
+          return !channelId || !isKnownEngine(engineKey) ? !1 : (channelPrimaryEngineOverrides[channelId] = engineKey, persistChannelPrimaryEngineOverrides(channelPrimaryEngineOverrides), !0);
+        },
+        clearChannelPrimaryEngineOverride(channelId) {
+          return !channelId || !Object.prototype.hasOwnProperty.call(channelPrimaryEngineOverrides, channelId) ? !1 : (delete channelPrimaryEngineOverrides[channelId], persistChannelPrimaryEngineOverrides(channelPrimaryEngineOverrides), !0);
+        },
+        // --- channel enablement ---------------------------------------------------
+        createEmptyChannelEnablementState,
+        normalizeStoredChannelEnablementState,
+        migrateLegacyChannelEnablementState,
+        loadChannelEnablementState,
+        getChannelEnablementStateValue,
+        channelEnablementStatesEqual,
+        getChannelEnablementState() {
+          return translationEnabledStates;
+        },
+        saveChannelEnablementState,
+        isTranslationEnabled(channelId) {
+          return getChannelEnablementStateValue(channelId, translationEnabledStates);
+        },
+        // An override equal to the global default is deleted instead of stored, so the
+        // file only ever holds channels that actually differ from the default.
+        setChannelEnablementStateValue(channelId, enabled) {
+          let currentState = normalizeStoredChannelEnablementState(translationEnabledStates) || createEmptyChannelEnablementState(!1), nextState = {
+            globalDefault: !1,
+            channelOverrides: Object.assign({}, currentState.channelOverrides)
+          };
+          return channelId ? (enabled == nextState.globalDefault ? delete nextState.channelOverrides[channelId] : nextState.channelOverrides[channelId] = !!enabled, saveChannelEnablementState(nextState), nextState) : currentState;
+        },
+        // --- reload ---------------------------------------------------------------
+        // Re-reads everything the user can edit outside the plugin. A loader that hands
+        // back something unusable keeps the value already in memory instead of blanking
+        // it: an empty in-memory record would be written back to disk by the very next
+        // edit, and that is how a transient read failure turns into lost configuration.
+        reload() {
+          let storedFavorites = loadFavorites();
+          favorites = Array.isArray(storedFavorites) ? storedFavorites : favorites;
+          let storedAuthKeys = loadAuthKeys();
+          authKeys = isRecord(storedAuthKeys) ? storedAuthKeys : authKeys;
+          let storedChannelLanguages = loadChannelLanguages();
+          channelLanguages = isRecord(storedChannelLanguages) ? storedChannelLanguages : channelLanguages;
+          let storedGuildLanguages = loadGuildLanguages();
+          guildLanguages = isRecord(storedGuildLanguages) ? storedGuildLanguages : guildLanguages;
+          let storedOverrides = loadChannelPrimaryEngineOverrides();
+          channelPrimaryEngineOverrides = isRecord(storedOverrides) ? normalizeStoredChannelPrimaryEngineOverrides(storedOverrides) : channelPrimaryEngineOverrides;
+          let storedPrimaryState = loadTranslationEnabledStates(), storedSecondaryState = loadReceivedAutoTranslationEnabledStates();
+          if (storedPrimaryState == null && storedSecondaryState == null) return translationEnabledStates;
+          let normalizedPrimaryState = normalizeStoredChannelEnablementState(storedPrimaryState), normalizedSecondaryState = normalizeStoredChannelEnablementState(storedSecondaryState);
+          return translationEnabledStates = loadChannelEnablementState(storedPrimaryState, storedSecondaryState), (!normalizedPrimaryState || !normalizedSecondaryState || !channelEnablementStatesEqual(normalizedPrimaryState, translationEnabledStates) || !channelEnablementStatesEqual(normalizedSecondaryState, translationEnabledStates)) && saveChannelEnablementState(translationEnabledStates), translationEnabledStates;
+        }
+      });
+    }
+    __name(createSettingsStore, "createSettingsStore");
+    module2.exports = {
+      LANGUAGE_DIRECTIONS,
+      createEmptyChannelEnablementState,
+      normalizeStoredChannelEnablementState,
+      migrateLegacyChannelEnablementState,
+      loadChannelEnablementState,
+      getChannelEnablementStateValue,
+      channelEnablementStatesEqual,
+      createSettingsStore
+    };
+  }
+});
+
 // src/i18n/labels.js
 var require_labels = __commonJS({
   "src/i18n/labels.js"(exports2, module2) {
@@ -5867,7 +6214,15 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a, _b, _c;
-        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
+        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), {
+          createSettingsStore,
+          createEmptyChannelEnablementState,
+          normalizeStoredChannelEnablementState,
+          migrateLegacyChannelEnablementState,
+          loadChannelEnablementState,
+          getChannelEnablementStateValue,
+          channelEnablementStatesEqual
+        } = require_settings_store(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
         var _this;
         let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
           render() {
@@ -5909,8 +6264,8 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             };
           }
           filterLanguages(direction, place) {
-            let isOutput = direction == languageTypes.OUTPUT, currentInput = languages[_this.getLanguageChoice(languageTypes.INPUT, place, this.props.channelId)], currentOutput = languages[_this.getLanguageChoice(languageTypes.OUTPUT, place, this.props.channelId)];
-            return BDFDB.ObjectUtils.toArray(BDFDB.ObjectUtils.map(isOutput ? BDFDB.ObjectUtils.filter(languages, (lang) => !lang.auto) : languages, (lang, id) => {
+            let isOutput = direction == languageTypes.OUTPUT, settingsStore = _this.ensureSettingsStore(), currentInput = settingsStore.getLanguage(_this.getLanguageChoice(languageTypes.INPUT, place, this.props.channelId)), currentOutput = settingsStore.getLanguage(_this.getLanguageChoice(languageTypes.OUTPUT, place, this.props.channelId));
+            return BDFDB.ObjectUtils.toArray(BDFDB.ObjectUtils.map(isOutput ? BDFDB.ObjectUtils.filter(settingsStore.getLanguages(), (lang) => !lang.auto) : settingsStore.getLanguages(), (lang, id) => {
               let input = isOutput ? currentInput : lang, output = isOutput ? lang : currentOutput, primarySupported = _this.engineSupportsLanguagePair(_this.getEffectivePrimaryEngine(this.props.channelId), input, output), backupSupported = _this.engineSupportsLanguagePair(_this.getEffectiveBackupEngine(this.props.channelId), input, output);
               return {
                 value: id,
@@ -6019,7 +6374,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               this.renderChannelPrimaryEngine(),
               this.renderLanguageDetector(),
               Object.keys(_this.defaults.choices).map((place) => {
-                let isChannelSpecific = channelLanguages[this.props.channelId] && channelLanguages[this.props.channelId][place], isGuildSpecific = !isChannelSpecific && guildLanguages[this.props.guildId] && guildLanguages[this.props.guildId][place];
+                let isChannelSpecific = _this.ensureSettingsStore().hasChannelLanguageScope(this.props.channelId, place), isGuildSpecific = !isChannelSpecific && _this.ensureSettingsStore().hasGuildLanguageScope(this.props.guildId, place);
                 return Object.keys(_this.defaults.choices[place].value).map((direction) => [
                   BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                     title: _this.labels[`language_choice_${direction.toLowerCase()}_${place.toLowerCase()}`] + ": ",
@@ -6028,16 +6383,8 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       name: isChannelSpecific || isGuildSpecific ? BDFDB.LibraryComponents.SvgIcon.Names.LOCK_CLOSED : BDFDB.LibraryComponents.SvgIcon.Names.LOCK_OPEN,
                       color: isChannelSpecific ? "var(--status-danger)" : isGuildSpecific ? "var(--status-warning)" : null,
                       onClick: /* @__PURE__ */ __name((_2) => {
-                        if (channelLanguages[this.props.channelId] && channelLanguages[this.props.channelId][place])
-                          isChannelSpecific = !1, delete channelLanguages[this.props.channelId][place], BDFDB.ObjectUtils.isEmpty(channelLanguages[this.props.channelId]) && delete channelLanguages[this.props.channelId];
-                        else if (guildLanguages[this.props.guildId] && guildLanguages[this.props.guildId][place]) {
-                          isGuildSpecific = !1, isChannelSpecific = !0, delete guildLanguages[this.props.guildId][place], BDFDB.ObjectUtils.isEmpty(guildLanguages[this.props.guildId]) && delete guildLanguages[this.props.guildId], channelLanguages[this.props.channelId] || (channelLanguages[this.props.channelId] = {}), channelLanguages[this.props.channelId][place] = {};
-                          for (let l in languageTypes) channelLanguages[this.props.channelId][place][languageTypes[l]] = _this.getLanguageChoice(languageTypes[l], place, null);
-                        } else {
-                          isGuildSpecific = !0, guildLanguages[this.props.guildId] || (guildLanguages[this.props.guildId] = {}), guildLanguages[this.props.guildId][place] = {};
-                          for (let l in languageTypes) guildLanguages[this.props.guildId][place][languageTypes[l]] = _this.getLanguageChoice(languageTypes[l], place, null);
-                        }
-                        BDFDB.DataUtils.save(channelLanguages, _this, "channelLanguages"), BDFDB.DataUtils.save(guildLanguages, _this, "guildLanguages"), BDFDB.ReactUtils.forceUpdate(this);
+                        let nextScope = _this.ensureSettingsStore().cycleLanguageChoiceScope(this.props.channelId, this.props.guildId, place);
+                        isChannelSpecific = nextScope == "channel", isGuildSpecific = nextScope == "guild", BDFDB.ReactUtils.forceUpdate(this);
                       }, "onClick")
                     }, {
                       iconSVG: '<svg width="21" height="21" fill="currentColor"><path d="M 0, 10.515 c 0, 2.892, 1.183, 5.521, 3.155, 7.361 L 0, 21.031 h 7.887 V 13.144 l -2.892, 2.892 C 3.549, 14.722, 2.629, 12.75, 2.629, 10.515 c 0 -3.418, 2.235 -6.309, 5.258 -7.492 v -2.629 C 3.418, 1.577, 0, 5.652, 0, 10.515 z M 21.031, 0 H 13.144 v 7.887 l 2.892 -2.892 C 17.482, 6.309, 18.402, 8.281, 18.402, 10.515 c 0, 3.418 -2.235, 6.309 -5.258, 7.492 V 20.768 c 4.469 -1.183, 7.887 -5.258, 7.887 -10.121 c 0 -2.892 -1.183 -5.521 -3.155 -7.361 L 21.031, 0 z"/></svg>',
@@ -6070,7 +6417,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                       maxMenuHeight: typeof window < "u" ? Math.max(150, Math.min(240, Math.floor(window.innerHeight * 0.36))) : 220,
                       value: _this.getLanguageChoice(direction, place, this.props.channelId),
                       options: this.filterLanguages(direction, place),
-                      optionRenderer: /* @__PURE__ */ __name((lang) => languages[lang.value] ? BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
+                      optionRenderer: /* @__PURE__ */ __name((lang) => _this.ensureSettingsStore().getLanguage(lang.value) ? BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
                         align: BDFDB.LibraryComponents.Flex.Align.CENTER,
                         children: [
                           BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
@@ -6091,9 +6438,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                             })
                           }),
                           BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FavButton, {
-                            isFavorite: languages[lang.value].fav == 0,
+                            isFavorite: _this.ensureSettingsStore().isFavorite(lang.value),
                             onClick: /* @__PURE__ */ __name((value) => {
-                              value ? favorites.push(lang.value) : BDFDB.ArrayUtils.remove(favorites, lang.value, !0), BDFDB.DataUtils.save(favorites.sort(), _this, "favorites"), _this.setLanguages();
+                              _this.ensureSettingsStore().setFavorite(lang.value, value), _this.setLanguages();
                             }, "onClick")
                           })
                         ]
@@ -6346,9 +6693,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           "−−−−·": "9",
           "−−−−−": "0",
           _: "··−−·−"
-        };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} };
-        let channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
+        }, channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
         var pluginRuntimeActive = !0;
         let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
@@ -7033,7 +7378,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           getConcreteConfiguredLanguages(plugin, settingKey) {
             let sourceLanguages = plugin.settings && plugin.settings.filters && plugin.settings.filters[settingKey], configuredLanguages = BDFDB.ArrayUtils.is(sourceLanguages) ? sourceLanguages : [];
             return [...new Set(configuredLanguages.filter((languageId) => {
-              let language = languages[languageId];
+              let language = plugin.ensureSettingsStore().getLanguage(languageId);
               return language && !language.auto && !language.special;
             }))];
           },
@@ -7118,7 +7463,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             ] : [
               plugin.getGlobalPrimaryEngine(),
               plugin.getEffectiveBackupEngine(),
-              ...Object.values(channelPrimaryEngineOverrides)
+              ...plugin.ensureSettingsStore().listChannelPrimaryEngines()
             ];
             return [...new Set(engineKeys)].some((engineKey) => aiDecisionPolicy.supportsAiAutoTranslateDecisionEngine(plugin, engineKey) && plugin.isEngineConfiguredForRuntime(engineKey));
           },
@@ -7127,7 +7472,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           }
         }, sentTranslationPolicy = {
           shouldSkipSentTranslationForSameTarget(plugin, text, channelId, forcedOutputLanguage = null, callback) {
-            let targetLanguageId = forcedOutputLanguage || plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.SENT, channelId), targetLanguage = targetLanguageId && languages[targetLanguageId];
+            let targetLanguageId = forcedOutputLanguage || plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.SENT, channelId), targetLanguage = targetLanguageId && plugin.ensureSettingsStore().getLanguage(targetLanguageId);
             if (!targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special) return callback(!1, null);
             let configuredInputLanguage = plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.SENT, channelId);
             if (configuredInputLanguage && configuredInputLanguage != "auto") return callback(plugin.isSameLanguageOrVariant(configuredInputLanguage, targetLanguageId), configuredInputLanguage);
@@ -7269,7 +7614,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           isClearlyForeignLanguageMessage(plugin, text, targetLanguageId) {
             if (!text || !targetLanguageId || targetLanguageId == "auto") return !1;
-            let targetLanguage = languages[targetLanguageId];
+            let targetLanguage = plugin.ensureSettingsStore().getLanguage(targetLanguageId);
             if (targetLanguage && targetLanguage.special) return !1;
             let targetFamilies = plugin.getLanguageScriptFamilies(targetLanguageId);
             if (!targetFamilies.length) return !1;
@@ -7301,7 +7646,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           isTranslationLikelyInTargetLanguage(plugin, text, targetLanguageId) {
             if (targetLanguageId = plugin.normalizeLanguageId(targetLanguageId), !text || !targetLanguageId || targetLanguageId == "auto") return !0;
-            let targetLanguage = languages[targetLanguageId];
+            let targetLanguage = plugin.ensureSettingsStore().getLanguage(targetLanguageId);
             if (targetLanguage && targetLanguage.special) return !0;
             let targetFamilies = plugin.getLanguageScriptFamilies(targetLanguageId);
             if (!targetFamilies.length) return !0;
@@ -7396,7 +7741,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, originalContentData)) return !0;
             let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId);
             if (!receivedAnalysis) return !1;
-            let { targetLanguageId, analysisSource, analysis } = receivedAnalysis, targetLanguage = languages[targetLanguageId];
+            let { targetLanguageId, analysisSource, analysis } = receivedAnalysis, targetLanguage = plugin.ensureSettingsStore().getLanguage(targetLanguageId);
             return !targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special || !analysisSource || !analysisSource.hasUnprotectedContent ? !1 : plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId);
           },
           shouldSkipByLocalLanguagePrecheck(plugin, text, analysis, targetLanguageId) {
@@ -7601,7 +7946,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   let scrollState = captureSettingsPanelScrollState();
                   BDFDB.PluginUtils.refreshSettingsPanel(this, settingsPanel, collapseStates), restoreSettingsPanelScrollState(scrollState);
                 }, "refreshPanel"), saveAuthField = /* @__PURE__ */ __name((engineKey, field, value) => {
-                  authKeys[engineKey] || (authKeys[engineKey] = {}), authKeys[engineKey][field] = (value || "").trim ? (value || "").trim() : value, BDFDB.DataUtils.save(authKeys, this, "authKeys"), this.SettingsUpdated = !0;
+                  this.ensureSettingsStore().setCredentialField(engineKey, field, value), this.SettingsUpdated = !0;
                 }, "saveAuthField"), saveReceivedFilterSetting = /* @__PURE__ */ __name((key, value) => {
                   saveFilterSetting(key, value);
                 }, "saveReceivedFilterSetting"), infoText = /* @__PURE__ */ __name((text) => BDFDB.ReactUtils.createElement("div", {
@@ -7893,9 +8238,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           className: "translator-prefix-translation-cell translator-prefix-language-cell",
                           children: createStableSelect({
                             value: entry.language,
-                            options: Object.keys(languages).filter((key) => !languages[key].auto && !languages[key].special).map((key) => ({
+                            options: this.ensureSettingsStore().getLanguageIds().filter((key) => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special).map((key) => ({
                               value: key,
-                              label: this.getLanguageDisplayName(languages[key])
+                              label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
                             })).sort((a, b) => a.label.localeCompare(b.label)),
                             onChange: /* @__PURE__ */ __name((value) => {
                               this.settings.prefixes.translationPrefixData[index].language = value, BDFDB.DataUtils.save(this.settings.prefixes.translationPrefixData, this, "prefixes", "translationPrefixData"), this.SettingsUpdated = !0;
@@ -8035,7 +8380,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     className: BDFDB.disCN.marginbottom8,
                     children: [
                       createStableSelect({
-                        value: authKeys[engineKey] && authKeys[engineKey].model || "",
+                        value: this.ensureSettingsStore().getCredentialField(engineKey, "model") || "",
                         options: state.items.map((modelId) => ({ value: modelId, label: modelId })),
                         onChange: /* @__PURE__ */ __name((value) => {
                           saveAuthField(engineKey, "model", value), refreshPanel();
@@ -8051,9 +8396,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   this.settings.engines[field] = value, BDFDB.DataUtils.save(this.settings.engines, this, "engines"), this.setLanguages(), this.SettingsUpdated = !0, refreshPanel();
                 }, "updateEngineSetting"), saveFilterSetting = /* @__PURE__ */ __name((key, value) => {
                   this.settings.filters || (this.settings.filters = {}), this.settings.filters[key] = value, BDFDB.DataUtils.save(value, this, "filters", key), this.SettingsUpdated = !0;
-                }, "saveFilterSetting"), createLanguageOptions = /* @__PURE__ */ __name((direction) => Object.keys(languages).filter((key) => !languages[key].special && (direction == languageTypes.INPUT || !languages[key].auto)).map((key) => ({
+                }, "saveFilterSetting"), createLanguageOptions = /* @__PURE__ */ __name((direction) => this.ensureSettingsStore().getLanguageIds().filter((key) => !this.ensureSettingsStore().getLanguage(key).special && (direction == languageTypes.INPUT || !this.ensureSettingsStore().getLanguage(key).auto)).map((key) => ({
                   value: key,
-                  label: this.getLanguageDisplayName(languages[key])
+                  label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
                 })).sort((a, b) => a.value == "auto" ? -1 : b.value == "auto" ? 1 : a.label.localeCompare(b.label)), "createLanguageOptions"), createLanguageSelector = /* @__PURE__ */ __name((place, direction, title) => BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
                   title,
                   className: BDFDB.disCN.marginbottom8,
@@ -8165,9 +8510,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           basis: "85%",
                           children: createStableSelect({
                             value: languageId,
-                            options: Object.keys(languages).filter((key) => !languages[key].auto && !languages[key].special).map((key) => ({
+                            options: this.ensureSettingsStore().getLanguageIds().filter((key) => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special).map((key) => ({
                               value: key,
-                              label: this.getLanguageDisplayName(languages[key])
+                              label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
                             })).sort((a, b) => a.label.localeCompare(b.label)),
                             onChange: /* @__PURE__ */ __name((value) => {
                               this.settings.filters.autoTranslateSourceLanguages[index] = value, BDFDB.DataUtils.save(this.settings.filters.autoTranslateSourceLanguages, this, "filters", "autoTranslateSourceLanguages"), this.SettingsUpdated = !0;
@@ -8218,9 +8563,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                           basis: "85%",
                           children: createStableSelect({
                             value: languageId,
-                            options: Object.keys(languages).filter((key) => !languages[key].auto && !languages[key].special).map((key) => ({
+                            options: this.ensureSettingsStore().getLanguageIds().filter((key) => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special).map((key) => ({
                               value: key,
-                              label: this.getLanguageDisplayName(languages[key])
+                              label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
                             })).sort((a, b) => a.label.localeCompare(b.label)),
                             onChange: /* @__PURE__ */ __name((value) => {
                               this.settings.filters.receivedAutoTranslateSourceLanguages[index] = value, BDFDB.DataUtils.save(this.settings.filters.receivedAutoTranslateSourceLanguages, this, "filters", "receivedAutoTranslateSourceLanguages"), this.SettingsUpdated = !0;
@@ -8327,9 +8672,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     type: "Switch",
                     label: this.getCustomText("paid_version_label"),
                     tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-                    value: authKeys[engineKey] && authKeys[engineKey].paid,
+                    value: this.ensureSettingsStore().getCredentialField(engineKey, "paid"),
                     onChange: /* @__PURE__ */ __name((value) => {
-                      authKeys[engineKey] || (authKeys[engineKey] = {}), authKeys[engineKey].paid = value, BDFDB.DataUtils.save(authKeys, this, "authKeys"), this.SettingsUpdated = !0;
+                      this.ensureSettingsStore().setCredentialFlag(engineKey, "paid", value), this.SettingsUpdated = !0;
                     }, "onChange")
                   })), engine.key && (items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
                     className: BDFDB.disCN.marginbottom8,
@@ -8338,7 +8683,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   })), items.push(createSecretInput({
                     fieldKey: `${engineKey}-key`,
                     placeholder: engine.key,
-                    value: authKeys[engineKey] && authKeys[engineKey].key,
+                    value: this.ensureSettingsStore().getCredentialField(engineKey, "key"),
                     onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "key", value), "onChange")
                   }))), engine.endpoint && (items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormTitle.Title, {
                     className: BDFDB.disCN.marginbottom8,
@@ -8347,7 +8692,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                   })), items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
                     className: BDFDB.disCN.marginbottom8,
                     placeholder: engine.endpoint,
-                    value: authKeys[engineKey] && authKeys[engineKey].endpoint,
+                    value: this.ensureSettingsStore().getCredentialField(engineKey, "endpoint"),
                     onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "endpoint", value), "onChange")
                   }))), engine.model) {
                     let modelCatalogState = this.modelCatalogState && this.modelCatalogState[engineKey], modelActions = [];
@@ -8367,7 +8712,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     })), items.push(createInlineHeader(this.getCustomText("model_id_label"), modelActions)), items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
                       className: BDFDB.disCN.marginbottom8,
                       placeholder: engine.model,
-                      value: authKeys[engineKey] && authKeys[engineKey].model,
+                      value: this.ensureSettingsStore().getCredentialField(engineKey, "model"),
                       onChange: /* @__PURE__ */ __name((value) => saveAuthField(engineKey, "model", value), "onChange")
                     })), modelCatalogState && modelCatalogState.loading && items.push(BDFDB.ReactUtils.createElement("div", {
                       className: BDFDB.disCN.marginbottom8,
@@ -8381,7 +8726,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
                     title: this.getCustomText("microsoft_region_label"),
                     className: BDFDB.disCN.marginbottom8,
                     children: createStableSelect({
-                      value: authKeys[engineKey] && authKeys[engineKey].region || "global",
+                      value: this.ensureSettingsStore().getCredentialField(engineKey, "region") || "global",
                       options: [
                         { value: "global", label: "Global" },
                         { value: "eastasia", label: "East Asia" },
@@ -8673,17 +9018,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             return originalContentData && originalContentData.content ? originalContentData.content : message.content || "";
           }
           ensureChannelLanguageChoiceScope(channelId, place) {
-            if (!channelId || !place) return null;
-            if (channelLanguages[channelId] || (channelLanguages[channelId] = {}), !channelLanguages[channelId][place]) {
-              channelLanguages[channelId][place] = {};
-              for (let typeKey in languageTypes) channelLanguages[channelId][place][languageTypes[typeKey]] = this.getLanguageChoice(languageTypes[typeKey], place, channelId);
-            }
-            return channelLanguages[channelId][place];
+            return this.ensureSettingsStore().ensureChannelLanguageChoiceScope(channelId, place);
           }
           setReplyTargetLanguageForChannel(channelId, languageId) {
-            if (!channelId || !languageId) return;
-            let scope = this.ensureChannelLanguageChoiceScope(channelId, messageTypes.SENT);
-            scope && (scope[languageTypes.OUTPUT] = languageId, BDFDB.DataUtils.save(channelLanguages, this, "channelLanguages"), this.setLanguages(), this.SettingsUpdated = !0);
+            !channelId || !languageId || (this.ensureSettingsStore().setChannelLanguageChoice(channelId, messageTypes.SENT, languageTypes.OUTPUT, languageId), this.setLanguages(), this.SettingsUpdated = !0);
           }
           extractLegacyDisplayedTranslationParts(content) {
             if (content = (content || "").trim(), !content) return { translatedContent: "", originalContent: "" };
@@ -10083,7 +10421,7 @@ __________________ __________________ __________________
           }
           prepareHistoricalTranslationJobItem(queueItem, job) {
             if (!queueItem || !queueItem.message || !this.isHistoricalTranslationJobCurrent(job)) return { status: "failed", reason: "stale_job" };
-            let channelId = job.channelId, input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {}), output = Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {}), prepared = this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
+            let channelId = job.channelId, input = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)) || {}), output = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)) || {}), prepared = this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
             return prepared ? prepared.cachedTranslation ? { status: "translated", translation: Object.assign({ channelId, auto: !0 }, prepared.cachedTranslation) } : prepared.skipped ? { status: "skipped", reason: prepared.skipReason || "local_guard" } : { status: "pending", prepared } : { status: "failed", reason: "prepare_failed" };
           }
           translateHistoricalTranslationJobBatch(preparedItems, job) {
@@ -10203,7 +10541,7 @@ __________________ __________________ __________________
           getHistoricalAiBatchEngineKey(channelId = null) {
             let engineKey = this.getEffectivePrimaryEngine(channelId);
             if (!["deepseek", "openai", "gemini", "oaicompat"].includes(engineKey)) return null;
-            let input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {}), output = Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {});
+            let input = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)) || {}), output = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)) || {});
             return !input.id || !output.id || output.special ? null : this.validTranslator(engineKey, input, output, null) ? engineKey : null;
           }
           prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output) {
@@ -10235,9 +10573,7 @@ __________________ __________________ __________________
             return this.ensureLiveTranslationQueue().processQueue();
           }
           forceUpdateAll() {
-            favorites = BDFDB.DataUtils.load(this, "favorites"), favorites = BDFDB.ArrayUtils.is(favorites) ? favorites : [], authKeys = BDFDB.DataUtils.load(this, "authKeys"), channelLanguages = BDFDB.DataUtils.load(this, "channelLanguages"), guildLanguages = BDFDB.DataUtils.load(this, "guildLanguages"), channelPrimaryEngineOverrides = this.normalizeStoredChannelPrimaryEngineOverrides(BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides")), this.ensureTranslationCacheStore().loadPersisted();
-            let storedTranslationEnabledStates = BDFDB.DataUtils.load(this, "translationEnabledStates"), storedReceivedAutoTranslationEnabledStates = BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates"), normalizedStoredTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedTranslationEnabledStates), normalizedStoredReceivedAutoTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedReceivedAutoTranslationEnabledStates);
-            translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates), (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) && this.saveChannelEnablementState(translationEnabledStates), this.ensureReceivedDisplayRuntime().clearAllSuppression(), this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.ensureReceivedDisplayRuntime().clearPreviews(null), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
+            this.ensureSettingsStore().reload(), this.ensureTranslationCacheStore().loadPersisted(), this.ensureReceivedDisplayRuntime().clearAllSuppression(), this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.ensureReceivedDisplayRuntime().clearPreviews(null), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
           }
           onMessageContextMenu(e) {
             if (e.instance.props.message && e.instance.props.channel) {
@@ -10341,7 +10677,7 @@ __________________ __________________ __________________
                   return this.shouldAutoTranslateSentMessage(cleanText, e.instance.props.channel.id, (shouldTranslate) => {
                     if (!shouldTranslate) return e2.originalMethod(Object.assign({}, e2.methodArguments[0], { value: cleanText }));
                     this.translateText(cleanText, messageTypes.SENT, (translation, input, output) => {
-                      output = { id: targetLanguage, name: languages[targetLanguage] ? languages[targetLanguage].name : targetLanguage }, translation = this.buildSentTranslationMessageValue(cleanText, translation, input, output), Promise.resolve(e2.originalMethod(Object.assign({}, e2.methodArguments[0], { value: translation }))).then((_2) => {
+                      output = { id: targetLanguage, name: (this.ensureSettingsStore().getLanguage(targetLanguage) || {}).name || targetLanguage }, translation = this.buildSentTranslationMessageValue(cleanText, translation, input, output), Promise.resolve(e2.originalMethod(Object.assign({}, e2.methodArguments[0], { value: translation }))).then((_2) => {
                         this.trackPendingSentOriginal(e.instance.props.channel.id, cleanText, translation);
                       });
                     }, targetLanguage, { channelId: e.instance.props.channel.id });
@@ -10409,8 +10745,8 @@ __________________ __________________ __________________
               getBatchEngineKey: /* @__PURE__ */ __name((channelId) => this.getHistoricalAiBatchEngineKey(channelId), "getBatchEngineKey"),
               createBurstContext: /* @__PURE__ */ __name((channelId) => ({
                 engineKey: this.getHistoricalAiBatchEngineKey(channelId),
-                input: Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {}),
-                output: Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {})
+                input: Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)) || {}),
+                output: Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)) || {})
               }), "createBurstContext"),
               prepareBurstItem: /* @__PURE__ */ __name((queueItem, channelId, context) => this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, context.input, context.output), "prepareBurstItem"),
               requestBurstTranslation: /* @__PURE__ */ __name((context, prepared) => this.requestAiBatchTranslation(context.engineKey, prepared), "requestBurstTranslation"),
@@ -10460,6 +10796,35 @@ __________________ __________________ __________________
               isOwnMessage: /* @__PURE__ */ __name((message) => this.isOwnMessage(message), "isOwnMessage")
             })), this.sentTranslationStoreInstance;
           }
+          ensureSettingsStore() {
+            return this.settingsStoreInstance || (this.settingsStoreInstance = createSettingsStore({
+              isKnownEngine: /* @__PURE__ */ __name((engineKey) => !!translationEngines[engineKey], "isKnownEngine"),
+              sortLanguages: /* @__PURE__ */ __name((table) => BDFDB.ObjectUtils.sort(table, "fav"), "sortLanguages"),
+              resolveGuildId: /* @__PURE__ */ __name((channelId) => {
+                let channel = channelId && BDFDB.LibraryStores.ChannelStore.getChannel(channelId);
+                return channel ? channel.guild_id ? channel.guild_id : "@me" : null;
+              }, "resolveGuildId"),
+              loadFavorites: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "favorites"), "loadFavorites"),
+              persistFavorites: /* @__PURE__ */ __name((value) => BDFDB.DataUtils.save(value, this, "favorites"), "persistFavorites"),
+              loadAuthKeys: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "authKeys"), "loadAuthKeys"),
+              persistAuthKeys: /* @__PURE__ */ __name((value) => BDFDB.DataUtils.save(value, this, "authKeys"), "persistAuthKeys"),
+              loadChannelLanguages: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "channelLanguages"), "loadChannelLanguages"),
+              persistChannelLanguages: /* @__PURE__ */ __name((value) => BDFDB.DataUtils.save(value, this, "channelLanguages"), "persistChannelLanguages"),
+              loadGuildLanguages: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "guildLanguages"), "loadGuildLanguages"),
+              persistGuildLanguages: /* @__PURE__ */ __name((value) => BDFDB.DataUtils.save(value, this, "guildLanguages"), "persistGuildLanguages"),
+              loadChannelPrimaryEngineOverrides: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides"), "loadChannelPrimaryEngineOverrides"),
+              persistChannelPrimaryEngineOverrides: /* @__PURE__ */ __name((value) => BDFDB.DataUtils.save(value, this, "channelPrimaryEngineOverrides"), "persistChannelPrimaryEngineOverrides"),
+              loadTranslationEnabledStates: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "translationEnabledStates"), "loadTranslationEnabledStates"),
+              loadReceivedAutoTranslationEnabledStates: /* @__PURE__ */ __name(() => BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates"), "loadReceivedAutoTranslationEnabledStates"),
+              persistChannelEnablementState: /* @__PURE__ */ __name((value) => {
+                BDFDB.DataUtils.save(value, this, "translationEnabledStates"), BDFDB.DataUtils.save(value, this, "receivedAutoTranslationEnabledStates");
+              }, "persistChannelEnablementState"),
+              loadGlobalLanguageChoice: /* @__PURE__ */ __name((place, direction) => this.settings.choices[place] && this.settings.choices[place][direction], "loadGlobalLanguageChoice"),
+              persistGlobalLanguageChoice: /* @__PURE__ */ __name((place, direction, choice) => {
+                this.settings.choices[place][direction] = choice, BDFDB.DataUtils.save(this.settings.choices, this, "choices");
+              }, "persistGlobalLanguageChoice")
+            })), this.settingsStoreInstance;
+          }
           ensureProviderClient() {
             return this.providerClientInstance || (this.providerClientInstance = createProviderClient({
               request: /* @__PURE__ */ __name((url, options, callback) => BDFDB.LibraryRequires.request(url, options, callback), "request"),
@@ -10469,9 +10834,9 @@ __________________ __________________ __________________
               // leave the awaiting promise pending forever once the plugin stops.
               sleep: /* @__PURE__ */ __name((ms) => new Promise((resolve) => setTimeout(resolve, ms)), "sleep"),
               now: /* @__PURE__ */ __name(() => Date.now(), "now"),
-              getAuthKeys: /* @__PURE__ */ __name(() => authKeys, "getAuthKeys"),
-              saveAuthKeys: /* @__PURE__ */ __name((value) => BDFDB.DataUtils.save(value, this, "authKeys"), "saveAuthKeys"),
-              getLanguages: /* @__PURE__ */ __name(() => languages, "getLanguages"),
+              getAuthKeys: /* @__PURE__ */ __name(() => this.ensureSettingsStore().getAuthKeys(), "getAuthKeys"),
+              saveAuthKeys: /* @__PURE__ */ __name((value) => this.ensureSettingsStore().replaceAuthKeys(value), "saveAuthKeys"),
+              getLanguages: /* @__PURE__ */ __name(() => this.ensureSettingsStore().getLanguages(), "getLanguages"),
               notify: /* @__PURE__ */ __name((message, options) => BDFDB.NotificationUtils.toast(message, options), "notify"),
               getLabels: /* @__PURE__ */ __name(() => this.labels, "getLabels"),
               getCustomText: /* @__PURE__ */ __name((key) => this.getCustomText(key), "getCustomText"),
@@ -10806,20 +11171,14 @@ __________________ __________________ __________________
             this.processChannelTitlePatch(e);
           }
           normalizeStoredChannelPrimaryEngineOverrides(overrides) {
-            if (!overrides || typeof overrides != "object" || Array.isArray(overrides)) return {};
-            let normalizedOverrides = {};
-            for (let channelId in overrides) {
-              let engineKey = overrides[channelId];
-              !channelId || typeof engineKey != "string" || !translationEngines[engineKey] || (normalizedOverrides[channelId] = engineKey);
-            }
-            return normalizedOverrides;
+            return this.ensureSettingsStore().normalizeStoredChannelPrimaryEngineOverrides(overrides);
           }
           getGlobalPrimaryEngine() {
             let engineKey = this.settings && this.settings.engines && this.settings.engines.translator;
             return translationEngines[engineKey] ? engineKey : Object.keys(translationEngines)[0];
           }
           getEffectivePrimaryEngine(channelId = null) {
-            return channelId && translationEngines[channelPrimaryEngineOverrides[channelId]] ? channelPrimaryEngineOverrides[channelId] : this.getGlobalPrimaryEngine();
+            return this.ensureSettingsStore().getChannelPrimaryEngineOverride(channelId) || this.getGlobalPrimaryEngine();
           }
           getEffectiveBackupEngine(channelId = null) {
             let backupEngineKey = this.settings && this.settings.engines && this.settings.engines.backup;
@@ -10843,68 +11202,43 @@ __________________ __________________ __________________
             return output && output.special ? !0 : this.engineSupportsLanguage(engineKey, input) && this.engineSupportsLanguage(engineKey, output);
           }
           hasChannelPrimaryEngineOverride(channelId) {
-            return !!channelId && Object.prototype.hasOwnProperty.call(channelPrimaryEngineOverrides, channelId) && !!translationEngines[channelPrimaryEngineOverrides[channelId]];
+            return this.ensureSettingsStore().hasChannelPrimaryEngineOverride(channelId);
           }
           saveChannelPrimaryEngineOverrides() {
-            BDFDB.DataUtils.save(channelPrimaryEngineOverrides, this, "channelPrimaryEngineOverrides");
+            this.ensureSettingsStore().saveChannelPrimaryEngineOverrides();
           }
           setChannelPrimaryEngine(channelId, engineKey) {
-            return !channelId || !translationEngines[engineKey] ? !1 : (channelPrimaryEngineOverrides[channelId] = engineKey, this.saveChannelPrimaryEngineOverrides(), !0);
+            return this.ensureSettingsStore().setChannelPrimaryEngine(channelId, engineKey);
           }
           clearChannelPrimaryEngineOverride(channelId) {
-            return !channelId || !Object.prototype.hasOwnProperty.call(channelPrimaryEngineOverrides, channelId) ? !1 : (delete channelPrimaryEngineOverrides[channelId], this.saveChannelPrimaryEngineOverrides(), !0);
+            return this.ensureSettingsStore().clearChannelPrimaryEngineOverride(channelId);
           }
           refreshChannelPrimaryEngineRuntime(channelId) {
             channelId && (this.clearDisplayedAutoTranslations(channelId), this.clearAutoTranslationQueue(channelId), this.resetAutoTranslationTracking(channelId), this.scheduleTranslationRerender(), this.processAutoTranslationQueue());
           }
           createEmptyChannelEnablementState(globalDefault = !1) {
-            return {
-              globalDefault: !!globalDefault,
-              channelOverrides: {}
-            };
+            return createEmptyChannelEnablementState(globalDefault);
           }
           normalizeStoredChannelEnablementState(state) {
-            if (!state || typeof state != "object" || Array.isArray(state)) return null;
-            let normalizedState = this.createEmptyChannelEnablementState(state.globalDefault), overrides = state.channelOverrides;
-            if (!overrides || typeof overrides != "object" || Array.isArray(overrides)) return normalizedState;
-            for (let channelId in overrides)
-              channelId && typeof overrides[channelId] == "boolean" && (normalizedState.channelOverrides[channelId] = overrides[channelId]);
-            return normalizedState;
+            return normalizeStoredChannelEnablementState(state);
           }
           migrateLegacyChannelEnablementState(stateKeys) {
-            let normalizedState = this.createEmptyChannelEnablementState(!1);
-            for (let stateKey of stateKeys || [])
-              typeof stateKey != "string" || !stateKey || stateKey == "global" || (normalizedState.channelOverrides[stateKey] = !0);
-            return normalizedState;
+            return migrateLegacyChannelEnablementState(stateKeys);
           }
           loadChannelEnablementState(primaryStoredState, secondaryStoredState) {
-            let normalizedPrimaryState = this.normalizeStoredChannelEnablementState(primaryStoredState) || (BDFDB.ArrayUtils.is(primaryStoredState) ? this.migrateLegacyChannelEnablementState(primaryStoredState) : null), normalizedSecondaryState = this.normalizeStoredChannelEnablementState(secondaryStoredState) || (BDFDB.ArrayUtils.is(secondaryStoredState) ? this.migrateLegacyChannelEnablementState(secondaryStoredState) : null);
-            return {
-              globalDefault: !1,
-              channelOverrides: Object.assign({}, normalizedSecondaryState && normalizedSecondaryState.channelOverrides, normalizedPrimaryState && normalizedPrimaryState.channelOverrides)
-            };
+            return loadChannelEnablementState(primaryStoredState, secondaryStoredState);
           }
           getChannelEnablementStateValue(channelId, state) {
-            let normalizedState = this.normalizeStoredChannelEnablementState(state) || this.createEmptyChannelEnablementState(!1);
-            return channelId && Object.prototype.hasOwnProperty.call(normalizedState.channelOverrides, channelId) ? normalizedState.channelOverrides[channelId] : normalizedState.globalDefault;
+            return getChannelEnablementStateValue(channelId, state);
           }
           channelEnablementStatesEqual(leftState, rightState) {
-            let normalizedLeftState = this.normalizeStoredChannelEnablementState(leftState) || this.createEmptyChannelEnablementState(!1), normalizedRightState = this.normalizeStoredChannelEnablementState(rightState) || this.createEmptyChannelEnablementState(!1);
-            if (normalizedLeftState.globalDefault != normalizedRightState.globalDefault) return !1;
-            let leftChannelIds = Object.keys(normalizedLeftState.channelOverrides), rightChannelIds = Object.keys(normalizedRightState.channelOverrides);
-            if (leftChannelIds.length != rightChannelIds.length) return !1;
-            for (let channelId of leftChannelIds) if (normalizedLeftState.channelOverrides[channelId] != normalizedRightState.channelOverrides[channelId]) return !1;
-            return !0;
+            return channelEnablementStatesEqual(leftState, rightState);
           }
           saveChannelEnablementState(nextState) {
-            translationEnabledStates = nextState, BDFDB.DataUtils.save(nextState, this, "translationEnabledStates"), BDFDB.DataUtils.save(nextState, this, "receivedAutoTranslationEnabledStates");
+            return this.ensureSettingsStore().saveChannelEnablementState(nextState);
           }
           setChannelEnablementStateValue(channelId, enabled) {
-            let currentState = this.normalizeStoredChannelEnablementState(translationEnabledStates) || this.createEmptyChannelEnablementState(!1), nextState = {
-              globalDefault: !1,
-              channelOverrides: Object.assign({}, currentState.channelOverrides)
-            };
-            return channelId ? (enabled == nextState.globalDefault ? delete nextState.channelOverrides[channelId] : nextState.channelOverrides[channelId] = !!enabled, this.saveChannelEnablementState(nextState), nextState) : currentState;
+            return this.ensureSettingsStore().setChannelEnablementStateValue(channelId, enabled);
           }
           async toggleTranslation(channelId) {
             let wasEnabled = this.isTranslationEnabled(channelId);
@@ -10916,7 +11250,7 @@ __________________ __________________ __________________
             this.resetAutoTranslationTracking(channelId), this.scheduleTranslationRerender(), this.processAutoTranslationQueue();
           }
           isTranslationEnabled(channelId) {
-            return this.getChannelEnablementStateValue(channelId, translationEnabledStates);
+            return this.ensureSettingsStore().isTranslationEnabled(channelId);
           }
           toggleReceivedAutoTranslation(channelId) {
             return this.toggleTranslation(channelId);
@@ -10926,8 +11260,7 @@ __________________ __________________ __________________
           }
           setLanguages() {
             this.settings.engines.translator == this.settings.engines.backup && (this.settings.engines.backup = Object.keys(translationEngines).filter((n) => n != this.settings.engines.translator)[0], BDFDB.DataUtils.save(this.settings.engines, this, "engines"));
-            let languageIds = Object.values(translationEngines).reduce((ids, translationEngine) => ids.concat(translationEngine.languages || []), []);
-            languages = BDFDB.ObjectUtils.deepAssign(
+            let languageIds = Object.values(translationEngines).reduce((ids, translationEngine) => ids.concat(translationEngine.languages || []), []), builtLanguages = BDFDB.ObjectUtils.deepAssign(
               Object.values(translationEngines).some((translationEngine) => translationEngine.auto) ? {
                 auto: {
                   auto: !0,
@@ -10959,11 +11292,10 @@ __________________ __________________ __________________
                 }
               }
             );
-            for (let id in languages) languages[id].fav = favorites.includes(id) ? 0 : 1;
-            languages = BDFDB.ObjectUtils.sort(languages, "fav");
+            this.ensureSettingsStore().setLanguages(builtLanguages);
           }
           getLanguageData(language) {
-            return language ? typeof language == "string" ? languages[language] || BDFDB.LanguageUtils.languages[language] || { id: language, name: language } : language : null;
+            return language ? typeof language == "string" ? this.ensureSettingsStore().getLanguage(language) || BDFDB.LanguageUtils.languages[language] || { id: language, name: language } : language : null;
           }
           getChineseLanguageName(languageId) {
             if (!languageId) return "";
@@ -11084,12 +11416,10 @@ __________________ __________________ __________________
             }) : null;
           }
           getLanguageChoice(direction, place, channelId) {
-            let choice, channel = channelId && BDFDB.LibraryStores.ChannelStore.getChannel(channelId), guildId = channel ? channel.guild_id ? channel.guild_id : "@me" : null;
-            return channelLanguages[channelId] && channelLanguages[channelId][place] ? choice = channelLanguages[channelId][place][direction] : guildId && guildLanguages[guildId] && guildLanguages[guildId][place] ? choice = guildLanguages[guildId][place][direction] : choice = this.settings.choices[place] && this.settings.choices[place][direction], choice = languages[choice] ? choice : Object.keys(languages)[0], choice = direction == languageTypes.OUTPUT && choice == "auto" ? "en" : choice, choice;
+            return this.ensureSettingsStore().getLanguageChoice(direction, place, channelId);
           }
           saveLanguageChoice(choice, direction, place, channelId) {
-            let channel = channelId && BDFDB.LibraryStores.ChannelStore.getChannel(channelId), guildId = channel ? channel.guild_id ? channel.guild_id : "@me" : null;
-            channelLanguages[channelId] && channelLanguages[channelId][place] ? (channelLanguages[channelId][place][direction] = choice, BDFDB.DataUtils.save(channelLanguages, this, "channelLanguages")) : guildLanguages[guildId] && guildLanguages[guildId][place] ? (guildLanguages[guildId][place][direction] = choice, BDFDB.DataUtils.save(guildLanguages, this, "guildLanguages")) : (this.settings.choices[place][direction] = choice, BDFDB.DataUtils.save(this.settings.choices, this, "choices"));
+            this.ensureSettingsStore().saveLanguageChoice(choice, direction, place, channelId);
           }
           getAutoTranslateSourceLanguages() {
             return languagePolicy.getConcreteConfiguredLanguages(this, "autoTranslateSourceLanguages");
@@ -11305,7 +11635,7 @@ __________________ __________________ __________________
               if (isSkip) return complete("", input, output, { skipped: !0 });
               if (translation && wrongTarget) return complete("", input, output, { failed: !0, wrongTargetLanguage: !0 });
               complete(translation == text ? "" : translation, input, output, { failed: !translation });
-            }, "finishTranslation"), [newText, protectedSegments, translate] = this.removeExceptions(text.trim(), place), channelId = options.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), primaryEngineKey = this.getEffectivePrimaryEngine(channelId), backupEngineKey = this.getEffectiveBackupEngine(channelId), input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, place, channelId)]), output = forcedOutputLanguage ? Object.assign({}, languages[forcedOutputLanguage] || { id: forcedOutputLanguage, name: forcedOutputLanguage }) : Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, place, channelId)]);
+            }, "finishTranslation"), [newText, protectedSegments, translate] = this.removeExceptions(text.trim(), place), channelId = options.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), primaryEngineKey = this.getEffectivePrimaryEngine(channelId), backupEngineKey = this.getEffectiveBackupEngine(channelId), input = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.INPUT, place, channelId))), output = forcedOutputLanguage ? Object.assign({}, this.ensureSettingsStore().getLanguage(forcedOutputLanguage) || { id: forcedOutputLanguage, name: forcedOutputLanguage }) : Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, place, channelId)));
             if (translate && input.id != output.id) {
               let specialCase = this.checkForSpecialCase(newText, input);
               if (specialCase)
