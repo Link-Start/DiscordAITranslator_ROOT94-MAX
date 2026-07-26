@@ -59,7 +59,12 @@ function createPluginInstance(options = {}) {
 			rerenderAll: () => {}
 		},
 		PatchUtils: {
+			patch: () => {},
 			forceAllUpdates: () => {}
+		},
+		LibraryModules: {
+			MessageUtils: {},
+			MessageToolbarUtils: {}
 		},
 		LibraryStores: {
 			ChannelStore: {
