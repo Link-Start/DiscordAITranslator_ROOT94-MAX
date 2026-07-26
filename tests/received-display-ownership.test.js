@@ -13,37 +13,55 @@ const path = require("node:path");
 // The maps this file used to guard (translatedMessages, oldMessages) no longer exist
 // anywhere in the tree, so asserting their absence proved nothing. The repaint contract is
 // what survived.
-const source = fs.readFileSync(path.resolve(__dirname, "..", "src", "legacy", "runtime.js"), "utf8");
+function read(...parts) {
+	return fs.readFileSync(path.resolve(__dirname, "..", ...parts), "utf8");
+}
+
+// The commit paths are spread across the plugin class and the display logic module, so
+// every slice below names the file it expects to find its method in. A method that moves
+// makes this file fail loudly rather than silently stop checking anything.
+const SOURCES = {
+	runtime: read("src", "legacy", "runtime.js"),
+	displayLogic: read("src", "display", "translation-display-logic.js")
+};
 
 // Named here so a rename cannot silently turn every assertion below into a tautology.
 const FULL_LIST_REPAINT = /scheduleTranslationRerender|PatchUtils\.forceAllUpdates/;
 const LEGACY_WHOLE_MESSAGE_WRITER = /applyStoredTranslationToMessage/;
 
-function findMethodStart(name, fromIndex = 0) {
-	const candidates = [`\n\t\t\t${name} (`, `\n\t\t\tasync ${name} (`, `\n\t\t\t${name}(`, `\n\t\t\tasync ${name}(`]
-		.map(pattern => source.indexOf(pattern, fromIndex))
-		.filter(index => index !== -1);
+function findMethodStart(source, name, fromIndex = 0) {
+	const candidates = [];
+	for (const indent of ["\n\t\t\t", "\n\t\t"]) {
+		for (const prefix of ["", "async "]) {
+			for (const spacing of [" (", "("]) {
+				const index = source.indexOf(`${indent}${prefix}${name}${spacing}`, fromIndex);
+				if (index !== -1) candidates.push(index);
+			}
+		}
+	}
 	return candidates.length ? Math.min(...candidates) : -1;
 }
 
-function methodSlice(name, nextName) {
-	const start = findMethodStart(name);
-	assert.notEqual(start, -1, `${name} method not found`);
-	const end = findMethodStart(nextName, start + 1);
-	assert.notEqual(end, -1, `${nextName} method not found after ${name}`);
+function methodSlice(sourceKey, name, nextName) {
+	const source = SOURCES[sourceKey];
+	const start = findMethodStart(source, name);
+	assert.notEqual(start, -1, `${name} method not found in ${sourceKey}`);
+	const end = findMethodStart(source, nextName, start + 1);
+	assert.notEqual(end, -1, `${nextName} method not found after ${name} in ${sourceKey}`);
 	return source.slice(start, end);
 }
 
 test("the guarded identifiers still exist, so these contracts are not vacuous", () => {
-	assert.match(source, FULL_LIST_REPAINT);
-	assert.match(source, LEGACY_WHOLE_MESSAGE_WRITER);
+	assert.match(SOURCES.runtime, FULL_LIST_REPAINT);
+	assert.match(SOURCES.runtime, LEGACY_WHOLE_MESSAGE_WRITER);
+	assert.match(SOURCES.displayLogic, LEGACY_WHOLE_MESSAGE_WRITER);
 });
 
 test("commit paths repaint the messages they touched, never the whole list", () => {
 	const commitMethods = [
-		methodSlice("commitReceivedDisplayResult", "commitHistoricalReceivedDisplayBatch"),
-		methodSlice("commitHistoricalReceivedDisplayBatch", "getReceivedDisplayView"),
-		methodSlice("commitHistoricalTranslationJob", "rerenderHistoricalTranslationJob")
+		methodSlice("runtime", "commitReceivedDisplayResult", "commitHistoricalReceivedDisplayBatch"),
+		methodSlice("runtime", "commitHistoricalReceivedDisplayBatch", "getReceivedDisplayView"),
+		methodSlice("runtime", "commitHistoricalTranslationJob", "rerenderHistoricalTranslationJob")
 	];
 	for (const method of commitMethods) {
 		assert.doesNotMatch(method, FULL_LIST_REPAINT);
@@ -52,14 +70,14 @@ test("commit paths repaint the messages they touched, never the whole list", () 
 });
 
 test("the received display commit path delegates to the display runtime", () => {
-	assert.match(methodSlice("commitReceivedDisplayResult", "commitHistoricalReceivedDisplayBatch"), /ensureReceivedDisplayRuntime\(\)\.commitMessageResult/);
-	assert.match(methodSlice("commitHistoricalReceivedDisplayBatch", "getReceivedDisplayView"), /ensureReceivedDisplayRuntime\(\)\.commitHistoricalBatch/);
+	assert.match(methodSlice("runtime", "commitReceivedDisplayResult", "commitHistoricalReceivedDisplayBatch"), /ensureReceivedDisplayRuntime\(\)\.commitMessageResult/);
+	assert.match(methodSlice("runtime", "commitHistoricalReceivedDisplayBatch", "getReceivedDisplayView"), /ensureReceivedDisplayRuntime\(\)\.commitHistoricalBatch/);
 });
 
 test("automatic translation flows never fall back to the whole-list repaint", () => {
 	const flowSlices = [
-		methodSlice("commitCachedDisplayResult", "resolveCheckMessageDisplay"),
-		methodSlice("resolveLoadedMessageContentTranslation", "prepareMessageContentDisplay")
+		methodSlice("runtime", "commitCachedDisplayResult", "resolveCheckMessageDisplay"),
+		methodSlice("displayLogic", "resolveLoadedMessageContentTranslation", "prepareMessageContentDisplay")
 	];
 	for (const flow of flowSlices) {
 		assert.doesNotMatch(flow, FULL_LIST_REPAINT);
