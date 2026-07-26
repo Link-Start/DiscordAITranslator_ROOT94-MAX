@@ -4896,9 +4896,11 @@ var require_loaded_translation_status_store = __commonJS({
       setTimeout: scheduleTimer = null,
       clearTimeout: cancelTimer = null,
       isChineseUiLanguage = /* @__PURE__ */ __name(() => !1, "isChineseUiLanguage"),
-      stalledAfterMs = 45e3
+      stalledAfterMs = 45e3,
+      requestFrame = /* @__PURE__ */ __name((callback) => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : globalThis.setTimeout(callback, 16), "requestFrame"),
+      cancelFrame = /* @__PURE__ */ __name((handle) => typeof cancelAnimationFrame == "function" ? cancelAnimationFrame(handle) : globalThis.clearTimeout(handle), "cancelFrame")
     } = {}) {
-      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), status = createEmptyStatus(), hideTimer = null, seenMessages = {};
+      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), positionFrame = null, status = createEmptyStatus(), hideTimer = null, seenMessages = {};
       function resolvePhase(previous, next, updates) {
         if (updates && typeof updates.phase == "string" && LOADED_STATUS_PHASE_SET.has(updates.phase)) return updates.phase;
         if (next.done) return "done";
@@ -5000,6 +5002,19 @@ var require_loaded_translation_status_store = __commonJS({
           seenMessages[key] || (seenMessages[key] = {});
           let wasSeen = !!seenMessages[key][messageKey];
           return seenMessages[key][messageKey] = !0, wasSeen;
+        },
+        // The banner is repositioned after every status change, and a historical batch
+        // changes the status once per message. Repositioning reads getBoundingClientRect,
+        // which forces a synchronous layout, so the callers used to pay for two of those
+        // per message - one immediate, one in an undeduped animation frame. One frame is
+        // enough, and coalescing means a burst of N updates costs one layout, not 2N.
+        schedulePosition(callback) {
+          return typeof callback != "function" || positionFrame !== null ? !1 : (positionFrame = requestFrame(() => {
+            positionFrame = null, callback();
+          }), !0);
+        },
+        cancelScheduledPosition() {
+          positionFrame !== null && (cancelFrame(positionFrame), positionFrame = null);
         },
         // The seen map only serves boundary dedup inside the active channel session;
         // keeping it for left channels grows memory for the whole Discord session.
@@ -5859,7 +5874,7 @@ var require_historical_translation_job = __commonJS({
               validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || { ok: !1 };
             } catch {
             }
-            validation.ok ? (record.status = "translated", record.translation = validation.translation) : record.status = "repairing";
+            validation.ok ? (record.status = "translated", record.translation = validation.translation) : validation.skipped ? (record.status = "skipped", record.reason = validation.reason || "skipped") : record.status = "repairing";
           }
         }
         if (this.state == "cancelled") return this.createSummary();
@@ -5882,7 +5897,7 @@ var require_historical_translation_job = __commonJS({
                 validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || { ok: !1 };
               } catch {
               }
-              validation.ok && (record.status = "translated", record.translation = validation.translation);
+              validation.ok ? (record.status = "translated", record.translation = validation.translation) : validation.skipped && (record.status = "skipped", record.reason = validation.reason || "skipped");
             }
           }
         }
@@ -9876,11 +9891,11 @@ __________________ __________________ __________________
             for (let element of elements)
               element && element.remove && element.remove();
           }
-          findNativeTextAreaStatusElement(anchorRect = null) {
+          findNativeTextAreaStatusElement(anchorRect = null, anchorElement = null) {
             if (typeof document > "u") return null;
             let candidates = [];
             try {
-              candidates = Array.from(document.querySelectorAll("div, span"));
+              candidates = Array.from((anchorElement && anchorElement.parentElement || anchorElement || document).querySelectorAll("div, span"));
             } catch {
               return null;
             }
@@ -9933,7 +9948,7 @@ __________________ __________________ __________________
             element.style.maxWidth = `${Math.round(maxStatusWidth)}px`;
             let measuredRect = element.getBoundingClientRect ? element.getBoundingClientRect() : null, statusWidth = Math.max(180, Math.min(measuredRect && measuredRect.width || element.offsetWidth || 260, maxStatusWidth)), statusHeight = Math.max(18, measuredRect && measuredRect.height || element.offsetHeight || 20);
             if (element.style.right = "auto", element.style.bottom = "auto", anchor && anchor.getBoundingClientRect) {
-              let rect = anchor.getBoundingClientRect(), nativeStatus = this.findNativeTextAreaStatusElement(rect), left = rect.right - statusWidth - viewportPadding, top = rect.top - statusHeight - 8;
+              let rect = anchor.getBoundingClientRect(), nativeStatus = this.findNativeTextAreaStatusElement(rect, anchor), left = rect.right - statusWidth - viewportPadding, top = rect.top - statusHeight - 8;
               if (nativeStatus && nativeStatus.getBoundingClientRect) {
                 let nativeRect = nativeStatus.getBoundingClientRect();
                 left = Math.max(rect.left + 8, Math.min(nativeRect.right - statusWidth, rect.right - statusWidth - 8)), top = nativeRect.top - statusHeight - 8;
@@ -10007,7 +10022,7 @@ __________________ __________________ __________________
               let retryResult = this.retryFailedHistoricalTranslations(currentStatus.channelId);
               retryResult && typeof retryResult.catch == "function" && retryResult.catch((_2) => {
               });
-            }) : retryButton && retryButton.remove(), element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus), this.updateInlineLoadedAutoTranslationStatusElements(), this.positionLoadedAutoTranslationStatusElement(element), requestAnimationFrame((_2) => this.positionLoadedAutoTranslationStatusElement(element));
+            }) : retryButton && retryButton.remove(), element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus), this.updateInlineLoadedAutoTranslationStatusElements(), loadedTranslationStatusStore.schedulePosition((_2) => this.positionLoadedAutoTranslationStatusElement(element));
           }
           hideLoadedAutoTranslationStatus(delay = 1600) {
             if (loadedTranslationStatusStore.cancelHide(), this.shouldShowLoadedAutoTranslationStatus(loadedTranslationStatusStore.getStatus())) {
@@ -10560,7 +10575,7 @@ __________________ __________________ __________________
             let channelId = queueItem.channel.id;
             if (!this.isTranslationEnabled(channelId)) return !1;
             let entry = this.getHistoricalTranslationJobQueue(channelId), job = entry.jobs[entry.jobs.length - 1];
-            return job && job.state == "collecting" && !job.sealed && job.items.size >= this.getReceivedAutoTranslateLoadedLimit() || ((!job || job.state != "collecting" || job.sealed) && (job = this.createCollectedHistoricalTranslationJob(channelId)), !job.add(queueItem)) ? !1 : (this.ensureLiveTranslationQueue().markMessageQueued(queueItem.message.id, { type: "historical", channelId, jobId: job.id }), queueItem.deferHistoricalSnapshotStart || this.scheduleHistoricalTranslationJobStart(channelId), this.updateHistoricalTranslationJobStatus(job), !0);
+            return job && job.state == "collecting" && !job.sealed && job.items.size >= this.getReceivedAutoTranslateLoadedLimit() || ((!job || job.state != "collecting" || job.sealed) && (job = this.createCollectedHistoricalTranslationJob(channelId)), !job.add(queueItem)) ? !1 : (this.ensureLiveTranslationQueue().markMessageQueued(queueItem.message.id, { type: "historical", channelId, jobId: job.id }), queueItem.deferHistoricalSnapshotStart || this.scheduleHistoricalTranslationJobStart(channelId), !0);
           }
           scheduleHistoricalTranslationJobStart(channelId) {
             let entry = this.getHistoricalTranslationJobQueue(channelId, !1);
@@ -10656,7 +10671,8 @@ __________________ __________________ __________________
             return engineKey ? this.awaitProviderBackoff().then((_2) => this.isHistoricalTranslationJobCurrent(job) ? this.requestAiBatchTranslation(engineKey, preparedItems) : null) : Promise.resolve(null);
           }
           validateHistoricalTranslationJobResult(prepared, rawTranslation, job) {
-            if (!prepared || rawTranslation == null || String(rawTranslation).trim() === "" || this.isSkipTranslationSignal(rawTranslation)) return { ok: !1 };
+            if (!prepared || rawTranslation == null || String(rawTranslation).trim() === "") return { ok: !1 };
+            if (this.isSkipTranslationSignal(rawTranslation)) return { ok: !1, skipped: !0, reason: "ai_skip_signal" };
             let translatedText = String(rawTranslation).replace(/\[NEWLINE\]/g, `
 `).trim();
             if (!this.hasAllProtectionPlaceholders(translatedText, prepared.exceptions)) return { ok: !1 };

@@ -417,3 +417,44 @@ test("a full batch lifecycle keeps the counters and gains a working signal", () 
 	harness.store.update({active: false, collecting: false, done: true, phase: harness.store.getPhaseForJobState("committed")});
 	assert.equal(harness.store.getStatusText(), "已加载翻译：第 1 批完成，显示 20/21，失败 1");
 });
+
+test("repositioning coalesces into one frame per burst", () => {
+	// Repositioning the banner reads getBoundingClientRect, which forces a synchronous
+	// layout. A historical batch changes the status once per message, and the callers used
+	// to pay two layouts per change - one immediate, one in an undeduped animation frame.
+	// A burst of N updates must cost one layout, not 2N.
+	const frames = [];
+	const store = createLoadedTranslationStatusStore({
+		requestFrame: callback => {frames.push(callback); return frames.length;},
+		cancelFrame: handle => {frames[handle - 1] = null;}
+	});
+
+	let repositions = 0;
+	const reposition = () => {repositions++;};
+	for (let i = 0; i < 20; i++) store.schedulePosition(reposition);
+	assert.equal(frames.filter(Boolean).length, 1, "twenty updates must arm exactly one frame");
+	assert.equal(repositions, 0, "nothing repositions until the frame runs");
+
+	frames[0]();
+	assert.equal(repositions, 1);
+
+	// After the frame ran, the next burst may arm again.
+	store.schedulePosition(reposition);
+	assert.equal(frames.filter(Boolean).length, 2);
+});
+
+test("a cancelled reposition frame does not strand the guard", () => {
+	const frames = [];
+	const store = createLoadedTranslationStatusStore({
+		requestFrame: callback => {frames.push(callback); return frames.length;},
+		cancelFrame: handle => {frames[handle - 1] = null;}
+	});
+
+	let repositions = 0;
+	store.schedulePosition(() => {repositions++;});
+	store.cancelScheduledPosition();
+	assert.equal(frames.filter(Boolean).length, 0, "the pending frame must be cancelled");
+
+	// The guard must be clear, or a detach would block repositioning forever.
+	assert.equal(store.schedulePosition(() => {repositions++;}), true);
+});

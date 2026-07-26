@@ -884,7 +884,7 @@ test("cached historical translations commit without a provider request", async (
 	assert.equal(plugin.historicalDisplayBatchCommits[0][0].translation.translatedContent, "缓存译文");
 });
 
-test("invalid batch items are repaired before one atomic coordinator commit", async () => {
+test("invalid batch items are repaired, but a skip verdict is terminal", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
 	const repairedIds = [];
 	let rerenderCount = 0;
@@ -922,9 +922,14 @@ test("invalid batch items are repaired before one atomic coordinator commit", as
 
 	await plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
 
-	assert.deepEqual(repairedIds.sort(), ["invalid-language", "invalid-placeholder", "invalid-skip"]);
+	// A skip verdict is the answer the batch prompt asked for, so it is terminal and must
+	// NOT enter the repair ladder. Repairing it re-asked the provider with the skip option
+	// removed, so the retry could not even reproduce the verdict - one wasted serial round
+	// trip per skipped message, and the message sat showing a spinner in the meantime.
+	assert.deepEqual(repairedIds.sort(), ["invalid-language", "invalid-placeholder"]);
 	assert.equal(plugin.historicalDisplayBatchCommits.length, 1);
-	assert.deepEqual(plugin.historicalDisplayBatchCommits[0].filter(result => result.status === "translated").map(result => result.messageId).sort(), ["invalid-language", "invalid-placeholder", "invalid-skip"]);
+	assert.deepEqual(plugin.historicalDisplayBatchCommits[0].filter(result => result.status === "translated").map(result => result.messageId).sort(), ["invalid-language", "invalid-placeholder"]);
+	assert.deepEqual(plugin.historicalDisplayBatchCommits[0].filter(result => result.status === "skipped").map(result => result.messageId), ["invalid-skip"]);
 	assert.equal(rerenderCount, 0);
 });
 

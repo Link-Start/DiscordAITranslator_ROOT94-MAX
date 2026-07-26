@@ -1443,10 +1443,12 @@ module.exports = (_ => {
 				}
 			}
 
-			findNativeTextAreaStatusElement (anchorRect = null) {
+			findNativeTextAreaStatusElement (anchorRect = null, anchorElement = null) {
 				if (typeof document == "undefined") return null;
 				let candidates = [];
-				try {candidates = Array.from(document.querySelectorAll("div, span"));}
+				// Scoped to the input container: a document-wide scan read textContent off every
+				// div and span in the app, once per status update, once per message.
+				try {candidates = Array.from((anchorElement && anchorElement.parentElement || anchorElement || document).querySelectorAll("div, span"));}
 				catch (err) {return null;}
 				const matches = candidates.map(element => {
 					if (!element || element.id == "DiscordAITranslator-loaded-status" || !element.getBoundingClientRect) return null;
@@ -1514,7 +1516,7 @@ module.exports = (_ => {
 				element.style.bottom = "auto";
 				if (anchor && anchor.getBoundingClientRect) {
 					const rect = anchor.getBoundingClientRect();
-					const nativeStatus = this.findNativeTextAreaStatusElement(rect);
+					const nativeStatus = this.findNativeTextAreaStatusElement(rect, anchor);
 					let left = rect.right - statusWidth - viewportPadding;
 					let top = rect.top - statusHeight - 8;
 					if (nativeStatus && nativeStatus.getBoundingClientRect) {
@@ -1649,8 +1651,7 @@ module.exports = (_ => {
 				else if (retryButton) retryButton.remove();
 				element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus);
 				this.updateInlineLoadedAutoTranslationStatusElements();
-				this.positionLoadedAutoTranslationStatusElement(element);
-				requestAnimationFrame(_ => this.positionLoadedAutoTranslationStatusElement(element));
+				loadedTranslationStatusStore.schedulePosition(_ => this.positionLoadedAutoTranslationStatusElement(element));
 			}
 
 			hideLoadedAutoTranslationStatus (delay = 1600) {
@@ -2379,7 +2380,6 @@ module.exports = (_ => {
 				if (!job.add(queueItem)) return false;
 				this.ensureLiveTranslationQueue().markMessageQueued(queueItem.message.id, {type: "historical", channelId, jobId: job.id});
 				if (!queueItem.deferHistoricalSnapshotStart) this.scheduleHistoricalTranslationJobStart(channelId);
-				this.updateHistoricalTranslationJobStatus(job);
 				return true;
 			}
 
@@ -2532,7 +2532,9 @@ module.exports = (_ => {
 			}
 
 			validateHistoricalTranslationJobResult (prepared, rawTranslation, job) {
-				if (!prepared || rawTranslation == null || String(rawTranslation).trim() === "" || this.isSkipTranslationSignal(rawTranslation)) return {ok: false};
+				if (!prepared || rawTranslation == null || String(rawTranslation).trim() === "") return {ok: false};
+				// A skip verdict is terminal, not a failure - see historical-translation-job.js.
+				if (this.isSkipTranslationSignal(rawTranslation)) return {ok: false, skipped: true, reason: "ai_skip_signal"};
 				let translatedText = String(rawTranslation).replace(/\[NEWLINE\]/g, "\n").trim();
 				if (!this.hasAllProtectionPlaceholders(translatedText, prepared.exceptions)) return {ok: false};
 				translatedText = this.addExceptions(translatedText, prepared.exceptions);
@@ -4470,7 +4472,6 @@ module.exports = (_ => {
 			protectUnicodeEmojiSegments (string, protectedSegments = {}, count = 0) {
 				return protectionLogic.protectUnicodeEmojiSegments(this, string, protectedSegments, count);
 			}
-
 
 			createProtectionPlaceholder (count) {
 				return protectionLogic.createProtectionPlaceholder(this, count);
