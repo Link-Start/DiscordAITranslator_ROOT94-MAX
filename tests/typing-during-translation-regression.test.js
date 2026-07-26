@@ -19,7 +19,7 @@ test("channel text area editor is not disabled while translations are running", 
 	assert.equal(props.disabled, false);
 });
 
-test("translation refresh updates message components without remounting the chat layer", () => {
+test("the retained legacy manual-path refresh updates message components without remounting the chat layer", () => {
 	let chatLayerRerenders = 0;
 	const targetedUpdates = [];
 	const plugin = createBasePluginInstance({
