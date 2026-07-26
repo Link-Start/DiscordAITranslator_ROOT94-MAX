@@ -71,6 +71,15 @@ module.exports = (_ => {
 		const {createSentTranslationStore} = require("../sent/sent-translation-store");
 		const {createLiveTranslationQueue} = require("../orchestrator/live-translation-queue");
 		const {createHistoricalJobRegistry} = require("../orchestrator/historical-job-registry");
+		const {
+			createSettingsStore,
+			createEmptyChannelEnablementState,
+			normalizeStoredChannelEnablementState,
+			migrateLegacyChannelEnablementState,
+			loadChannelEnablementState,
+			getChannelEnablementStateValue,
+			channelEnablementStatesEqual
+		} = require("../settings/settings-store");
 		const {getLabelsForUiLanguage} = require("../i18n/labels");
 		const {getCustomTextValue} = require("../i18n/text");
 
@@ -131,9 +140,10 @@ module.exports = (_ => {
 			}
 			filterLanguages(direction, place) {
 				const isOutput = direction == languageTypes.OUTPUT;
-				const currentInput = languages[_this.getLanguageChoice(languageTypes.INPUT, place, this.props.channelId)];
-				const currentOutput = languages[_this.getLanguageChoice(languageTypes.OUTPUT, place, this.props.channelId)];
-				return BDFDB.ObjectUtils.toArray(BDFDB.ObjectUtils.map(isOutput ? BDFDB.ObjectUtils.filter(languages, lang => !lang.auto) : languages, (lang, id) => {
+				const settingsStore = _this.ensureSettingsStore();
+				const currentInput = settingsStore.getLanguage(_this.getLanguageChoice(languageTypes.INPUT, place, this.props.channelId));
+				const currentOutput = settingsStore.getLanguage(_this.getLanguageChoice(languageTypes.OUTPUT, place, this.props.channelId));
+				return BDFDB.ObjectUtils.toArray(BDFDB.ObjectUtils.map(isOutput ? BDFDB.ObjectUtils.filter(settingsStore.getLanguages(), lang => !lang.auto) : settingsStore.getLanguages(), (lang, id) => {
 					const input = isOutput ? currentInput : lang;
 					const output = isOutput ? lang : currentOutput;
 					const primarySupported = _this.engineSupportsLanguagePair(_this.getEffectivePrimaryEngine(this.props.channelId), input, output);
@@ -258,8 +268,8 @@ module.exports = (_ => {
 					this.renderChannelPrimaryEngine(),
 					this.renderLanguageDetector(),
 					Object.keys(_this.defaults.choices).map(place => {
-						let isChannelSpecific = channelLanguages[this.props.channelId] && channelLanguages[this.props.channelId][place];
-						let isGuildSpecific = !isChannelSpecific && guildLanguages[this.props.guildId] && guildLanguages[this.props.guildId][place];
+						let isChannelSpecific = _this.ensureSettingsStore().hasChannelLanguageScope(this.props.channelId, place);
+						let isGuildSpecific = !isChannelSpecific && _this.ensureSettingsStore().hasGuildLanguageScope(this.props.guildId, place);
 						return Object.keys(_this.defaults.choices[place].value).map(direction => [
 							BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FormItem, {
 								title: _this.labels[`language_choice_${direction.toLowerCase()}_${place.toLowerCase()}`] + ": ",
@@ -268,29 +278,9 @@ module.exports = (_ => {
 									name: isChannelSpecific || isGuildSpecific ? BDFDB.LibraryComponents.SvgIcon.Names.LOCK_CLOSED : BDFDB.LibraryComponents.SvgIcon.Names.LOCK_OPEN,
 									color: isChannelSpecific ? "var(--status-danger)" : isGuildSpecific ? "var(--status-warning)" : null,
 									onClick: _ => {
-										if (channelLanguages[this.props.channelId] && channelLanguages[this.props.channelId][place]) {
-											isChannelSpecific = false;
-											delete channelLanguages[this.props.channelId][place];
-											if (BDFDB.ObjectUtils.isEmpty(channelLanguages[this.props.channelId])) delete channelLanguages[this.props.channelId];
-										}
-										else if (guildLanguages[this.props.guildId] && guildLanguages[this.props.guildId][place]) {
-											isGuildSpecific = false;
-											isChannelSpecific = true;
-											delete guildLanguages[this.props.guildId][place];
-											if (BDFDB.ObjectUtils.isEmpty(guildLanguages[this.props.guildId])) delete guildLanguages[this.props.guildId];
-											if (!channelLanguages[this.props.channelId]) channelLanguages[this.props.channelId] = {};
-											channelLanguages[this.props.channelId][place] = {};
-											for (let l in languageTypes) channelLanguages[this.props.channelId][place][languageTypes[l]] = _this.getLanguageChoice(languageTypes[l], place, null);
-										}
-										else {
-											isGuildSpecific = true;
-											if (!guildLanguages[this.props.guildId]) guildLanguages[this.props.guildId] = {};
-											guildLanguages[this.props.guildId][place] = {};
-											for (let l in languageTypes) guildLanguages[this.props.guildId][place][languageTypes[l]] = _this.getLanguageChoice(languageTypes[l], place, null);
-										}
-										BDFDB.DataUtils.save(channelLanguages, _this, "channelLanguages");
-										BDFDB.DataUtils.save(guildLanguages, _this, "guildLanguages");
-										
+										const nextScope = _this.ensureSettingsStore().cycleLanguageChoiceScope(this.props.channelId, this.props.guildId, place);
+										isChannelSpecific = nextScope == "channel";
+										isGuildSpecific = nextScope == "guild";
 										BDFDB.ReactUtils.forceUpdate(this);
 									}
 								}, {
@@ -332,7 +322,7 @@ module.exports = (_ => {
 									maxMenuHeight: typeof window != "undefined" ? Math.max(150, Math.min(240, Math.floor(window.innerHeight * 0.36))) : 220,
 									value: _this.getLanguageChoice(direction, place, this.props.channelId),
 									options: this.filterLanguages(direction, place),
-									optionRenderer: lang => languages[lang.value] ? BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
+									optionRenderer: lang => _this.ensureSettingsStore().getLanguage(lang.value) ? BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex, {
 										align: BDFDB.LibraryComponents.Flex.Align.CENTER,
 										children: [
 											BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.Flex.Child, {
@@ -353,11 +343,9 @@ module.exports = (_ => {
 												})
 											}),
 											BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.FavButton, {
-												isFavorite: languages[lang.value].fav == 0,
+												isFavorite: _this.ensureSettingsStore().isFavorite(lang.value),
 												onClick: value => {
-													if (value) favorites.push(lang.value);
-													else BDFDB.ArrayUtils.remove(favorites, lang.value, true);
-													BDFDB.DataUtils.save(favorites.sort(), _this, "favorites");
+													_this.ensureSettingsStore().setFavorite(lang.value, value);
 													_this.setLanguages();
 												}
 											})
@@ -387,11 +375,6 @@ module.exports = (_ => {
 		};
 		
 		
-		var languages = {};
-		var favorites = [];
-		var authKeys = {};
-		var channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {};
-		var translationEnabledStates = {globalDefault: false, channelOverrides: {}};
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		const channelTitleStore = createChannelTitleStore();
@@ -1466,7 +1449,7 @@ module.exports = (_ => {
 				const sourceLanguages = plugin.settings && plugin.settings.filters && plugin.settings.filters[settingKey];
 				const configuredLanguages = BDFDB.ArrayUtils.is(sourceLanguages) ? sourceLanguages : [];
 				return [...new Set(configuredLanguages.filter(languageId => {
-					const language = languages[languageId];
+					const language = plugin.ensureSettingsStore().getLanguage(languageId);
 					return language && !language.auto && !language.special;
 				}))];
 			},
@@ -1566,7 +1549,7 @@ module.exports = (_ => {
 				] : [
 					plugin.getGlobalPrimaryEngine(),
 					plugin.getEffectiveBackupEngine(),
-					...Object.values(channelPrimaryEngineOverrides)
+					...plugin.ensureSettingsStore().listChannelPrimaryEngines()
 				];
 				return [...new Set(engineKeys)].some(engineKey => aiDecisionPolicy.supportsAiAutoTranslateDecisionEngine(plugin, engineKey) && plugin.isEngineConfiguredForRuntime(engineKey));
 			},
@@ -1578,7 +1561,7 @@ module.exports = (_ => {
 		const sentTranslationPolicy = {
 			shouldSkipSentTranslationForSameTarget(plugin, text, channelId, forcedOutputLanguage = null, callback) {
 				const targetLanguageId = forcedOutputLanguage || plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.SENT, channelId);
-				const targetLanguage = targetLanguageId && languages[targetLanguageId];
+				const targetLanguage = targetLanguageId && plugin.ensureSettingsStore().getLanguage(targetLanguageId);
 				if (!targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special) return callback(false, null);
 				const configuredInputLanguage = plugin.getLanguageChoice(languageTypes.INPUT, messageTypes.SENT, channelId);
 				if (configuredInputLanguage && configuredInputLanguage != "auto") return callback(plugin.isSameLanguageOrVariant(configuredInputLanguage, targetLanguageId), configuredInputLanguage);
@@ -1744,7 +1727,7 @@ module.exports = (_ => {
 			},
 			isClearlyForeignLanguageMessage(plugin, text, targetLanguageId) {
 				if (!text || !targetLanguageId || targetLanguageId == "auto") return false;
-				const targetLanguage = languages[targetLanguageId];
+				const targetLanguage = plugin.ensureSettingsStore().getLanguage(targetLanguageId);
 				if (targetLanguage && targetLanguage.special) return false;
 				const targetFamilies = plugin.getLanguageScriptFamilies(targetLanguageId);
 				if (!targetFamilies.length) return false;
@@ -1801,7 +1784,7 @@ module.exports = (_ => {
 			isTranslationLikelyInTargetLanguage(plugin, text, targetLanguageId) {
 				targetLanguageId = plugin.normalizeLanguageId(targetLanguageId);
 				if (!text || !targetLanguageId || targetLanguageId == "auto") return true;
-				const targetLanguage = languages[targetLanguageId];
+				const targetLanguage = plugin.ensureSettingsStore().getLanguage(targetLanguageId);
 				if (targetLanguage && targetLanguage.special) return true;
 				const targetFamilies = plugin.getLanguageScriptFamilies(targetLanguageId);
 				if (!targetFamilies.length) return true;
@@ -1930,7 +1913,7 @@ module.exports = (_ => {
 				const receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId);
 				if (!receivedAnalysis) return false;
 				const {targetLanguageId, analysisSource, analysis} = receivedAnalysis;
-				const targetLanguage = languages[targetLanguageId];
+				const targetLanguage = plugin.ensureSettingsStore().getLanguage(targetLanguageId);
 				if (!targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special) return false;
 				if (!analysisSource || !analysisSource.hasUnprotectedContent) return false;
 				return plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId);
@@ -2234,9 +2217,7 @@ module.exports = (_ => {
 							restoreSettingsPanelScrollState(scrollState);
 						};
 						const saveAuthField = (engineKey, field, value) => {
-							if (!authKeys[engineKey]) authKeys[engineKey] = {};
-							authKeys[engineKey][field] = (value || "").trim ? (value || "").trim() : value;
-							BDFDB.DataUtils.save(authKeys, this, "authKeys");
+							this.ensureSettingsStore().setCredentialField(engineKey, field, value);
 							this.SettingsUpdated = true;
 						};
 						const saveReceivedFilterSetting = (key, value) => {
@@ -2613,11 +2594,11 @@ module.exports = (_ => {
 											className: "translator-prefix-translation-cell translator-prefix-language-cell",
 											children: createStableSelect({
 												value: entry.language,
-												options: Object.keys(languages)
-													.filter(key => !languages[key].auto && !languages[key].special)
+												options: this.ensureSettingsStore().getLanguageIds()
+													.filter(key => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special)
 													.map(key => ({
 														value: key,
-														label: this.getLanguageDisplayName(languages[key])
+														label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
 													}))
 													.sort((a, b) => a.label.localeCompare(b.label)),
 												onChange: value => {
@@ -2813,7 +2794,7 @@ module.exports = (_ => {
 								className: BDFDB.disCN.marginbottom8,
 								children: [
 									createStableSelect({
-										value: authKeys[engineKey] && authKeys[engineKey].model || "",
+										value: this.ensureSettingsStore().getCredentialField(engineKey, "model") || "",
 										options: state.items.map(modelId => ({value: modelId, label: modelId})),
 										onChange: value => {
 											saveAuthField(engineKey, "model", value);
@@ -2840,11 +2821,11 @@ module.exports = (_ => {
 							BDFDB.DataUtils.save(value, this, "filters", key);
 							this.SettingsUpdated = true;
 						};
-						const createLanguageOptions = direction => Object.keys(languages)
-							.filter(key => !languages[key].special && (direction == languageTypes.INPUT || !languages[key].auto))
+						const createLanguageOptions = direction => this.ensureSettingsStore().getLanguageIds()
+							.filter(key => !this.ensureSettingsStore().getLanguage(key).special && (direction == languageTypes.INPUT || !this.ensureSettingsStore().getLanguage(key).auto))
 							.map(key => ({
 								value: key,
-								label: this.getLanguageDisplayName(languages[key])
+								label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
 							}))
 							.sort((a, b) => {
 								if (a.value == "auto") return -1;
@@ -2985,11 +2966,11 @@ module.exports = (_ => {
 											basis: "85%",
 											children: createStableSelect({
 												value: languageId,
-												options: Object.keys(languages)
-													.filter(key => !languages[key].auto && !languages[key].special)
+												options: this.ensureSettingsStore().getLanguageIds()
+													.filter(key => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special)
 													.map(key => ({
 														value: key,
-														label: this.getLanguageDisplayName(languages[key])
+														label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
 													}))
 													.sort((a, b) => a.label.localeCompare(b.label)),
 												onChange: value => {
@@ -3052,11 +3033,11 @@ module.exports = (_ => {
 											basis: "85%",
 											children: createStableSelect({
 												value: languageId,
-												options: Object.keys(languages)
-													.filter(key => !languages[key].auto && !languages[key].special)
+												options: this.ensureSettingsStore().getLanguageIds()
+													.filter(key => !this.ensureSettingsStore().getLanguage(key).auto && !this.ensureSettingsStore().getLanguage(key).special)
 													.map(key => ({
 														value: key,
-														label: this.getLanguageDisplayName(languages[key])
+														label: this.getLanguageDisplayName(this.ensureSettingsStore().getLanguage(key))
 													}))
 													.sort((a, b) => a.label.localeCompare(b.label)),
 												onChange: value => {
@@ -3198,11 +3179,9 @@ module.exports = (_ => {
 								type: "Switch",
 								label: this.getCustomText("paid_version_label"),
 								tag: BDFDB.LibraryComponents.FormTitle.Tags.H5,
-								value: authKeys[engineKey] && authKeys[engineKey].paid,
+								value: this.ensureSettingsStore().getCredentialField(engineKey, "paid"),
 								onChange: value => {
-									if (!authKeys[engineKey]) authKeys[engineKey] = {};
-									authKeys[engineKey].paid = value;
-									BDFDB.DataUtils.save(authKeys, this, "authKeys");
+									this.ensureSettingsStore().setCredentialFlag(engineKey, "paid", value);
 									this.SettingsUpdated = true;
 								}
 							}));
@@ -3215,7 +3194,7 @@ module.exports = (_ => {
 								items.push(createSecretInput({
 									fieldKey: `${engineKey}-key`,
 									placeholder: engine.key,
-									value: authKeys[engineKey] && authKeys[engineKey].key,
+									value: this.ensureSettingsStore().getCredentialField(engineKey, "key"),
 									onChange: value => saveAuthField(engineKey, "key", value)
 								}));
 							}
@@ -3228,7 +3207,7 @@ module.exports = (_ => {
 								items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
 									className: BDFDB.disCN.marginbottom8,
 									placeholder: engine.endpoint,
-									value: authKeys[engineKey] && authKeys[engineKey].endpoint,
+									value: this.ensureSettingsStore().getCredentialField(engineKey, "endpoint"),
 									onChange: value => saveAuthField(engineKey, "endpoint", value)
 								}));
 							}
@@ -3254,7 +3233,7 @@ module.exports = (_ => {
 								items.push(BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.TextInput, {
 									className: BDFDB.disCN.marginbottom8,
 									placeholder: engine.model,
-									value: authKeys[engineKey] && authKeys[engineKey].model,
+									value: this.ensureSettingsStore().getCredentialField(engineKey, "model"),
 									onChange: value => saveAuthField(engineKey, "model", value)
 								}));
 								if (modelCatalogState && modelCatalogState.loading) items.push(BDFDB.ReactUtils.createElement("div", {
@@ -3269,7 +3248,7 @@ module.exports = (_ => {
 								title: this.getCustomText("microsoft_region_label"),
 								className: BDFDB.disCN.marginbottom8,
 								children: createStableSelect({
-									value: authKeys[engineKey] && authKeys[engineKey].region || "global",
+									value: this.ensureSettingsStore().getCredentialField(engineKey, "region") || "global",
 									options: [
 										{value: "global", label: "Global"},
 										{value: "eastasia", label: "East Asia"},
@@ -3643,21 +3622,12 @@ module.exports = (_ => {
 			}
 
 			ensureChannelLanguageChoiceScope (channelId, place) {
-				if (!channelId || !place) return null;
-				if (!channelLanguages[channelId]) channelLanguages[channelId] = {};
-				if (!channelLanguages[channelId][place]) {
-					channelLanguages[channelId][place] = {};
-					for (let typeKey in languageTypes) channelLanguages[channelId][place][languageTypes[typeKey]] = this.getLanguageChoice(languageTypes[typeKey], place, channelId);
-				}
-				return channelLanguages[channelId][place];
+				return this.ensureSettingsStore().ensureChannelLanguageChoiceScope(channelId, place);
 			}
 
 			setReplyTargetLanguageForChannel (channelId, languageId) {
 				if (!channelId || !languageId) return;
-				const scope = this.ensureChannelLanguageChoiceScope(channelId, messageTypes.SENT);
-				if (!scope) return;
-				scope[languageTypes.OUTPUT] = languageId;
-				BDFDB.DataUtils.save(channelLanguages, this, "channelLanguages");
+				this.ensureSettingsStore().setChannelLanguageChoice(channelId, messageTypes.SENT, languageTypes.OUTPUT, languageId);
 				this.setLanguages();
 				this.SettingsUpdated = true;
 			}
@@ -5565,8 +5535,8 @@ module.exports = (_ => {
 			prepareHistoricalTranslationJobItem (queueItem, job) {
 				if (!queueItem || !queueItem.message || !this.isHistoricalTranslationJobCurrent(job)) return {status: "failed", reason: "stale_job"};
 				const channelId = job.channelId;
-				const input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {});
-				const output = Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {});
+				const input = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)) || {});
+				const output = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)) || {});
 				const prepared = this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, input, output);
 				if (!prepared) return {status: "failed", reason: "prepare_failed"};
 				if (prepared.cachedTranslation) return {status: "translated", translation: Object.assign({channelId, auto: true}, prepared.cachedTranslation)};
@@ -5729,8 +5699,8 @@ module.exports = (_ => {
 			getHistoricalAiBatchEngineKey (channelId = null) {
 				const engineKey = this.getEffectivePrimaryEngine(channelId);
 				if (!["deepseek", "openai", "gemini", "oaicompat"].includes(engineKey)) return null;
-				const input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {});
-				const output = Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {});
+				const input = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)) || {});
+				const output = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)) || {});
 				if (!input.id || !output.id || output.special) return null;
 				return this.validTranslator(engineKey, input, output, null) ? engineKey : null;
 			}
@@ -5771,21 +5741,8 @@ module.exports = (_ => {
 			}
 		
 			forceUpdateAll () {
-				favorites = BDFDB.DataUtils.load(this, "favorites");
-				favorites = !BDFDB.ArrayUtils.is(favorites) ? [] : favorites;
-				
-				authKeys = BDFDB.DataUtils.load(this, "authKeys");
-				channelLanguages = BDFDB.DataUtils.load(this, "channelLanguages");
-				guildLanguages = BDFDB.DataUtils.load(this, "guildLanguages");
-				channelPrimaryEngineOverrides = this.normalizeStoredChannelPrimaryEngineOverrides(BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides"));
+				this.ensureSettingsStore().reload();
 				this.ensureTranslationCacheStore().loadPersisted();
-				
-				const storedTranslationEnabledStates = BDFDB.DataUtils.load(this, "translationEnabledStates");
-				const storedReceivedAutoTranslationEnabledStates = BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates");
-				const normalizedStoredTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedTranslationEnabledStates);
-				const normalizedStoredReceivedAutoTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedReceivedAutoTranslationEnabledStates);
-				translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates);
-				if (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) this.saveChannelEnablementState(translationEnabledStates);
 				this.ensureReceivedDisplayRuntime().clearAllSuppression();
 				this.clearAutoTranslationQueue();
 				this.resetAutoTranslationTracking();
@@ -5951,7 +5908,7 @@ module.exports = (_ => {
 								// Translate with the specific target language
 								this.translateText(cleanText, messageTypes.SENT, (translation, input, output) => {
 									// Override the output language with the one from the prefix
-									output = {id: targetLanguage, name: languages[targetLanguage] ? languages[targetLanguage].name : targetLanguage};
+									output = {id: targetLanguage, name: (this.ensureSettingsStore().getLanguage(targetLanguage) || {}).name || targetLanguage};
 									
 									translation = this.buildSentTranslationMessageValue(cleanText, translation, input, output);
 									Promise.resolve(e2.originalMethod(Object.assign({}, e2.methodArguments[0], {value: translation}))).then(_ => {
@@ -6046,8 +6003,8 @@ module.exports = (_ => {
 					getBatchEngineKey: channelId => this.getHistoricalAiBatchEngineKey(channelId),
 					createBurstContext: channelId => ({
 					engineKey: this.getHistoricalAiBatchEngineKey(channelId),
-					input: Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)] || {}),
-					output: Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)] || {})
+					input: Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.INPUT, messageTypes.RECEIVED, channelId)) || {}),
+					output: Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)) || {})
 					}),
 					prepareBurstItem: (queueItem, channelId, context) => this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, context.input, context.output),
 					requestBurstTranslation: (context, prepared) => this.requestAiBatchTranslation(context.engineKey, prepared),
@@ -6103,6 +6060,39 @@ module.exports = (_ => {
 				return this.sentTranslationStoreInstance;
 			}
 
+			ensureSettingsStore () {
+				if (!this.settingsStoreInstance) this.settingsStoreInstance = createSettingsStore({
+					isKnownEngine: engineKey => !!translationEngines[engineKey],
+					sortLanguages: table => BDFDB.ObjectUtils.sort(table, "fav"),
+					resolveGuildId: channelId => {
+						const channel = channelId && BDFDB.LibraryStores.ChannelStore.getChannel(channelId);
+						return channel ? (channel.guild_id ? channel.guild_id : "@me") : null;
+					},
+					loadFavorites: () => BDFDB.DataUtils.load(this, "favorites"),
+					persistFavorites: value => BDFDB.DataUtils.save(value, this, "favorites"),
+					loadAuthKeys: () => BDFDB.DataUtils.load(this, "authKeys"),
+					persistAuthKeys: value => BDFDB.DataUtils.save(value, this, "authKeys"),
+					loadChannelLanguages: () => BDFDB.DataUtils.load(this, "channelLanguages"),
+					persistChannelLanguages: value => BDFDB.DataUtils.save(value, this, "channelLanguages"),
+					loadGuildLanguages: () => BDFDB.DataUtils.load(this, "guildLanguages"),
+					persistGuildLanguages: value => BDFDB.DataUtils.save(value, this, "guildLanguages"),
+					loadChannelPrimaryEngineOverrides: () => BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides"),
+					persistChannelPrimaryEngineOverrides: value => BDFDB.DataUtils.save(value, this, "channelPrimaryEngineOverrides"),
+					loadTranslationEnabledStates: () => BDFDB.DataUtils.load(this, "translationEnabledStates"),
+					loadReceivedAutoTranslationEnabledStates: () => BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates"),
+					persistChannelEnablementState: value => {
+						BDFDB.DataUtils.save(value, this, "translationEnabledStates");
+						BDFDB.DataUtils.save(value, this, "receivedAutoTranslationEnabledStates");
+					},
+					loadGlobalLanguageChoice: (place, direction) => this.settings.choices[place] && this.settings.choices[place][direction],
+					persistGlobalLanguageChoice: (place, direction, choice) => {
+						this.settings.choices[place][direction] = choice;
+						BDFDB.DataUtils.save(this.settings.choices, this, "choices");
+					}
+				});
+				return this.settingsStoreInstance;
+			}
+
 			ensureProviderClient () {
 				if (!this.providerClientInstance) this.providerClientInstance = createProviderClient({
 					request: (url, options, callback) => BDFDB.LibraryRequires.request(url, options, callback),
@@ -6112,9 +6102,9 @@ module.exports = (_ => {
 					// leave the awaiting promise pending forever once the plugin stops.
 					sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
 					now: () => Date.now(),
-					getAuthKeys: () => authKeys,
-					saveAuthKeys: value => BDFDB.DataUtils.save(value, this, "authKeys"),
-					getLanguages: () => languages,
+					getAuthKeys: () => this.ensureSettingsStore().getAuthKeys(),
+					saveAuthKeys: value => this.ensureSettingsStore().replaceAuthKeys(value),
+					getLanguages: () => this.ensureSettingsStore().getLanguages(),
 					notify: (message, options) => BDFDB.NotificationUtils.toast(message, options),
 					getLabels: () => this.labels,
 					getCustomText: key => this.getCustomText(key),
@@ -6496,14 +6486,7 @@ module.exports = (_ => {
 			processChannelThreadItem (e) {this.processChannelTitlePatch(e);}
 
 			normalizeStoredChannelPrimaryEngineOverrides (overrides) {
-				if (!overrides || typeof overrides != "object" || Array.isArray(overrides)) return {};
-				const normalizedOverrides = {};
-				for (const channelId in overrides) {
-					const engineKey = overrides[channelId];
-					if (!channelId || typeof engineKey != "string" || !translationEngines[engineKey]) continue;
-					normalizedOverrides[channelId] = engineKey;
-				}
-				return normalizedOverrides;
+				return this.ensureSettingsStore().normalizeStoredChannelPrimaryEngineOverrides(overrides);
 			}
 
 			getGlobalPrimaryEngine () {
@@ -6512,8 +6495,7 @@ module.exports = (_ => {
 			}
 
 			getEffectivePrimaryEngine (channelId = null) {
-				if (channelId && translationEngines[channelPrimaryEngineOverrides[channelId]]) return channelPrimaryEngineOverrides[channelId];
-				return this.getGlobalPrimaryEngine();
+				return this.ensureSettingsStore().getChannelPrimaryEngineOverride(channelId) || this.getGlobalPrimaryEngine();
 			}
 
 			getEffectiveBackupEngine (channelId = null) {
@@ -6548,25 +6530,19 @@ module.exports = (_ => {
 			}
 
 			hasChannelPrimaryEngineOverride (channelId) {
-				return !!channelId && Object.prototype.hasOwnProperty.call(channelPrimaryEngineOverrides, channelId) && !!translationEngines[channelPrimaryEngineOverrides[channelId]];
+				return this.ensureSettingsStore().hasChannelPrimaryEngineOverride(channelId);
 			}
 
 			saveChannelPrimaryEngineOverrides () {
-				BDFDB.DataUtils.save(channelPrimaryEngineOverrides, this, "channelPrimaryEngineOverrides");
+				this.ensureSettingsStore().saveChannelPrimaryEngineOverrides();
 			}
 
 			setChannelPrimaryEngine (channelId, engineKey) {
-				if (!channelId || !translationEngines[engineKey]) return false;
-				channelPrimaryEngineOverrides[channelId] = engineKey;
-				this.saveChannelPrimaryEngineOverrides();
-				return true;
+				return this.ensureSettingsStore().setChannelPrimaryEngine(channelId, engineKey);
 			}
 
 			clearChannelPrimaryEngineOverride (channelId) {
-				if (!channelId || !Object.prototype.hasOwnProperty.call(channelPrimaryEngineOverrides, channelId)) return false;
-				delete channelPrimaryEngineOverrides[channelId];
-				this.saveChannelPrimaryEngineOverrides();
-				return true;
+				return this.ensureSettingsStore().clearChannelPrimaryEngineOverride(channelId);
 			}
 
 			refreshChannelPrimaryEngineRuntime (channelId) {
@@ -6579,77 +6555,35 @@ module.exports = (_ => {
 			}
 
 			createEmptyChannelEnablementState (globalDefault = false) {
-				return {
-					globalDefault: !!globalDefault,
-					channelOverrides: {}
-				};
+				return createEmptyChannelEnablementState(globalDefault);
 			}
 
 			normalizeStoredChannelEnablementState (state) {
-				if (!state || typeof state != "object" || Array.isArray(state)) return null;
-				const normalizedState = this.createEmptyChannelEnablementState(state.globalDefault);
-				const overrides = state.channelOverrides;
-				if (!overrides || typeof overrides != "object" || Array.isArray(overrides)) return normalizedState;
-				for (const channelId in overrides) {
-					if (!channelId) continue;
-					if (typeof overrides[channelId] != "boolean") continue;
-					normalizedState.channelOverrides[channelId] = overrides[channelId];
-				}
-				return normalizedState;
+				return normalizeStoredChannelEnablementState(state);
 			}
 
 			migrateLegacyChannelEnablementState (stateKeys) {
-				const normalizedState = this.createEmptyChannelEnablementState(false);
-				for (const stateKey of stateKeys || []) {
-					if (typeof stateKey != "string" || !stateKey || stateKey == "global") continue;
-					normalizedState.channelOverrides[stateKey] = true;
-				}
-				return normalizedState;
+				return migrateLegacyChannelEnablementState(stateKeys);
 			}
 
 			loadChannelEnablementState (primaryStoredState, secondaryStoredState) {
-				const normalizedPrimaryState = this.normalizeStoredChannelEnablementState(primaryStoredState) || (BDFDB.ArrayUtils.is(primaryStoredState) ? this.migrateLegacyChannelEnablementState(primaryStoredState) : null);
-				const normalizedSecondaryState = this.normalizeStoredChannelEnablementState(secondaryStoredState) || (BDFDB.ArrayUtils.is(secondaryStoredState) ? this.migrateLegacyChannelEnablementState(secondaryStoredState) : null);
-				return {
-					globalDefault: false,
-					channelOverrides: Object.assign({}, normalizedSecondaryState && normalizedSecondaryState.channelOverrides, normalizedPrimaryState && normalizedPrimaryState.channelOverrides)
-				};
+				return loadChannelEnablementState(primaryStoredState, secondaryStoredState);
 			}
 
 			getChannelEnablementStateValue (channelId, state) {
-				const normalizedState = this.normalizeStoredChannelEnablementState(state) || this.createEmptyChannelEnablementState(false);
-				if (channelId && Object.prototype.hasOwnProperty.call(normalizedState.channelOverrides, channelId)) return normalizedState.channelOverrides[channelId];
-				return normalizedState.globalDefault;
+				return getChannelEnablementStateValue(channelId, state);
 			}
 
 			channelEnablementStatesEqual (leftState, rightState) {
-				const normalizedLeftState = this.normalizeStoredChannelEnablementState(leftState) || this.createEmptyChannelEnablementState(false);
-				const normalizedRightState = this.normalizeStoredChannelEnablementState(rightState) || this.createEmptyChannelEnablementState(false);
-				if (normalizedLeftState.globalDefault != normalizedRightState.globalDefault) return false;
-				const leftChannelIds = Object.keys(normalizedLeftState.channelOverrides);
-				const rightChannelIds = Object.keys(normalizedRightState.channelOverrides);
-				if (leftChannelIds.length != rightChannelIds.length) return false;
-				for (const channelId of leftChannelIds) if (normalizedLeftState.channelOverrides[channelId] != normalizedRightState.channelOverrides[channelId]) return false;
-				return true;
+				return channelEnablementStatesEqual(leftState, rightState);
 			}
 
 			saveChannelEnablementState (nextState) {
-				translationEnabledStates = nextState;
-				BDFDB.DataUtils.save(nextState, this, "translationEnabledStates");
-				BDFDB.DataUtils.save(nextState, this, "receivedAutoTranslationEnabledStates");
+				return this.ensureSettingsStore().saveChannelEnablementState(nextState);
 			}
 
 			setChannelEnablementStateValue (channelId, enabled) {
-				const currentState = this.normalizeStoredChannelEnablementState(translationEnabledStates) || this.createEmptyChannelEnablementState(false);
-				const nextState = {
-					globalDefault: false,
-					channelOverrides: Object.assign({}, currentState.channelOverrides)
-				};
-				if (!channelId) return currentState;
-				if (enabled == nextState.globalDefault) delete nextState.channelOverrides[channelId];
-				else nextState.channelOverrides[channelId] = !!enabled;
-				this.saveChannelEnablementState(nextState);
-				return nextState;
+				return this.ensureSettingsStore().setChannelEnablementStateValue(channelId, enabled);
 			}
 
 			async toggleTranslation (channelId) {
@@ -6674,7 +6608,7 @@ module.exports = (_ => {
 			}
 			
 			isTranslationEnabled (channelId) {
-				return this.getChannelEnablementStateValue(channelId, translationEnabledStates);
+				return this.ensureSettingsStore().isTranslationEnabled(channelId);
 			}
 
 			toggleReceivedAutoTranslation (channelId) {
@@ -6691,7 +6625,7 @@ module.exports = (_ => {
 					BDFDB.DataUtils.save(this.settings.engines, this, "engines");
 				}
 				let languageIds = Object.values(translationEngines).reduce((ids, translationEngine) => ids.concat(translationEngine.languages || []), []);
-				languages = BDFDB.ObjectUtils.deepAssign(
+				const builtLanguages = BDFDB.ObjectUtils.deepAssign(
 					!Object.values(translationEngines).some(translationEngine => translationEngine.auto) ? {} : {
 						auto: {
 							auto: true,
@@ -6723,13 +6657,12 @@ module.exports = (_ => {
                         },
 					}
 				);
-				for (let id in languages) languages[id].fav = favorites.includes(id) ? 0 : 1;
-				languages = BDFDB.ObjectUtils.sort(languages, "fav");
+				this.ensureSettingsStore().setLanguages(builtLanguages);
 			}
 
 			getLanguageData (language) {
 				if (!language) return null;
-				if (typeof language == "string") return languages[language] || BDFDB.LanguageUtils.languages[language] || {id: language, name: language};
+				if (typeof language == "string") return this.ensureSettingsStore().getLanguage(language) || BDFDB.LanguageUtils.languages[language] || {id: language, name: language};
 				return language;
 			}
 
@@ -6882,32 +6815,11 @@ module.exports = (_ => {
 			}
 
 			getLanguageChoice (direction, place, channelId) {
-				let choice;
-				let channel = channelId && BDFDB.LibraryStores.ChannelStore.getChannel(channelId);
-				let guildId = channel ? (channel.guild_id ? channel.guild_id : "@me") : null;
-				if (channelLanguages[channelId] && channelLanguages[channelId][place]) choice = channelLanguages[channelId][place][direction];
-				else if (guildId && guildLanguages[guildId] && guildLanguages[guildId][place]) choice = guildLanguages[guildId][place][direction];
-				else choice = this.settings.choices[place] && this.settings.choices[place][direction];
-				choice = languages[choice] ? choice : Object.keys(languages)[0];
-				choice = direction == languageTypes.OUTPUT && choice == "auto" ? "en" : choice;
-				return choice;
+				return this.ensureSettingsStore().getLanguageChoice(direction, place, channelId);
 			}
 
 			saveLanguageChoice (choice, direction, place, channelId) {
-				let channel = channelId && BDFDB.LibraryStores.ChannelStore.getChannel(channelId);
-				let guildId = channel ? (channel.guild_id ? channel.guild_id : "@me") : null;
-				if (channelLanguages[channelId] && channelLanguages[channelId][place]) {
-					channelLanguages[channelId][place][direction] = choice;
-					BDFDB.DataUtils.save(channelLanguages, this, "channelLanguages");
-				}
-				else if (guildLanguages[guildId] && guildLanguages[guildId][place]) {
-					guildLanguages[guildId][place][direction] = choice;
-					BDFDB.DataUtils.save(guildLanguages, this, "guildLanguages");
-				}
-				else {
-					this.settings.choices[place][direction] = choice;
-					BDFDB.DataUtils.save(this.settings.choices, this, "choices");
-				}
+				this.ensureSettingsStore().saveLanguageChoice(choice, direction, place, channelId);
 			}
 
 			getAutoTranslateSourceLanguages () {
@@ -7203,10 +7115,10 @@ module.exports = (_ => {
 				let channelId = options.channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
 				const primaryEngineKey = this.getEffectivePrimaryEngine(channelId);
 				const backupEngineKey = this.getEffectiveBackupEngine(channelId);
-				let input = Object.assign({}, languages[this.getLanguageChoice(languageTypes.INPUT, place, channelId)]);
+				let input = Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.INPUT, place, channelId)));
 				let output = forcedOutputLanguage ? 
-					Object.assign({}, languages[forcedOutputLanguage] || {id: forcedOutputLanguage, name: forcedOutputLanguage}) : 
-					Object.assign({}, languages[this.getLanguageChoice(languageTypes.OUTPUT, place, channelId)]);
+					Object.assign({}, this.ensureSettingsStore().getLanguage(forcedOutputLanguage) || {id: forcedOutputLanguage, name: forcedOutputLanguage}) :
+					Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, place, channelId)));
 				
 				if (translate && input.id != output.id) {
 					let specialCase = this.checkForSpecialCase(newText, input);
