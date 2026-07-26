@@ -3,10 +3,15 @@ const {createTranslationDisplayController} = require("./translation-display-cont
 const {createDiscordRenderAdapter} = require("./discord-render-adapter");
 
 function createDisplayRuntime(dependencies) {
-	const store = createMessageStateStore();
+	// The compile-time constant strips the journal implementation from release bundles;
+	// node test runs see an undefined identifier and disable the journal the same way.
+	const debugEnabled = typeof __TRANSLATOR_DISPLAY_DEBUG__ !== "undefined" && __TRANSLATOR_DISPLAY_DEBUG__;
+	const journal = debugEnabled ? require("../diagnostics/display-transition-journal").createDisplayTransitionJournal({enabled: true}) : null;
+	const store = createMessageStateStore({journal});
 	const renderAdapter = createDiscordRenderAdapter(dependencies);
-	const controller = createTranslationDisplayController({store, renderAdapter});
+	const controller = createTranslationDisplayController({store, renderAdapter, journal});
 	return Object.freeze({
+		getTransitionJournal: () => journal,
 		captureSource: snapshot => store.captureSource(snapshot),
 		setChannelGeneration: (channelId, generation) => store.setChannelGeneration(channelId, generation),
 		getChannelGeneration: channelId => store.getChannelGeneration(channelId),

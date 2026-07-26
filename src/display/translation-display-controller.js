@@ -32,8 +32,13 @@ function createEmptyOutcome(additions) {
 	};
 }
 
-function createTranslationDisplayController({store, renderAdapter}) {
+function createTranslationDisplayController({store, renderAdapter, journal = null}) {
 	let transactionSequence = 0;
+
+	function recordRenderTransition(view, transition) {
+		if (!journal || !view) return;
+		journal.append({channelId: view.channelId, messageId: view.messageId, revision: view.revision, transition});
+	}
 
 	async function refreshRecords(records) {
 		if (!records.length) return createEmptyOutcome();
@@ -42,6 +47,7 @@ function createTranslationDisplayController({store, renderAdapter}) {
 		const channelIds = new Set(views.map(view => view.channelId));
 		if (channelIds.size !== 1) throw new Error("A display transaction cannot span channels");
 		const requestedViews = new Map(views.map(view => [String(view.messageId), view]));
+		for (const view of views) recordRenderTransition(view, "render-requested");
 		const outcome = await renderAdapter.refreshMessages({
 			transactionId: ++transactionSequence,
 			channelId: views[0].channelId,
@@ -68,6 +74,8 @@ function createTranslationDisplayController({store, renderAdapter}) {
 
 		const confirmedIds = filterCurrentIds(rawOutcome.confirmedIds);
 		const missingIds = filterCurrentIds(rawOutcome.missingIds);
+		for (const messageId of confirmedIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-confirmed");
+		for (const messageId of missingIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-unconfirmed");
 		store.markRenderOutcome({confirmedIds, missingIds});
 		const filteredOutcome = {
 			...rawOutcome,
