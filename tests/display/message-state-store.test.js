@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
 	MESSAGE_STATUSES,
 	RENDER_STATUSES,
+	MESSAGE_ORIGINS,
 	createMessageStateStore
 } = require("../../src/display/message-state-store");
 
@@ -325,7 +326,7 @@ test("restoreChannel changes only automatic non-cancelled records in that channe
 	assert.equal(store.getDisplayState("cancelled-a").revision, cancelledRevision);
 });
 
-test("restoreAll changes only automatic non-cancelled records", () => {
+test("restoreAll changes every non-cancelled record, manual included", () => {
 	const store = createMessageStateStore();
 	store.captureSource(snapshot("translated-auto", "c1", "One"));
 	store.commitResult(translated("translated-auto", "c1", "One", "一"));
@@ -339,15 +340,16 @@ test("restoreAll changes only automatic non-cancelled records", () => {
 
 	const restored = store.restoreAll("plugin-stopped");
 
-	assert.deepEqual(restored.map(record => record.messageId), ["translated-auto", "pending-auto"]);
-	for (const messageId of ["translated-auto", "pending-auto"]) {
+	// Stopping the plugin must leave nothing translated on screen. The legacy path
+	// cleared manual translations too; now that they live here, restoreAll owns that.
+	assert.deepEqual(restored.map(record => record.messageId), ["translated-auto", "pending-auto", "translated-manual"]);
+	for (const messageId of ["translated-auto", "pending-auto", "translated-manual"]) {
 		const state = store.getDisplayState(messageId);
 		assert.equal(state.status, "cancelled");
 		assert.equal(state.translation, null);
 		assert.equal(state.reason, "plugin-stopped");
 		assert.equal(state.renderStatus, "pending");
 	}
-	assert.equal(store.getDisplayState("translated-manual").translation.content, "三");
 	assert.equal(store.getDisplayState("cancelled-auto").revision, cancelledRevision);
 });
 
@@ -504,4 +506,870 @@ test("commitBatch rejects unrecorded results individually without discarding the
 	assert.deepEqual(outcome.rejected.map(result => result.messageId), ["never-captured"]);
 	assert.equal(store.getDisplayState("m1").status, "translated");
 	assert.equal(store.getDisplayState("never-captured"), null);
+});
+
+function messageClone(messageId, channelId, content) {
+	return {id: messageId, channel_id: channelId, content, timestamp: new Date(1700000000000), embeds: []};
+}
+
+function manualArchive(messageId, channelId, content) {
+	return {
+		message: messageClone(messageId, channelId, content),
+		originalContentData: {content, embeds: [{description: `${content} embed`}]}
+	};
+}
+
+function manualCommit(messageId, channelId, sourceContent, content, extra = {}) {
+	return {
+		...translated(messageId, channelId, sourceContent, content, 1, MESSAGE_ORIGINS.MANUAL),
+		...extra
+	};
+}
+
+test("exports the origin vocabulary the restore filters are keyed by", () => {
+	assert.deepEqual(MESSAGE_ORIGINS, {AUTOMATIC: "automatic", MANUAL: "manual"});
+	assert.equal(Object.isFrozen(MESSAGE_ORIGINS), true);
+});
+
+test("a manual request carries its origin and manual options through every transition", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	const pending = store.markPending({
+		messageId: "m1",
+		channelId: "c1",
+		generation: 1,
+		origin: "manual",
+		manualOptions: {independentOfTextAreaSwitch: true},
+		requestIdentity: "manual-1"
+	});
+	assert.equal(pending.origin, "manual");
+	assert.deepEqual(pending.manualOptions, {independentOfTextAreaSwitch: true});
+	assert.equal(Object.isFrozen(pending.manualOptions), true);
+
+	const translating = store.markTranslating({messageId: "m1", channelId: "c1", generation: 1});
+	assert.equal(translating.origin, "manual", "an omitted origin inherits the record origin");
+	assert.deepEqual(translating.manualOptions, {independentOfTextAreaSwitch: true});
+
+	const committed = store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {requestIdentity: "manual-1"}));
+	assert.equal(committed.origin, "manual");
+	assert.deepEqual(committed.manualOptions, {independentOfTextAreaSwitch: true}, "a commit without options inherits them");
+});
+
+test("an automatic record never carries manual options and unknown origins normalize", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	const pending = store.markPending({messageId: "m1", channelId: "c1", generation: 1, origin: "sideways", manualOptions: {independentOfTextAreaSwitch: true}});
+
+	assert.equal(pending.origin, "automatic");
+	assert.equal(pending.manualOptions, null);
+
+	const committed = store.commitResult(translated("m1", "c1", "Hello", "你好"));
+	assert.equal(committed.origin, "automatic");
+	assert.equal(committed.manualOptions, null);
+});
+
+test("a manual commit defaults its manual options rather than leaving them unset", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	const committed = store.commitResult(manualCommit("m1", "c1", "Hello", "你好"));
+
+	assert.deepEqual(committed.manualOptions, {independentOfTextAreaSwitch: false});
+});
+
+test("restoreChannel restores only the origins it was given", () => {
+	const store = createMessageStateStore();
+	for (const [messageId, origin] of [["auto-a", "automatic"], ["manual-a", "manual"]]) {
+		store.captureSource(snapshot(messageId, "c1", `${messageId} source`));
+		store.commitResult(translated(messageId, "c1", `${messageId} source`, `${messageId} translated`, 1, origin));
+	}
+
+	assert.deepEqual(store.restoreChannel("c1").map(record => record.messageId), ["auto-a"]);
+	assert.equal(store.getDisplayState("manual-a").translation.content, "manual-a translated");
+
+	const explicit = store.restoreChannel("c1", "channel-disabled", {origins: ["manual"]});
+
+	assert.deepEqual(explicit.map(record => record.messageId), ["manual-a"]);
+	assert.equal(store.getDisplayState("manual-a").translation, null);
+});
+
+test("restoreMessage restores a manual translation so untranslate can undo it", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好"));
+
+	const restored = store.restoreMessage("m1");
+
+	assert.deepEqual(restored.map(record => record.messageId), ["m1"]);
+	assert.equal(store.getDisplayState("m1").status, "cancelled");
+	assert.equal(store.getDisplayState("m1").translation, null);
+	assert.equal(store.getDisplayState("m1").reason, "manual-untranslate");
+	assert.deepEqual(store.restoreMessage("m1", "manual-untranslate", {origins: ["automatic"]}), []);
+});
+
+test("restoreAll restores manual translations so a stopped plugin leaves nothing painted", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("auto-a", "c1", "One"));
+	store.commitResult(translated("auto-a", "c1", "One", "一"));
+	store.captureSource(snapshot("manual-a", "c2", "Two"));
+	store.commitResult(manualCommit("manual-a", "c2", "Two", "二"));
+
+	const restored = store.restoreAll();
+
+	assert.deepEqual(restored.map(record => record.messageId), ["auto-a", "manual-a"]);
+	assert.equal(store.getDisplayState("manual-a").translation, null);
+	assert.equal(store.getDisplayState("manual-a").reason, "plugin-stopped");
+});
+
+test("restore leaves records that never carried a translation untouched", () => {
+	const store = createMessageStateStore();
+	const captured = store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	assert.deepEqual(store.restoreAll(), []);
+	assert.deepEqual(store.restoreChannel("c1"), []);
+	assert.equal(store.getDisplayState("m1"), captured);
+});
+
+test("markPending refuses to leave a translated record without an explicit supersede", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	const committed = store.commitResult(translated("m1", "c1", "Hello", "你好"));
+
+	const refused = store.markPending({messageId: "m1", channelId: "c1", generation: 1, requestIdentity: "boundary-reset"});
+
+	assert.equal(refused, null);
+	assert.equal(store.getDisplayState("m1"), committed);
+	assert.equal(store.getDisplayState("m1").translation.content, "你好");
+
+	const superseded = store.markPending({messageId: "m1", channelId: "c1", generation: 1, requestIdentity: "edit-requeue", supersede: true});
+
+	assert.equal(superseded.status, "pending");
+	assert.equal(superseded.translation, null);
+	assert.equal(superseded.requestIdentity, "edit-requeue");
+});
+
+test("markPending still leaves every non-translated status without a supersede flag", () => {
+	for (const [label, terminal] of [["skipped", "skipped"], ["failed", "failed"], ["cancelled", "cancelled"]]) {
+		const store = createMessageStateStore();
+		store.captureSource(snapshot(label, "c1", "Hello"));
+		store.commitResult({messageId: label, channelId: "c1", generation: 1, sourceSignature: `c1:${label}:Hello`, origin: "automatic", status: terminal});
+
+		assert.equal(store.markPending({messageId: label, channelId: "c1", generation: 1, requestIdentity: "retry"}).status, "pending", label);
+	}
+});
+
+test("captureSource never mints a source archive", () => {
+	const store = createMessageStateStore();
+	const captured = store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	assert.equal(captured.archive, null);
+	assert.equal(store.hasSourceArchive("m1"), false);
+	assert.equal(store.peekSourceArchive("m1"), null);
+	assert.equal(store.consumeSourceArchive("m1"), null);
+});
+
+test("only a manual translation commit writes the source archive", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("auto", "c1", "Hello"));
+	store.captureSource(snapshot("manual", "c1", "Hello"));
+
+	const automatic = store.commitResult({...translated("auto", "c1", "Hello", "你好"), archive: manualArchive("auto", "c1", "Hello")});
+	assert.equal(automatic.archive, null, "an automatic commit may not mint a restore token");
+
+	const manual = store.commitResult(manualCommit("manual", "c1", "Hello", "你好", {archive: manualArchive("manual", "c1", "Hello")}));
+	assert.equal(manual.archive.message.content, "Hello");
+	assert.equal(manual.archive.message.channel_id, "c1");
+	assert.equal(manual.archive.originalContentData.content, "Hello");
+});
+
+test("a non-translated manual result may not mint an archive", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	store.commitResult({
+		messageId: "m1",
+		channelId: "c1",
+		generation: 1,
+		sourceSignature: "c1:m1:Hello",
+		origin: "manual",
+		status: "skipped",
+		reason: "same-language",
+		archive: manualArchive("m1", "c1", "Hello")
+	});
+
+	assert.equal(store.hasSourceArchive("m1"), false);
+});
+
+test("the archive stays a frozen plain object the runtime can re-hydrate", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	const archive = manualArchive("m1", "c1", "Hello");
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {archive}));
+
+	archive.message.content = "mutated outside";
+	archive.originalContentData.content = "mutated data";
+
+	const stored = store.peekSourceArchive("m1");
+	assert.equal(stored.message.content, "Hello");
+	assert.equal(stored.originalContentData.content, "Hello");
+	assert.equal(Object.isFrozen(stored), true);
+	assert.equal(Object.isFrozen(stored.message), true);
+	assert.equal(Object.isFrozen(stored.originalContentData), true);
+	assert.equal(Object.getPrototypeOf(stored.message), Object.prototype);
+	// Deep freezing would rebuild this as a bare object and lose the value the clone needs.
+	assert.equal(stored.message.timestamp instanceof Date, true);
+});
+
+test("an archive without a message clone is refused", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {archive: {originalContentData: {content: "Hello"}}}));
+
+	assert.equal(store.hasSourceArchive("m1"), false);
+});
+
+test("peek leaves the archive in place and consume spends it exactly once", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {archive: manualArchive("m1", "c1", "Hello")}));
+
+	assert.equal(store.peekSourceArchive("m1").message.content, "Hello");
+	assert.equal(store.peekSourceArchive("m1").message.content, "Hello");
+	assert.equal(store.hasSourceArchive("m1"), true);
+
+	const consumed = store.consumeSourceArchive("m1");
+
+	assert.equal(consumed.message.content, "Hello");
+	assert.equal(store.hasSourceArchive("m1"), false);
+	assert.equal(store.consumeSourceArchive("m1"), null);
+	assert.equal(store.peekSourceArchive("m1"), null);
+});
+
+test("dropSourceArchive reports whether it had anything to drop", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {archive: manualArchive("m1", "c1", "Hello")}));
+
+	assert.equal(store.dropSourceArchive("m1"), true);
+	assert.equal(store.dropSourceArchive("m1"), false);
+	assert.equal(store.dropSourceArchive("missing"), false);
+});
+
+test("archive traffic never advances the display revision", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {archive: manualArchive("m1", "c1", "Hello")}));
+	const revision = store.getDisplayState("m1").revision;
+
+	store.peekSourceArchive("m1");
+	store.consumeSourceArchive("m1");
+
+	assert.equal(store.getDisplayState("m1").revision, revision, "an in-flight render transaction must not go stale over scratch state");
+});
+
+test("an edited source keeps the archive the render still owes the reader", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Before edit"));
+	store.commitResult(manualCommit("m1", "c1", "Before edit", "旧译文", {archive: manualArchive("m1", "c1", "Before edit")}));
+
+	store.captureSource(snapshot("m1", "c1", "After edit"));
+
+	assert.equal(store.getDisplayState("m1").translation, null);
+	assert.equal(store.peekSourceArchive("m1").message.content, "Before edit", "the runtime drops the archive explicitly, capture does not");
+});
+
+test("clearDisplayedTranslation returns a record to idle and keeps the archive", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	const committed = store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {archive: manualArchive("m1", "c1", "Hello")}));
+
+	const cleared = store.clearDisplayedTranslation("m1");
+
+	assert.equal(cleared.status, "idle");
+	assert.equal(cleared.translation, null);
+	assert.equal(cleared.reason, null);
+	assert.equal(cleared.origin, null);
+	assert.equal(cleared.manualOptions, null);
+	assert.equal(cleared.requestIdentity, null);
+	assert.equal(cleared.renderStatus, "pending");
+	assert.equal(cleared.revision > committed.revision, true);
+	assert.equal(cleared.archive.message.content, "Hello");
+	assert.equal(cleared.sourceSignature, committed.sourceSignature, "the source survives so the original can still paint");
+});
+
+test("clearDisplayedTranslation drops the archive only when told to", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {archive: manualArchive("m1", "c1", "Hello")}));
+
+	assert.equal(store.clearDisplayedTranslation("m1", {preserveArchive: false}).archive, null);
+});
+
+test("clearDisplayedTranslation clears suppression unless asked to preserve it", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.suppress("m1");
+
+	assert.equal(store.clearDisplayedTranslation("m1", {preserveSuppressed: true}).suppressed, true);
+	assert.equal(store.clearDisplayedTranslation("m1").suppressed, false);
+});
+
+test("clearDisplayedTranslation leaves the reply preview alone unless asked", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitPreviewResult({messageId: "m1", channelId: "c1", signature: "preview-sig", translation: {translatedContent: "你好"}});
+	store.markPreviewPending({messageId: "m1", channelId: "c1", signature: "preview-sig"});
+
+	assert.equal(store.clearDisplayedTranslation("m1").preview.translatedContent, "你好");
+
+	const cleared = store.clearDisplayedTranslation("m1", {clearPreview: true});
+
+	assert.equal(cleared.preview, null);
+	assert.equal(cleared.previewSignature, null);
+	assert.equal(cleared.previewPending, null);
+});
+
+test("clearDisplayedTranslation ignores a message this store never saw", () => {
+	const store = createMessageStateStore();
+	assert.equal(store.clearDisplayedTranslation("missing"), null);
+});
+
+test("suppress creates a suppression-only record for a message never captured", () => {
+	const store = createMessageStateStore();
+
+	const suppressed = store.suppress("m1");
+
+	assert.equal(suppressed.messageId, "m1");
+	assert.equal(suppressed.suppressed, true);
+	assert.equal(suppressed.status, "idle");
+	assert.equal(suppressed.translation, null);
+	assert.equal(store.isSuppressed("m1"), true);
+	assert.equal(store.isSuppressed("m2"), false);
+});
+
+test("a suppression-only record still accepts the capture that follows it", () => {
+	const store = createMessageStateStore();
+	store.suppress("m1", {channelId: "c1"});
+
+	const captured = store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	assert.equal(captured.source.content, "Hello");
+	assert.equal(captured.suppressed, true, "capture must not undo standing user intent");
+	assert.deepEqual(store.listChannel("c1").map(record => record.messageId), ["m1"]);
+	assert.equal(store.commitResult(translated("m1", "c1", "Hello", "你好")).status, "translated");
+});
+
+test("a suppression-only record without a channel is claimed by its first capture", () => {
+	const store = createMessageStateStore();
+	store.suppress("m1");
+	assert.deepEqual(store.listChannel(""), []);
+
+	const captured = store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	assert.equal(captured.channelId, "c1");
+	assert.deepEqual(store.listChannel("c1").map(record => record.messageId), ["m1"]);
+});
+
+test("suppression survives the restore and the cancel that untranslate performs", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(translated("m1", "c1", "Hello", "你好"));
+	store.suppress("m1");
+
+	store.restoreMessage("m1");
+
+	assert.equal(store.getDisplayState("m1").status, "cancelled");
+	assert.equal(store.getDisplayState("m1").translation, null);
+	assert.equal(store.isSuppressed("m1"), true, "a cleared suppression would immediately requeue the message");
+
+	store.restoreChannel("c1");
+	store.restoreAll();
+	assert.equal(store.isSuppressed("m1"), true);
+});
+
+test("clearing a translation and restoring it are alternatives, not a sequence", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(translated("m1", "c1", "Hello", "你好"));
+	store.clearDisplayedTranslation("m1", {preserveSuppressed: true});
+
+	// The clear already returned the record to idle with no origin, so there is no
+	// translation left for restore to cancel and no repaint for it to ask for.
+	assert.deepEqual(store.restoreMessage("m1"), []);
+	assert.equal(store.getDisplayState("m1").status, "idle");
+});
+
+test("a manual translation lifts the suppression the untranslate set", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.suppress("m1");
+
+	assert.equal(store.commitResult(manualCommit("m1", "c1", "Hello", "你好")).suppressed, false);
+});
+
+test("an automatic commit leaves suppression exactly as it found it", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.suppress("m1");
+
+	assert.equal(store.commitResult(translated("m1", "c1", "Hello", "你好")).suppressed, true);
+});
+
+test("suppression clears one message at a time or all at once", () => {
+	const store = createMessageStateStore();
+	store.suppress("m1", {channelId: "c1"});
+	store.suppress("m2", {channelId: "c2"});
+
+	assert.equal(store.clearSuppression("m1").suppressed, false);
+	assert.equal(store.clearSuppression("m1"), null, "a record that is not suppressed reports no change");
+	assert.equal(store.clearSuppression("missing"), null);
+
+	assert.deepEqual(store.clearAllSuppression().map(record => record.messageId), ["m2"]);
+	assert.equal(store.isSuppressed("m2"), false);
+	assert.deepEqual(store.clearAllSuppression(), []);
+});
+
+test("suppression traffic never advances the display revision", () => {
+	const store = createMessageStateStore();
+	const captured = store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	store.suppress("m1");
+	store.clearSuppression("m1");
+
+	assert.equal(store.getDisplayState("m1").revision, captured.revision);
+});
+
+test("suppress refuses an empty message identity", () => {
+	const store = createMessageStateStore();
+	assert.equal(store.suppress(""), null);
+	assert.equal(store.suppress(null), null);
+});
+
+test("a preview commit projects onto the same record as the message translation", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	const record = store.commitPreviewResult({
+		messageId: "m1",
+		channelId: "c1",
+		signature: "preview-signature",
+		translation: {translatedContent: "你好", originalContent: "Hello", auto: true}
+	});
+
+	assert.equal(record.preview.translatedContent, "你好");
+	assert.equal(record.preview.channelId, "c1");
+	assert.equal(record.previewSignature, "preview-signature");
+	assert.equal(Object.isFrozen(record.preview), true);
+	assert.equal(store.getDisplayState("m1").sourceSignature, "c1:m1:Hello", "the preview signature is a separate field");
+});
+
+test("the preview signature is never measured against the source signature", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitPreviewResult({messageId: "m1", channelId: "c1", signature: "preview-only-content", translation: {translatedContent: "你好"}});
+
+	// The source signature hashes embeds too, so an embed-only change must not evict a
+	// preview that is still correct for the content it was hashed over.
+	store.captureSource({...snapshot("m1", "c1", "Hello"), sourceSignature: "c1:m1:Hello+embed"});
+
+	assert.equal(store.getPreviewTranslation("m1", {signature: "preview-only-content"}).translatedContent, "你好");
+	assert.equal(store.getPreviewTranslation("m1", {signature: "c1:m1:Hello+embed"}), null, "the source signature can never validate a preview");
+});
+
+test("a preview read with a stale signature drops the preview", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitPreviewResult({messageId: "m1", channelId: "c1", signature: "sig-1", translation: {translatedContent: "你好"}});
+
+	assert.equal(store.getPreviewTranslation("m1").translatedContent, "你好", "an unchecked read never evicts");
+	assert.equal(store.getPreviewTranslation("m1", {signature: "sig-2"}), null);
+	assert.equal(store.getDisplayState("m1").preview, null);
+	assert.equal(store.getDisplayState("m1").previewSignature, null);
+	assert.equal(store.getPreviewTranslation("missing"), null);
+});
+
+test("preview candidates and the reply projection resolve in opposite directions", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitPreviewResult({messageId: "m1", channelId: "c1", signature: "sig-1", translation: {translatedContent: "preview 你好"}});
+	store.commitResult(translated("m1", "c1", "Hello", "message 你好"));
+
+	assert.deepEqual(store.getPreviewCandidates("m1").map(candidate => candidate.translatedContent || candidate.content), ["preview 你好", "message 你好"]);
+
+	const projection = store.getReplyPreviewProjection("m1");
+
+	assert.equal(projection.translation.content, "message 你好");
+	assert.equal(projection.fromPreview, false);
+	assert.equal(projection.channelId, "c1");
+});
+
+test("the reply projection falls back to the preview when no message translation displays", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitPreviewResult({messageId: "m1", channelId: "c1", signature: "sig-1", translation: {translatedContent: "preview 你好"}});
+
+	const projection = store.getReplyPreviewProjection("m1");
+
+	assert.equal(projection.translation.translatedContent, "preview 你好");
+	assert.equal(projection.fromPreview, true);
+	assert.deepEqual(store.getPreviewCandidates("m1").map(candidate => candidate.translatedContent), ["preview 你好"]);
+});
+
+test("a pending or cancelled record contributes no translation to either reader", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(translated("m1", "c1", "Hello", "你好"));
+	store.restoreMessage("m1");
+
+	assert.deepEqual(store.getPreviewCandidates("m1"), []);
+	assert.equal(store.getReplyPreviewProjection("m1").translation, null);
+	assert.deepEqual(store.getPreviewCandidates("missing"), []);
+	assert.equal(store.getReplyPreviewProjection("missing"), null);
+});
+
+test("the reply projection reports origin, manual options and suppression", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {manualOptions: {independentOfTextAreaSwitch: true}}));
+	store.suppress("m1");
+
+	const projection = store.getReplyPreviewProjection("m1", {channelId: "c9"});
+
+	assert.equal(projection.origin, "manual");
+	assert.deepEqual(projection.manualOptions, {independentOfTextAreaSwitch: true});
+	assert.equal(projection.suppressed, true);
+	assert.equal(projection.channelId, "c9", "an explicit channel always wins");
+	assert.equal(Object.isFrozen(projection), true);
+});
+
+test("a preview commit for a message the stream never captured still lands", () => {
+	const store = createMessageStateStore();
+
+	const record = store.commitPreviewResult({messageId: "m1", channelId: "c1", signature: "sig-1", translation: {translatedContent: "你好"}});
+
+	assert.equal(record.messageId, "m1");
+	assert.equal(record.channelId, "c1");
+	assert.equal(record.preview.channelId, "c1");
+	assert.deepEqual(store.listChannel("c1").map(item => item.messageId), ["m1"]);
+});
+
+test("a preview commit without a usable translation is refused", () => {
+	const store = createMessageStateStore();
+
+	assert.equal(store.commitPreviewResult(null), null);
+	assert.equal(store.commitPreviewResult({messageId: "m1", channelId: "c1"}), null);
+	assert.equal(store.commitPreviewResult({messageId: "", channelId: "c1", translation: {translatedContent: "x"}}), null);
+	assert.equal(store.getDisplayState("m1"), null);
+});
+
+test("preview state never advances the display revision", () => {
+	const store = createMessageStateStore();
+	const captured = store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	store.commitPreviewResult({messageId: "m1", channelId: "c1", signature: "sig-1", translation: {translatedContent: "你好"}});
+	store.markPreviewPending({messageId: "m1", channelId: "c1", signature: "sig-2"});
+	store.clearPreview("m1");
+
+	assert.equal(store.getDisplayState("m1").revision, captured.revision, "a reply header repaint must not invalidate a message render transaction");
+});
+
+test("a preview request holds the pending slot until its own token releases it", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	const token = store.markPreviewPending({messageId: "m1", channelId: "c1", signature: "sig-1"});
+
+	assert.equal(typeof token, "string");
+	assert.equal(store.isPreviewPending("m1"), true);
+	assert.deepEqual(store.getPreviewPending("m1"), {token, channelId: "c1", signature: "sig-1"});
+	assert.equal(Object.isFrozen(store.getPreviewPending("m1")), true);
+
+	assert.equal(store.releasePreviewPending("m1", token), true);
+	assert.equal(store.isPreviewPending("m1"), false);
+	assert.equal(store.releasePreviewPending("m1", token), false);
+});
+
+test("a superseded preview request cannot release the slot its successor owns", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	const first = store.markPreviewPending({messageId: "m1", channelId: "c1", signature: "sig-1"});
+	const second = store.markPreviewPending({messageId: "m1", channelId: "c1", signature: "sig-2"});
+
+	assert.notEqual(first, second);
+	assert.equal(store.releasePreviewPending("m1", first), false);
+	assert.equal(store.isPreviewPending("m1"), true);
+	assert.equal(store.getPreviewPending("m1").signature, "sig-2");
+	assert.equal(store.releasePreviewPending("m1", second), true);
+});
+
+test("releasing without a token clears whatever is pending", () => {
+	const store = createMessageStateStore();
+	store.markPreviewPending({messageId: "m1", channelId: "c1", signature: "sig-1"});
+
+	assert.equal(store.releasePreviewPending("m1"), true);
+	assert.equal(store.releasePreviewPending("m1"), false);
+	assert.equal(store.releasePreviewPending("missing"), false);
+});
+
+test("a committed preview retires the pending slot it was waiting on", () => {
+	const store = createMessageStateStore();
+	store.markPreviewPending({messageId: "m1", channelId: "c1", signature: "sig-1"});
+
+	store.commitPreviewResult({messageId: "m1", channelId: "c1", signature: "sig-1", translation: {translatedContent: "你好"}});
+
+	assert.equal(store.isPreviewPending("m1"), false);
+});
+
+test("markPreviewPending refuses an empty message identity", () => {
+	const store = createMessageStateStore();
+	assert.equal(store.markPreviewPending(null), null);
+	assert.equal(store.markPreviewPending({messageId: "", channelId: "c1"}), null);
+});
+
+test("previews clear per message and per channel", () => {
+	const store = createMessageStateStore();
+	for (const [messageId, channelId] of [["m1", "c1"], ["m2", "c1"], ["m3", "c2"]]) {
+		store.commitPreviewResult({messageId, channelId, signature: `sig-${messageId}`, translation: {translatedContent: `${messageId} 你好`}});
+		store.markPreviewPending({messageId, channelId, signature: `sig-${messageId}`});
+	}
+
+	assert.deepEqual(store.clearPreviews("c1").map(record => record.messageId), ["m1", "m2"]);
+	assert.equal(store.getDisplayState("m1").preview, null);
+	assert.equal(store.getDisplayState("m1").previewPending, null);
+	assert.equal(store.getDisplayState("m3").preview.translatedContent, "m3 你好");
+
+	assert.equal(store.clearPreview("m3").preview, null);
+	assert.equal(store.clearPreview("m3"), null);
+	assert.equal(store.clearPreview("missing"), null);
+	assert.deepEqual(store.clearPreviews(), []);
+});
+
+test("listPreviewed reports every record carrying preview state", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("plain", "c1", "Hello"));
+	store.commitPreviewResult({messageId: "with-preview", channelId: "c1", signature: "sig", translation: {translatedContent: "你好"}});
+	store.markPreviewPending({messageId: "with-pending", channelId: "c1", signature: "sig"});
+
+	assert.deepEqual(store.listPreviewed().map(record => record.messageId), ["with-preview", "with-pending"]);
+});
+
+test("capturePreviewSource seeds a record for a message the stream never delivered", () => {
+	const store = createMessageStateStore();
+
+	const record = store.capturePreviewSource({
+		messageId: "m1",
+		channelId: "c1",
+		sourceSignature: "preview-source",
+		source: {content: "Hello"}
+	});
+
+	assert.equal(record.messageId, "m1");
+	assert.equal(record.channelId, "c1");
+	assert.equal(record.generation, 1, "an absent channel generation defaults the way a commit would");
+	assert.equal(record.source.content, "Hello");
+	assert.equal(record.status, "idle");
+	assert.equal(store.getChannelGeneration("c1"), 1);
+	assert.deepEqual(store.listChannel("c1").map(item => item.messageId), ["m1"]);
+});
+
+test("capturePreviewSource adopts the channel generation already in force", () => {
+	const store = createMessageStateStore();
+	store.setChannelGeneration("c1", 7);
+
+	const record = store.capturePreviewSource({messageId: "m1", channelId: "c1", sourceSignature: "preview-source", source: {content: "Hello"}});
+
+	assert.equal(record.generation, 7);
+	assert.equal(store.commitResult({...translated("m1", "c1", "x", "你好", 7), sourceSignature: "preview-source"}).status, "translated");
+});
+
+test("capturePreviewSource never overwrites a source or translation the stream owns", () => {
+	const store = createMessageStateStore();
+	const captured = store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	assert.equal(store.capturePreviewSource({messageId: "m1", channelId: "c1", sourceSignature: "preview-source", source: {content: "Preview"}}), captured);
+	assert.equal(store.getDisplayState("m1").source.content, "Hello");
+
+	store.commitResult(translated("m1", "c1", "Hello", "你好"));
+	store.capturePreviewSource({messageId: "m1", channelId: "c1", sourceSignature: "preview-source", source: {content: "Preview"}});
+
+	assert.equal(store.getDisplayState("m1").translation.content, "你好");
+	assert.equal(store.getDisplayState("m1").sourceSignature, "c1:m1:Hello");
+});
+
+test("capturePreviewSource fills in a suppression-only record without losing it", () => {
+	const store = createMessageStateStore();
+	store.suppress("m1");
+
+	const record = store.capturePreviewSource({messageId: "m1", channelId: "c1", sourceSignature: "preview-source", source: {content: "Hello"}});
+
+	assert.equal(record.suppressed, true);
+	assert.equal(record.source.content, "Hello");
+});
+
+test("capturePreviewSource refuses to move a message to another channel", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	assert.equal(store.capturePreviewSource({messageId: "m1", channelId: "c2", sourceSignature: "preview-source"}), null);
+	assert.equal(store.capturePreviewSource({messageId: "", channelId: "c1"}), null);
+	assert.equal(store.capturePreviewSource(null), null);
+});
+
+test("reply preview eligibility is keyed by channel and base message", () => {
+	const store = createMessageStateStore();
+
+	assert.equal(store.markPreviewEligible("c1", "base-1"), true);
+	store.markPreviewEligible("c1", "base-2");
+	store.markPreviewEligible("c2", "base-1");
+
+	assert.equal(store.isPreviewEligible("c1", "base-1"), true);
+	assert.equal(store.isPreviewEligible("c2", "base-2"), false);
+	assert.equal(store.isPreviewEligible("c1", "missing"), false);
+	assert.equal(store.markPreviewEligible("", "base-1"), false);
+	assert.equal(store.markPreviewEligible("c1", ""), false);
+	assert.equal(store.isPreviewEligible(null, null), false);
+});
+
+test("eligibility is not a record flag and clears per channel or entirely", () => {
+	const store = createMessageStateStore();
+	store.markPreviewEligible("c1", "base-1");
+	store.markPreviewEligible("c2", "base-2");
+
+	assert.equal(store.getDisplayState("base-1"), null, "marking eligibility must not mint a record");
+
+	store.clearPreviewEligibility("c1");
+
+	assert.equal(store.isPreviewEligible("c1", "base-1"), false);
+	assert.equal(store.isPreviewEligible("c2", "base-2"), true);
+
+	store.clearPreviewEligibility();
+
+	assert.equal(store.isPreviewEligible("c2", "base-2"), false);
+});
+
+test("resolveChannelId walks the five sources in order", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "cRecord", "Hello"));
+
+	assert.equal(store.resolveChannelId("m1", {fallbackChannelId: "cExplicit", translation: {channelId: "cArgument"}}), "cExplicit");
+	assert.equal(store.resolveChannelId("m1", {translation: {channelId: "cArgument"}}), "cArgument");
+	assert.equal(store.resolveChannelId("m1"), null, "a record with nothing stored resolves to nothing");
+
+	store.commitResult({...translated("m1", "cRecord", "Hello", "你好"), translation: {content: "你好", channelId: "cTranslation"}});
+	assert.equal(store.resolveChannelId("m1"), "cTranslation");
+
+	store.clearDisplayedTranslation("m1");
+	store.commitPreviewResult({messageId: "m1", channelId: "cPreview", signature: "sig", translation: {translatedContent: "你好", channelId: "cPreview"}});
+	assert.equal(store.resolveChannelId("m1"), "cPreview");
+
+	store.clearPreview("m1");
+	assert.equal(store.resolveChannelId("m1"), null);
+});
+
+test("resolveChannelId falls back to the archived message clone", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitResult(manualCommit("m1", "c1", "Hello", "你好", {archive: manualArchive("m1", "cArchive", "Hello")}));
+	store.clearDisplayedTranslation("m1");
+
+	assert.equal(store.resolveChannelId("m1"), "cArchive");
+
+	store.dropSourceArchive("m1");
+	assert.equal(store.resolveChannelId("m1"), null);
+});
+
+test("resolveChannelId honours an explicit channel even for an unknown message", () => {
+	const store = createMessageStateStore();
+
+	assert.equal(store.resolveChannelId("missing", {fallbackChannelId: "c1"}), "c1");
+	assert.equal(store.resolveChannelId("missing", {translation: {channelId: "c2"}}), "c2");
+	assert.equal(store.resolveChannelId("missing"), null);
+	assert.equal(store.resolveChannelId("missing", {}), null);
+});
+
+test("listTranslated reports exactly the records that display a translation", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("idle", "c1", "One"));
+	store.captureSource(snapshot("auto", "c1", "Two"));
+	store.commitResult(translated("auto", "c1", "Two", "二"));
+	store.captureSource(snapshot("manual", "c2", "Three"));
+	store.commitResult(manualCommit("manual", "c2", "Three", "三"));
+	store.captureSource(snapshot("skipped", "c2", "Four"));
+	store.commitResult({messageId: "skipped", channelId: "c2", generation: 1, sourceSignature: "c2:skipped:Four", origin: "automatic", status: "skipped"});
+
+	assert.deepEqual(store.listTranslated().map(record => record.messageId), ["auto", "manual"]);
+
+	store.restoreAll();
+
+	assert.deepEqual(store.listTranslated(), []);
+});
+
+test("a manual translation commits for a message the automatic pipeline never captured", () => {
+	const store = createMessageStateStore();
+
+	const record = store.commitManualTranslation({
+		messageId: "m1",
+		channelId: "c1",
+		translation: {content: "你好", translatedContent: "你好", originalContent: "Hello"},
+		manualOptions: {independentOfTextAreaSwitch: true},
+		archive: manualArchive("m1", "c1", "Hello")
+	});
+
+	assert.equal(record.status, "translated");
+	assert.equal(record.origin, "manual");
+	assert.equal(record.translation.content, "你好");
+	assert.deepEqual(record.manualOptions, {independentOfTextAreaSwitch: true});
+	assert.equal(record.archive.message.content, "Hello");
+	assert.equal(record.renderStatus, "pending");
+	assert.deepEqual(store.listTranslated().map(item => item.messageId), ["m1"]);
+	assert.deepEqual(store.listChannel("c1").map(item => item.messageId), ["m1"]);
+});
+
+test("a manual translation lifts suppression and keeps an archive it was not given", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+	store.commitManualTranslation({messageId: "m1", channelId: "c1", translation: {content: "你好"}, archive: manualArchive("m1", "c1", "Hello")});
+	store.suppress("m1");
+
+	const recommitted = store.commitManualTranslation({messageId: "m1", channelId: "c1", translation: {content: "你好 2"}});
+
+	assert.equal(recommitted.suppressed, false);
+	assert.equal(recommitted.archive.message.content, "Hello");
+	assert.equal(recommitted.translation.content, "你好 2");
+});
+
+test("a manual translation without usable content is refused", () => {
+	const store = createMessageStateStore();
+
+	assert.equal(store.commitManualTranslation(null), null);
+	assert.equal(store.commitManualTranslation({messageId: "m1", channelId: "c1"}), null);
+	assert.equal(store.commitManualTranslation({messageId: "m1", channelId: "c1", translation: {content: 42}}), null);
+	assert.equal(store.commitManualTranslation({messageId: "", channelId: "c1", translation: {content: "x"}}), null);
+	assert.equal(store.getDisplayState("m1"), null);
+});
+
+test("a manual translation is restorable and clearable like any other record", () => {
+	const store = createMessageStateStore();
+	store.commitManualTranslation({messageId: "m1", channelId: "c1", translation: {content: "你好"}, archive: manualArchive("m1", "c1", "Hello")});
+
+	assert.deepEqual(store.restoreChannel("c1"), [], "a channel switch leaves a manual translation alone");
+	assert.deepEqual(store.restoreMessage("m1").map(record => record.messageId), ["m1"]);
+	assert.equal(store.getDisplayState("m1").status, "cancelled");
+	assert.equal(store.peekSourceArchive("m1").message.content, "Hello");
+});
+
+test("a manual translation never freezes out the automatic pipeline that follows it", () => {
+	const store = createMessageStateStore();
+	store.commitManualTranslation({messageId: "m1", channelId: "c1", translation: {content: "你好"}});
+
+	// The manual record carries no generation, so an automatic commit stays rejected until
+	// the channel stream captures a real source for it.
+	assert.equal(store.commitResult(translated("m1", "c1", "Hello", "auto")), null);
+
+	store.captureSource(snapshot("m1", "c1", "Hello"));
+
+	assert.equal(store.getDisplayState("m1").translation, null);
+	assert.equal(store.commitResult(translated("m1", "c1", "Hello", "auto")).status, "translated");
 });
