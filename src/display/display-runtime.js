@@ -20,6 +20,7 @@ function createDisplayRuntime(dependencies) {
 		releasePending: request => store.releasePending(request),
 		commitMessageResult: (result, options) => controller.commitMessageResult(result, options),
 		commitHistoricalBatch: results => controller.commitHistoricalBatch(results),
+		renderMessages: messageIds => controller.renderMessages(messageIds),
 		restoreMessage: (messageId, options) => controller.restoreMessage(messageId, options),
 		restoreChannel: channelId => controller.restoreChannel(channelId),
 		restoreAll: options => controller.restoreAll(options)
