@@ -3492,6 +3492,7 @@ module.exports = (_ => {
 
 			onStart () {
 				pluginRuntimeActive = true;
+				this.resetReceivedDisplayRuntime();
 				liveTranslationRuntimeGeneration++;
 				liveTranslationRequests = {};
 				sentAutomaticTranslationRuntimeGeneration++;
@@ -3544,6 +3545,9 @@ module.exports = (_ => {
 				manualTranslationScrollLockTimer = null;
 				manualTranslationScrollAnchor = null;
 				deferredSettingsRerenderTimer = null;
+				// Restore store-owned automatic records synchronously before legacy cleanup so the
+				// final rerender paints originals; onStop must not reload settings via forceUpdateAll.
+				this.restoreAllReceivedDisplay({refresh: false});
 				this.clearDisplayedTranslations();
 				failedHistoricalTranslationSnapshots.clear();
 				manualMessageTranslationRequests = {};
@@ -3556,7 +3560,7 @@ module.exports = (_ => {
 				isTranslating = false;
 				isLiveAutoTranslating = false;
 				this.clearLoadedAutoTranslationStatus();
-				this.forceUpdateAll();
+				BDFDB.MessageUtils.rerenderAll(true);
 			}
 
 			getSettingsPanel (collapseStates = {}) {
@@ -8714,12 +8718,21 @@ module.exports = (_ => {
 				return nextState;
 			}
 
-			toggleTranslation (channelId) {
+			async toggleTranslation (channelId) {
 				const wasEnabled = this.isTranslationEnabled(channelId);
 				this.setChannelEnablementStateValue(channelId, !wasEnabled);
 				if (wasEnabled) {
+					// A disabled channel session invalidates every in-flight commit before the
+					// restore transaction repaints originals with acknowledgement.
+					const displayGeneration = this.getReceivedDisplayGeneration(channelId);
+					if (displayGeneration !== undefined) this.setReceivedDisplayGeneration(channelId, displayGeneration + 1);
 					this.clearDisplayedAutoTranslations(channelId);
 					this.clearAutoTranslationQueue(channelId);
+					this.resetAutoTranslationTracking(channelId);
+					await this.restoreReceivedDisplayChannel(channelId);
+					this.scheduleTranslationRerender();
+					this.processAutoTranslationQueue();
+					return;
 				}
 				this.resetAutoTranslationTracking(channelId);
 				this.scheduleTranslationRerender();

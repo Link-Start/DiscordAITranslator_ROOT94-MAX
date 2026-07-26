@@ -6,13 +6,21 @@ function createHarness({confirmDirectly = true, confirmAfterFallback = true} = {
 	const calls = {forceUpdate: 0, rerenderAll: 0};
 	let confirmed = false;
 	const messageElement = {querySelector: () => confirmed ? {} : null};
-	const scroller = {scrollTop: 100, scrollHeight: 1000, clientHeight: 400};
+	const scroller = {
+		scrollTop: 100,
+		scrollHeight: 1000,
+		clientHeight: 400,
+		addEventListener: () => {},
+		removeEventListener: () => {},
+		getBoundingClientRect: () => ({top: 0, bottom: 400, height: 400})
+	};
 	global.document = {
 		querySelector(selector) {
 			if (selector === ".messages-scroller") return scroller;
 			if (typeof selector == "string" && selector.includes("message-")) return messageElement;
 			return null;
-		}
+		},
+		getElementById: () => null
 	};
 	global.requestAnimationFrame = callback => callback();
 	const plugin = createPluginInstance({
