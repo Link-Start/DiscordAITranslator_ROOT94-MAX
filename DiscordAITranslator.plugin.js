@@ -34,12 +34,15 @@ var require_message_state_store = __commonJS({
       PENDING: "pending",
       CONFIRMED: "confirmed",
       UNCONFIRMED: "unconfirmed"
-    }), TERMINAL_STATUSES = /* @__PURE__ */ new Set([
+    }), MESSAGE_ORIGINS = Object.freeze({
+      AUTOMATIC: "automatic",
+      MANUAL: "manual"
+    }), ALL_MESSAGE_ORIGINS = Object.freeze([MESSAGE_ORIGINS.AUTOMATIC, MESSAGE_ORIGINS.MANUAL]), TERMINAL_STATUSES = /* @__PURE__ */ new Set([
       MESSAGE_STATUSES.TRANSLATED,
       MESSAGE_STATUSES.SKIPPED,
       MESSAGE_STATUSES.FAILED,
       MESSAGE_STATUSES.CANCELLED
-    ]), INVALID_REQUEST_IDENTITY = /* @__PURE__ */ Symbol("invalid-request-identity");
+    ]), INVALID_REQUEST_IDENTITY = /* @__PURE__ */ Symbol("invalid-request-identity"), EMPTY_SOURCE = Object.freeze({});
     function freezeValue(value) {
       return Array.isArray(value) ? Object.freeze(value.map(freezeValue)) : !value || typeof value != "object" ? value : Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeValue(item)])));
     }
@@ -48,6 +51,10 @@ var require_message_state_store = __commonJS({
       return value == null ? "" : String(value);
     }
     __name(normalizeIdentity, "normalizeIdentity");
+    function normalizeOptionalIdentity(value) {
+      return value == null ? null : String(value);
+    }
+    __name(normalizeOptionalIdentity, "normalizeOptionalIdentity");
     function normalizeRequestIdentity(value) {
       if (value == null) return null;
       switch (typeof value) {
@@ -66,20 +73,66 @@ var require_message_state_store = __commonJS({
       return value != null && !(typeof value == "number" && Number.isNaN(value));
     }
     __name(hasGeneration, "hasGeneration");
+    function normalizeOrigin(value) {
+      return value === MESSAGE_ORIGINS.MANUAL ? MESSAGE_ORIGINS.MANUAL : MESSAGE_ORIGINS.AUTOMATIC;
+    }
+    __name(normalizeOrigin, "normalizeOrigin");
+    function normalizeOrigins(value) {
+      let origins = Array.isArray(value) ? value : ALL_MESSAGE_ORIGINS;
+      return new Set(origins.filter((origin) => ALL_MESSAGE_ORIGINS.includes(origin)));
+    }
+    __name(normalizeOrigins, "normalizeOrigins");
+    function normalizeManualOptions(origin, requested, current) {
+      return origin !== MESSAGE_ORIGINS.MANUAL ? null : requested && typeof requested == "object" ? Object.freeze({ independentOfTextAreaSwitch: !!requested.independentOfTextAreaSwitch }) : current || Object.freeze({ independentOfTextAreaSwitch: !1 });
+    }
+    __name(normalizeManualOptions, "normalizeManualOptions");
+    function normalizeArchive(archive) {
+      if (!archive || typeof archive != "object") return null;
+      let message = archive.message;
+      return !message || typeof message != "object" ? null : Object.freeze({
+        message: Object.freeze({ ...message }),
+        originalContentData: archive.originalContentData ? freezeValue(archive.originalContentData) : null
+      });
+    }
+    __name(normalizeArchive, "normalizeArchive");
     var TRANSITIONS_BY_STATUS = Object.freeze({
       [MESSAGE_STATUSES.TRANSLATED]: "state-committed",
       [MESSAGE_STATUSES.SKIPPED]: "skipped",
       [MESSAGE_STATUSES.FAILED]: "failed",
       [MESSAGE_STATUSES.CANCELLED]: "cancelled"
     });
+    function createBaseRecord(messageId, channelId) {
+      return {
+        messageId,
+        channelId,
+        generation: null,
+        sourceSignature: "",
+        source: EMPTY_SOURCE,
+        archive: null,
+        status: MESSAGE_STATUSES.IDLE,
+        translation: null,
+        reason: null,
+        origin: null,
+        manualOptions: null,
+        suppressed: !1,
+        preview: null,
+        previewSignature: null,
+        previewPending: null,
+        requestIdentity: null,
+        renderStatus: RENDER_STATUSES.IDLE,
+        renderReason: null,
+        revision: 0
+      };
+    }
+    __name(createBaseRecord, "createBaseRecord");
     function createMessageStateStore({ journal = null } = {}) {
-      let records = /* @__PURE__ */ new Map(), channelMessageIds = /* @__PURE__ */ new Map(), channelGenerations = /* @__PURE__ */ new Map(), revision = 0;
+      let records = /* @__PURE__ */ new Map(), channelMessageIds = /* @__PURE__ */ new Map(), channelGenerations = /* @__PURE__ */ new Map(), previewEligibility = /* @__PURE__ */ new Map(), revision = 0, previewPendingSequence = 0;
       function recordTransition(record, transition) {
         return !journal || !record || journal.append({ channelId: record.channelId, messageId: record.messageId, revision: record.revision, transition }), record;
       }
       __name(recordTransition, "recordTransition");
       function indexRecord(record) {
-        channelMessageIds.has(record.channelId) || channelMessageIds.set(record.channelId, /* @__PURE__ */ new Set()), channelMessageIds.get(record.channelId).add(record.messageId);
+        return record.channelId && (channelMessageIds.has(record.channelId) || channelMessageIds.set(record.channelId, /* @__PURE__ */ new Set()), channelMessageIds.get(record.channelId).add(record.messageId)), record;
       }
       __name(indexRecord, "indexRecord");
       function update(messageId, changes, { advanceRevision = !0 } = {}) {
@@ -89,6 +142,17 @@ var require_message_state_store = __commonJS({
         return records.set(next.messageId, next), next;
       }
       __name(update, "update");
+      function updateProjection(messageId, changes) {
+        return update(messageId, changes, { advanceRevision: !1 });
+      }
+      __name(updateProjection, "updateProjection");
+      function ensureRecord(messageId, channelId) {
+        let current = records.get(messageId);
+        if (current) return channelId && !current.channelId ? indexRecord(updateProjection(messageId, { channelId })) : current;
+        let record = Object.freeze({ ...createBaseRecord(messageId, channelId), revision: ++revision });
+        return records.set(messageId, record), indexRecord(record);
+      }
+      __name(ensureRecord, "ensureRecord");
       function getCurrentRecord(input) {
         if (!input || typeof input != "object" || !hasGeneration(input.generation)) return null;
         let messageId = normalizeIdentity(input.messageId), channelId = normalizeIdentity(input.channelId);
@@ -97,6 +161,10 @@ var require_message_state_store = __commonJS({
         return !record || record.channelId !== channelId || record.generation !== input.generation || !channelGenerations.has(channelId) || channelGenerations.get(channelId) !== input.generation ? null : record;
       }
       __name(getCurrentRecord, "getCurrentRecord");
+      function getDisplayedTranslation(record) {
+        return record && record.status === MESSAGE_STATUSES.TRANSLATED ? record.translation : null;
+      }
+      __name(getDisplayedTranslation, "getDisplayedTranslation");
       function getTerminalStatus(result) {
         return result && (result.status || MESSAGE_STATUSES.TRANSLATED);
       }
@@ -109,20 +177,26 @@ var require_message_state_store = __commonJS({
       }
       __name(validatesTerminalResult, "validatesTerminalResult");
       function applyResult(result) {
-        let status = getTerminalStatus(result), translated = status === MESSAGE_STATUSES.TRANSLATED;
+        let current = records.get(normalizeIdentity(result.messageId)), status = getTerminalStatus(result), translated = status === MESSAGE_STATUSES.TRANSLATED, origin = normalizeOrigin(result.origin || current && current.origin), manualCommit = origin === MESSAGE_ORIGINS.MANUAL && translated, archive = manualCommit && normalizeArchive(result.archive) || current && current.archive || null;
         return recordTransition(update(result.messageId, {
           status,
           translation: translated ? freezeValue(result.translation) : null,
           reason: translated ? null : String(result.reason || status),
-          origin: result.origin || "automatic",
+          origin,
+          manualOptions: normalizeManualOptions(origin, result.manualOptions, current && current.manualOptions),
+          archive,
+          // A manual translation is the user overriding their own untranslate, so it lifts
+          // the suppression that untranslate set.
+          suppressed: manualCommit ? !1 : !!(current && current.suppressed),
           requestIdentity: null,
           renderStatus: RENDER_STATUSES.PENDING,
           renderReason: null
         }), TRANSITIONS_BY_STATUS[status]);
       }
       __name(applyResult, "applyResult");
-      function restoreRecords(recordsToRestore, reason) {
-        return recordsToRestore.filter((record) => record && record.origin === "automatic" && record.status !== MESSAGE_STATUSES.CANCELLED).map((record) => recordTransition(update(record.messageId, {
+      function restoreRecords(recordsToRestore, reason, origins) {
+        let allowedOrigins = normalizeOrigins(origins);
+        return recordsToRestore.filter((record) => record && record.origin && allowedOrigins.has(record.origin) && record.status !== MESSAGE_STATUSES.CANCELLED).map((record) => recordTransition(update(record.messageId, {
           status: MESSAGE_STATUSES.CANCELLED,
           translation: null,
           reason,
@@ -135,31 +209,66 @@ var require_message_state_store = __commonJS({
       function listChannel(channelId) {
         return [...channelMessageIds.get(normalizeIdentity(channelId)) || []].map((messageId) => records.get(messageId)).filter(Boolean);
       }
-      return __name(listChannel, "listChannel"), Object.freeze({
+      __name(listChannel, "listChannel");
+      function resolveChannelId(messageId, { fallbackChannelId = null, translation = null } = {}) {
+        if (fallbackChannelId) return normalizeIdentity(fallbackChannelId);
+        if (translation && translation.channelId) return normalizeIdentity(translation.channelId);
+        let record = records.get(normalizeIdentity(messageId));
+        if (!record) return null;
+        let displayed = getDisplayedTranslation(record);
+        return displayed && displayed.channelId ? normalizeIdentity(displayed.channelId) : record.preview && record.preview.channelId ? normalizeIdentity(record.preview.channelId) : record.archive && record.archive.message && record.archive.message.channel_id ? normalizeIdentity(record.archive.message.channel_id) : null;
+      }
+      __name(resolveChannelId, "resolveChannelId");
+      function previewChannelIdOf(record) {
+        return record.preview && record.preview.channelId || record.previewPending && record.previewPending.channelId || record.channelId || null;
+      }
+      __name(previewChannelIdOf, "previewChannelIdOf");
+      function clearPreviewState(messageId) {
+        return updateProjection(messageId, { preview: null, previewSignature: null, previewPending: null });
+      }
+      return __name(clearPreviewState, "clearPreviewState"), Object.freeze({
         captureSource(snapshot) {
           if (!snapshot || typeof snapshot != "object" || !hasGeneration(snapshot.generation)) return null;
           let messageId = normalizeIdentity(snapshot.messageId), channelId = normalizeIdentity(snapshot.channelId);
           if (!messageId || !channelId) return null;
           let current = records.get(messageId);
-          if (current && current.channelId !== channelId || channelGenerations.has(channelId) && channelGenerations.get(channelId) !== snapshot.generation) return null;
+          if (current && current.channelId && current.channelId !== channelId || channelGenerations.has(channelId) && channelGenerations.get(channelId) !== snapshot.generation) return null;
           let sourceSignature = normalizeIdentity(snapshot.sourceSignature);
           if (current && current.generation === snapshot.generation && current.sourceSignature === sourceSignature) return current;
           let record = Object.freeze({
-            messageId,
-            channelId,
+            ...createBaseRecord(messageId, channelId),
+            archive: current ? current.archive : null,
+            suppressed: !!(current && current.suppressed),
+            preview: current ? current.preview : null,
+            previewSignature: current ? current.previewSignature : null,
+            previewPending: current ? current.previewPending : null,
             generation: snapshot.generation,
             sourceSignature,
             source: freezeValue(snapshot.source || {}),
-            status: MESSAGE_STATUSES.IDLE,
-            translation: null,
-            reason: null,
-            origin: null,
-            requestIdentity: null,
-            renderStatus: RENDER_STATUSES.IDLE,
-            renderReason: null,
             revision: ++revision
           });
           return records.set(messageId, record), indexRecord(record), channelGenerations.has(channelId) || channelGenerations.set(channelId, snapshot.generation), recordTransition(record, "captured");
+        },
+        // A referenced message can be painted in a reply header without ever passing through
+        // the channel stream, so the preview path seeds its own record instead of translating
+        // against no state at all.
+        capturePreviewSource(snapshot) {
+          if (!snapshot || typeof snapshot != "object") return null;
+          let messageId = normalizeIdentity(snapshot.messageId), channelId = normalizeIdentity(snapshot.channelId);
+          if (!messageId || !channelId) return null;
+          let current = records.get(messageId);
+          if (current && current.channelId && current.channelId !== channelId) return null;
+          let generation = hasGeneration(snapshot.generation) ? snapshot.generation : channelGenerations.has(channelId) ? channelGenerations.get(channelId) : 1;
+          if (channelGenerations.has(channelId) || channelGenerations.set(channelId, generation), current && (current.sourceSignature || current.translation || current.status !== MESSAGE_STATUSES.IDLE)) return current;
+          let record = Object.freeze({
+            ...current || createBaseRecord(messageId, channelId),
+            channelId,
+            generation,
+            sourceSignature: normalizeIdentity(snapshot.sourceSignature),
+            source: freezeValue(snapshot.source || {}),
+            revision: ++revision
+          });
+          return records.set(messageId, record), indexRecord(record), recordTransition(record, "preview-captured");
         },
         setChannelGeneration(channelId, generation) {
           let normalizedChannelId = normalizeIdentity(channelId);
@@ -172,14 +281,25 @@ var require_message_state_store = __commonJS({
           return records.get(normalizeIdentity(messageId)) || null;
         },
         listChannel,
+        listTranslated() {
+          return [...records.values()].filter((record) => getDisplayedTranslation(record));
+        },
+        listPreviewed() {
+          return [...records.values()].filter((record) => record.preview || record.previewPending);
+        },
+        resolveChannelId,
         markPending(request) {
-          if (!getCurrentRecord(request) || request.status && request.status !== MESSAGE_STATUSES.PENDING) return null;
+          let current = getCurrentRecord(request);
+          if (!current || request.status && request.status !== MESSAGE_STATUSES.PENDING || current.status === MESSAGE_STATUSES.TRANSLATED && !request.supersede) return null;
           let requestIdentity = normalizeRequestIdentity(request.requestIdentity);
-          return requestIdentity === INVALID_REQUEST_IDENTITY ? null : recordTransition(update(request.messageId, {
+          if (requestIdentity === INVALID_REQUEST_IDENTITY) return null;
+          let origin = normalizeOrigin(request.origin);
+          return recordTransition(update(request.messageId, {
             status: MESSAGE_STATUSES.PENDING,
             translation: null,
             reason: null,
-            origin: request.origin || "automatic",
+            origin,
+            manualOptions: normalizeManualOptions(origin, request.manualOptions, current.manualOptions),
             requestIdentity,
             renderStatus: RENDER_STATUSES.PENDING,
             renderReason: null
@@ -190,11 +310,12 @@ var require_message_state_store = __commonJS({
           if (!current || request.status && request.status !== MESSAGE_STATUSES.TRANSLATING) return null;
           let nextRequestIdentity = Object.prototype.hasOwnProperty.call(request, "requestIdentity") ? normalizeRequestIdentity(request.requestIdentity) : null;
           if (nextRequestIdentity === INVALID_REQUEST_IDENTITY) return null;
-          let requestIdentity = nextRequestIdentity === null ? current.requestIdentity : nextRequestIdentity;
+          let requestIdentity = nextRequestIdentity === null ? current.requestIdentity : nextRequestIdentity, origin = normalizeOrigin(request.origin || current.origin);
           return recordTransition(update(request.messageId, {
             status: MESSAGE_STATUSES.TRANSLATING,
             reason: null,
-            origin: request.origin || current.origin || "automatic",
+            origin,
+            manualOptions: normalizeManualOptions(origin, request.manualOptions, current.manualOptions),
             requestIdentity,
             renderStatus: RENDER_STATUSES.PENDING,
             renderReason: null
@@ -220,15 +341,180 @@ var require_message_state_store = __commonJS({
             requestIdentity: null
           }), "released");
         },
-        restoreMessage(messageId, reason = "manual-untranslate") {
+        // Manual untranslate restores whatever it finds, including a manual translation the
+        // user is undoing right now.
+        restoreMessage(messageId, reason = "manual-untranslate", { origins = ALL_MESSAGE_ORIGINS } = {}) {
           let record = records.get(normalizeIdentity(messageId));
-          return restoreRecords(record ? [record] : [], reason);
+          return restoreRecords(record ? [record] : [], reason, origins);
         },
-        restoreChannel(channelId, reason = "channel-disabled") {
-          return restoreRecords(listChannel(channelId), reason);
+        // Disabling a channel only withdraws what the channel put there; a manual translation
+        // is an explicit per-message decision and outlives the channel switch.
+        restoreChannel(channelId, reason = "channel-disabled", { origins = [MESSAGE_ORIGINS.AUTOMATIC] } = {}) {
+          return restoreRecords(listChannel(channelId), reason, origins);
         },
-        restoreAll(reason = "plugin-stopped") {
-          return restoreRecords([...records.values()], reason);
+        restoreAll(reason = "plugin-stopped", { origins = ALL_MESSAGE_ORIGINS } = {}) {
+          return restoreRecords([...records.values()], reason, origins);
+        },
+        // The archive is deliberately untouched: a rendered message whose props still carry
+        // translated text needs it on the next render to get its original back.
+        clearDisplayedTranslation(messageId, { preserveArchive = !0, preserveSuppressed = !1, clearPreview = !1 } = {}) {
+          if (!records.get(normalizeIdentity(messageId))) return null;
+          let changes = {
+            status: MESSAGE_STATUSES.IDLE,
+            translation: null,
+            reason: null,
+            origin: null,
+            manualOptions: null,
+            requestIdentity: null,
+            renderStatus: RENDER_STATUSES.PENDING,
+            renderReason: null
+          };
+          return preserveArchive || (changes.archive = null), preserveSuppressed || (changes.suppressed = !1), clearPreview && (changes.preview = null, changes.previewSignature = null, changes.previewPending = null), recordTransition(update(messageId, changes), "display-cleared");
+        },
+        // The manual path has no live request to correlate and reaches messages the automatic
+        // pipeline never captured (a disabled channel still translates on demand), so it commits
+        // without the generation and request-identity contract commitResult enforces.
+        commitManualTranslation(result) {
+          if (!result || typeof result != "object") return null;
+          let messageId = normalizeIdentity(result.messageId);
+          if (!messageId || !result.translation || typeof result.translation.content != "string") return null;
+          let channelId = normalizeIdentity(result.channelId), current = ensureRecord(messageId, channelId);
+          return recordTransition(update(messageId, {
+            status: MESSAGE_STATUSES.TRANSLATED,
+            translation: freezeValue(result.translation),
+            reason: null,
+            origin: MESSAGE_ORIGINS.MANUAL,
+            manualOptions: normalizeManualOptions(MESSAGE_ORIGINS.MANUAL, result.manualOptions, current.manualOptions),
+            archive: normalizeArchive(result.archive) || current.archive || null,
+            suppressed: !1,
+            requestIdentity: null,
+            renderStatus: RENDER_STATUSES.PENDING,
+            renderReason: null
+          }), "state-committed");
+        },
+        hasSourceArchive(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return !!(record && record.archive);
+        },
+        peekSourceArchive(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return record && record.archive || null;
+        },
+        // Spending the restore token and telling the render to stop overriding the extracted
+        // original are two different decisions, so peek and consume stay separate calls.
+        consumeSourceArchive(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          if (!record || !record.archive) return null;
+          let archive = record.archive;
+          return updateProjection(record.messageId, { archive: null }), archive;
+        },
+        dropSourceArchive(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return !record || !record.archive ? !1 : (updateProjection(record.messageId, { archive: null }), !0);
+        },
+        // Suppression sits outside the status machine on purpose: it has to survive the
+        // restore and the cancel that untranslate performs immediately after setting it.
+        suppress(messageId, { channelId = null } = {}) {
+          let id = normalizeIdentity(messageId);
+          return id ? (ensureRecord(id, normalizeIdentity(channelId)), recordTransition(updateProjection(id, { suppressed: !0 }), "suppressed")) : null;
+        },
+        isSuppressed(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return !!(record && record.suppressed);
+        },
+        clearSuppression(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return !record || !record.suppressed ? null : updateProjection(record.messageId, { suppressed: !1 });
+        },
+        clearAllSuppression() {
+          return [...records.values()].filter((record) => record.suppressed).map((record) => updateProjection(record.messageId, { suppressed: !1 }));
+        },
+        commitPreviewResult(result) {
+          if (!result || typeof result != "object") return null;
+          let messageId = normalizeIdentity(result.messageId);
+          if (!messageId || !result.translation || typeof result.translation != "object") return null;
+          let channelId = normalizeIdentity(result.channelId), record = ensureRecord(messageId, channelId), preview = freezeValue({ ...result.translation, channelId: result.translation.channelId || channelId || record.channelId || null });
+          return recordTransition(updateProjection(messageId, {
+            preview,
+            // Never compared against sourceSignature: the preview signature is hashed over
+            // content alone while the source signature includes embeds, so one field cannot
+            // answer both questions.
+            previewSignature: normalizeOptionalIdentity(result.signature),
+            previewPending: null
+          }), "preview-committed");
+        },
+        markPreviewPending(request) {
+          if (!request || typeof request != "object") return null;
+          let messageId = normalizeIdentity(request.messageId);
+          if (!messageId) return null;
+          let channelId = normalizeIdentity(request.channelId), record = ensureRecord(messageId, channelId), token = `preview-${++previewPendingSequence}`;
+          return updateProjection(messageId, {
+            previewPending: Object.freeze({
+              token,
+              channelId: channelId || record.channelId || null,
+              signature: normalizeOptionalIdentity(request.signature)
+            })
+          }), token;
+        },
+        isPreviewPending(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return !!(record && record.previewPending);
+        },
+        getPreviewPending(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return record && record.previewPending || null;
+        },
+        // A superseded request must not release the pending slot its successor now owns.
+        releasePreviewPending(messageId, token = null) {
+          let record = records.get(normalizeIdentity(messageId));
+          return !record || !record.previewPending || token != null && record.previewPending.token !== normalizeIdentity(token) ? !1 : (updateProjection(record.messageId, { previewPending: null }), !0);
+        },
+        getPreviewTranslation(messageId, { signature = null } = {}) {
+          let record = records.get(normalizeIdentity(messageId));
+          return !record || !record.preview ? null : signature == null || record.previewSignature === normalizeIdentity(signature) ? record.preview : (updateProjection(record.messageId, { preview: null, previewSignature: null }), null);
+        },
+        // Preview first: the stable-original resolver walks candidates looking for the oldest
+        // surviving original, and the preview keeps one after the message translation replaced it.
+        getPreviewCandidates(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return record ? [record.preview, getDisplayedTranslation(record)].filter(Boolean) : [];
+        },
+        // Message first: what the message itself displays outranks the preview-only translation
+        // when the reply header decides which text to paint.
+        getReplyPreviewProjection(messageId, { channelId = null } = {}) {
+          let id = normalizeIdentity(messageId), record = records.get(id);
+          if (!record) return null;
+          let displayed = getDisplayedTranslation(record);
+          return Object.freeze({
+            messageId: record.messageId,
+            channelId: resolveChannelId(id, { fallbackChannelId: channelId }),
+            translation: displayed || record.preview || null,
+            fromPreview: !displayed && !!record.preview,
+            origin: record.origin,
+            manualOptions: record.manualOptions,
+            suppressed: record.suppressed,
+            revision: record.revision
+          });
+        },
+        clearPreview(messageId) {
+          let record = records.get(normalizeIdentity(messageId));
+          return !record || !record.preview && !record.previewSignature && !record.previewPending ? null : clearPreviewState(record.messageId);
+        },
+        clearPreviews(channelId = null) {
+          let normalizedChannelId = normalizeIdentity(channelId);
+          return [...records.values()].filter((record) => record.preview || record.previewSignature || record.previewPending).filter((record) => !normalizedChannelId || previewChannelIdOf(record) === normalizedChannelId).map((record) => clearPreviewState(record.messageId));
+        },
+        markPreviewEligible(channelId, messageId) {
+          let normalizedChannelId = normalizeIdentity(channelId), normalizedMessageId = normalizeIdentity(messageId);
+          return !normalizedChannelId || !normalizedMessageId ? !1 : (previewEligibility.has(normalizedChannelId) || previewEligibility.set(normalizedChannelId, /* @__PURE__ */ new Set()), previewEligibility.get(normalizedChannelId).add(normalizedMessageId), !0);
+        },
+        isPreviewEligible(channelId, messageId) {
+          let eligible = previewEligibility.get(normalizeIdentity(channelId));
+          return !!(eligible && eligible.has(normalizeIdentity(messageId)));
+        },
+        clearPreviewEligibility(channelId = null) {
+          if (channelId == null) return previewEligibility.clear();
+          previewEligibility.delete(normalizeIdentity(channelId));
         },
         markRenderOutcome({ confirmedIds = [], missingIds = [] } = {}) {
           for (let messageId of confirmedIds)
@@ -239,7 +525,7 @@ var require_message_state_store = __commonJS({
       });
     }
     __name(createMessageStateStore, "createMessageStateStore");
-    module2.exports = { MESSAGE_STATUSES, RENDER_STATUSES, createMessageStateStore };
+    module2.exports = { MESSAGE_STATUSES, RENDER_STATUSES, MESSAGE_ORIGINS, createMessageStateStore };
   }
 });
 

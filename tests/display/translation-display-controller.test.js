@@ -355,7 +355,7 @@ test("a display transaction rejects records spanning channels before refreshing"
 	assert.equal(refreshCount, 0);
 });
 
-test("restoreAll groups automatic records by channel without cross-channel leakage", async () => {
+test("restoreAll groups every restored record by channel without cross-channel leakage", async () => {
 	const {store, refreshes, controller} = createHarness();
 	for (const [messageId, channelId, origin] of [
 		["auto-a", "c1", "automatic"],
@@ -376,10 +376,11 @@ test("restoreAll groups automatic records by channel without cross-channel leaka
 		messageIds: request.messageIds
 	})), [
 		{transactionId: 1, channelId: "c1", messageIds: ["auto-a", "auto-b"]},
-		{transactionId: 2, channelId: "c2", messageIds: ["auto-c"]}
+		// Stopping the plugin leaves nothing translated on screen, manual included.
+		{transactionId: 2, channelId: "c2", messageIds: ["auto-c", "manual-c"]}
 	]);
 	assert.equal(refreshes.every(request => request.views.every(view => view.channelId === request.channelId)), true);
-	assert.equal(controller.getDisplayView("manual-c").content, "manual-c translated");
+	assert.equal(controller.getDisplayView("manual-c").translated, false);
 });
 
 test("restoreAll with refresh disabled returns restored records without rendering", async () => {
@@ -415,7 +416,9 @@ test("a late confirmed acknowledgement cannot confirm a newer display revision",
 	assert.equal(refreshes.length, 1);
 	const requestedRevision = refreshes[0].views[0].revision;
 
-	const newerState = store.markPending(pendingRequest("m1", "c1", "request-new"));
+	// Superseding a translated record is now explicit, so a stale-acknowledgement test
+	// has to say it means to do it.
+	const newerState = store.markPending(Object.assign(pendingRequest("m1", "c1", "request-new"), {supersede: true}));
 	assert.equal(newerState.revision > requestedRevision, true);
 	deferred.resolve({confirmedIds: ["m1"], missingIds: [], fallbackUsed: false});
 
@@ -435,7 +438,9 @@ test("a late missing acknowledgement cannot mark a newer display revision unconf
 	assert.equal(refreshes.length, 1);
 	const requestedRevision = refreshes[0].views[0].revision;
 
-	const newerState = store.markPending(pendingRequest("m1", "c1", "request-new"));
+	// Superseding a translated record is now explicit, so a stale-acknowledgement test
+	// has to say it means to do it.
+	const newerState = store.markPending(Object.assign(pendingRequest("m1", "c1", "request-new"), {supersede: true}));
 	assert.equal(newerState.revision > requestedRevision, true);
 	deferred.resolve({confirmedIds: [], missingIds: ["m1"], fallbackUsed: true});
 
