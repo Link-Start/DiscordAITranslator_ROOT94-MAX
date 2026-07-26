@@ -130,10 +130,13 @@ function createLoadedTranslationStatusStore({
 	setTimeout: scheduleTimer = null,
 	clearTimeout: cancelTimer = null,
 	isChineseUiLanguage = () => false,
-	stalledAfterMs = LOADED_STATUS_STALLED_AFTER_MS
+	stalledAfterMs = LOADED_STATUS_STALLED_AFTER_MS,
+	requestFrame = callback => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : globalThis.setTimeout(callback, 16),
+	cancelFrame = handle => typeof cancelAnimationFrame == "function" ? cancelAnimationFrame(handle) : globalThis.clearTimeout(handle)
 } = {}) {
 	const startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay));
 	const stopTimer = cancelTimer || (handle => globalThis.clearTimeout(handle));
+	let positionFrame = null;
 
 	let status = createEmptyStatus();
 	let hideTimer = null;
@@ -284,6 +287,25 @@ function createLoadedTranslationStatusStore({
 			const wasSeen = !!seenMessages[key][messageKey];
 			seenMessages[key][messageKey] = true;
 			return wasSeen;
+		},
+		// The banner is repositioned after every status change, and a historical batch
+		// changes the status once per message. Repositioning reads getBoundingClientRect,
+		// which forces a synchronous layout, so the callers used to pay for two of those
+		// per message - one immediate, one in an undeduped animation frame. One frame is
+		// enough, and coalescing means a burst of N updates costs one layout, not 2N.
+		schedulePosition(callback) {
+			if (typeof callback != "function") return false;
+			if (positionFrame !== null) return false;
+			positionFrame = requestFrame(() => {
+				positionFrame = null;
+				callback();
+			});
+			return true;
+		},
+		cancelScheduledPosition() {
+			if (positionFrame === null) return;
+			cancelFrame(positionFrame);
+			positionFrame = null;
 		},
 		// The seen map only serves boundary dedup inside the active channel session;
 		// keeping it for left channels grows memory for the whole Discord session.

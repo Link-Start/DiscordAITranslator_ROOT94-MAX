@@ -185,6 +185,12 @@ class HistoricalTranslationJob {
 					record.status = "translated";
 					record.translation = validation.translation;
 				}
+				// A skip verdict is terminal. Sending it to "repairing" left the message showing
+				// a spinner and bought a second serial request for an answer we already had.
+				else if (validation.skipped) {
+					record.status = "skipped";
+					record.reason = validation.reason || "skipped";
+				}
 				else record.status = "repairing";
 			}
 		}
@@ -210,6 +216,10 @@ class HistoricalTranslationJob {
 					if (validation.ok) {
 						record.status = "translated";
 						record.translation = validation.translation;
+					}
+					else if (validation.skipped) {
+						record.status = "skipped";
+						record.reason = validation.reason || "skipped";
 					}
 				}
 			}
