@@ -1874,8 +1874,8 @@ git commit -m "docs: record display milestone verification"
 - Automated verification: `npm run verify` `292/292` at `5a1fe17`; `git diff --check` clean; deterministic build warning-free
 - Generated artifact bytes: `711035` (700 KB guard enforced by `tests/build-contract.test.js`)
 - Repository artifact SHA-256: `4d0d1c0f0e3938865c5179b9fe878820affe1d1efbfa5ebe2a1caf997d280821`
-- Deployed SHA-256: `4D0D1C0F0E3938865C5179B9FE878820AFFE1D1EFBFA5EBE2A1CAF997D280821` (2026-07-26, backup `DiscordAITranslator-20260726-175610.plugin.js` retained)
-- DiscordPTB smoke gate: not run — Steps 5-8 (DevTools console inspection plus the eight observation checks) require the operator in the client and remain open
+- Deployed SHA-256: `422E76152EEE14FAA38F90B130A4C0CB4CCF6EFF02ECCC8EE04FD83F782F0BDC` (2026-07-26 18:27, `443a54a`; backups `-175610` and `-182726` retained)
+- DiscordPTB smoke gate: first operator pass FAILED and the defect is fixed — the loaded-history capsule stalled at `0/N` with N growing while the client janked, because per-commit scroll restores fired scroll events that kept extending the user-scroll idle window, starving the snapshot seal; reproduced in `tests/integration/received-display-throughput.test.js`, fixed in `443a54a` (programmatic-scroll grace window plus coalesced live display flushes), redeployed. The eight observation checks now need a fresh operator pass.
 
 ## Later Milestones
 
