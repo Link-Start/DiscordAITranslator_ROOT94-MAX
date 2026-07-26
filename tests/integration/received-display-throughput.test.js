@@ -145,3 +145,48 @@ test("the historical snapshot seals while live commits keep restoring scroll", a
 	}
 	finally {echo.restore();}
 });
+
+test("switching channels releases the previous channel's session tracking state", () => {
+	const plugin = require("../helpers/createPluginInstance").createPluginInstance({callSetLanguages: false});
+	plugin.clearAutoTranslationQueue = () => {};
+	plugin.clearAutoTranslationEligibleReplyPreviewMessages = () => {};
+	plugin.clearDisplayedAutoTranslations = () => {};
+	plugin.getReceivedAutoTranslateScope = () => "loaded_messages";
+
+	plugin.prepareAutoTranslationChannelSession("channel-a");
+	plugin.getAutoTranslationChannelState("channel-a");
+	for (let index = 0; index < 50; index++) plugin.markLoadedAutoTranslationMessageSeen("channel-a", String(index));
+	assert.equal(plugin.getLoadedAutoTranslationSeenCount("channel-a"), 50);
+
+	plugin.prepareAutoTranslationChannelSession("channel-b");
+
+	assert.equal(plugin.getLoadedAutoTranslationSeenCount("channel-a"), 0, "leaving channel-a must drop its seen map");
+});
+
+test("a cleared translation keeps its original clone until the render path consumes it", () => {
+	const {createPluginInstance} = require("../helpers/createPluginInstance");
+	const plugin = createPluginInstance({callSetLanguages: false});
+	const message = {id: "manual-clone-1", channel_id: "channel-clone", content: "original text", embeds: [], attachments: [], author: {id: "other-user"}};
+	plugin.applyStoredTranslationToMessage(message, {
+		channelId: "channel-clone",
+		auto: false,
+		manual: true,
+		content: "译文",
+		translatedContent: "译文",
+		originalContent: "original text",
+		embeds: {}
+	});
+	plugin.clearDisplayedTranslationState("manual-clone-1", {clearReplyPreview: true});
+	// The clone must survive the clear: a rendered message whose props still show
+	// translated text needs it on the next render to restore the original.
+	assert.equal(plugin.hasStoredOriginalMessageClone("manual-clone-1"), true);
+
+	const event = {
+		instance: {props: {message: Object.assign({}, message, {content: "译文"})}},
+		returnvalue: {props: {children: []}}
+	};
+	plugin.processMessageContent(event);
+
+	assert.equal(event.instance.props.message.content, "original text");
+	assert.equal(plugin.hasStoredOriginalMessageClone("manual-clone-1"), false, "the render path consumes and releases the clone");
+});

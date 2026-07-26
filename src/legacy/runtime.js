@@ -612,6 +612,7 @@ module.exports = (_ => {
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		var autoTranslationBackoffUntil = 0;
+		var autoTranslationBackoffStep = 0;
 		var autoTranslationScrollWatcherAttached = false;
 		var autoTranslationScrollWatcherElement = null;
 		var autoTranslationScrollActivityHandler = null;
@@ -1238,7 +1239,12 @@ module.exports = (_ => {
 			prepareAutoTranslationChannelSession(plugin, channelId) {
 				if (!channelId || lastAutoTranslationChannelId == channelId) return;
 				const previousChannelId = lastAutoTranslationChannelId;
-				if (previousChannelId) plugin.clearAutoTranslationQueue(previousChannelId);
+				if (previousChannelId) {
+					plugin.clearAutoTranslationQueue(previousChannelId);
+					// The seen map only serves boundary dedup inside the active channel session;
+					// keeping it for left channels grows memory for the whole Discord session.
+					receivedTranslationRuntime.resetLoadedMessageTracking(previousChannelId);
+				}
 				lastAutoTranslationChannelId = channelId;
 				const channelState = receivedTranslationRuntime.getAutoTranslationChannelState(plugin, channelId);
 				channelState.initialized = false;
@@ -1350,8 +1356,19 @@ module.exports = (_ => {
 			},
 			scheduleAutoTranslationBackoff(plugin, ms) {
 				if (!ms) return;
-				autoTranslationBackoffUntil = Math.max(autoTranslationBackoffUntil || 0, Date.now() + ms);
+				const now = Date.now();
+				// Escalate while a backoff window is already open (consecutive provider
+				// pressure); reset the step once a window has fully expired.
+				if (autoTranslationBackoffUntil > now) autoTranslationBackoffStep = Math.min(autoTranslationBackoffStep + 1, 4);
+				else autoTranslationBackoffStep = 0;
+				const scaledMs = Math.min(ms * Math.pow(2, autoTranslationBackoffStep), 60000);
+				autoTranslationBackoffUntil = Math.max(autoTranslationBackoffUntil || 0, now + scaledMs);
 				receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
+			},
+			awaitProviderBackoff(_plugin) {
+				const waitMs = (autoTranslationBackoffUntil || 0) - Date.now();
+				if (waitMs <= 0) return Promise.resolve();
+				return new Promise(resolve => setTimeout(resolve, waitMs));
 			},
 			createQueueItem(plugin, message, channel, originalContentData = null, queueOptions = {}) {
 				const normalizedOriginalContentData = originalContentData || plugin.extractOriginalContentData(message);
@@ -1470,10 +1487,7 @@ module.exports = (_ => {
 			},
 			shouldCollectHistoricalStreamMessage(plugin, message, context) {
 				if (!message || !message.id || !context.channelId) return false;
-				if (!loadedAutoTranslationSeenMessages[context.channelId]) loadedAutoTranslationSeenMessages[context.channelId] = {};
-				const seenMessages = loadedAutoTranslationSeenMessages[context.channelId];
-				const wasSeen = !!seenMessages[message.id];
-				seenMessages[message.id] = true;
+				const wasSeen = plugin.markLoadedAutoTranslationMessageSeen(context.channelId, message.id);
 				if (plugin.getReceivedAutoTranslateScope() != "loaded_messages") return false;
 				if (context.historicalLoadedPass) return true;
 				return !wasSeen && !plugin.isMessageIdNewer(message.id, context.autoTranslateBoundaryId);
@@ -1739,6 +1753,9 @@ module.exports = (_ => {
 					preserveSuppressed: false
 				}, options);
 				delete translatedMessages[messageId];
+				// oldMessages[messageId] intentionally survives this clear: a rendered message
+				// whose props still carry translated text needs the clone on its next render
+				// to restore the original; the render path deletes the clone after consuming it.
 				if (!config.preserveSuppressed) delete suppressedAutoTranslations[messageId];
 				if (config.clearReplyPreview) {
 					delete replyPreviewTranslations[messageId];
@@ -6087,7 +6104,30 @@ module.exports = (_ => {
 			}
 
 			shouldPersistReceivedSkipDecision (reason) {
-				return ["symbol_only", "link_only", "same_language", "too_similar", "ai_skip_signal", "source_filter"].includes(reason);
+				// symbol_only and link_only are recomputed locally for free before any request;
+				// persisting them would evict paid translations from the bounded cache.
+				return ["same_language", "too_similar", "ai_skip_signal", "source_filter"].includes(reason);
+			}
+
+			hasCachedTranslationEntry (messageId) {
+				return !!(messageId && translationCache[messageId]);
+			}
+
+			getLoadedAutoTranslationSeenCount (channelId) {
+				const seenMessages = channelId && loadedAutoTranslationSeenMessages[channelId];
+				return seenMessages ? Object.keys(seenMessages).length : 0;
+			}
+
+			markLoadedAutoTranslationMessageSeen (channelId, messageId) {
+				if (!channelId || !messageId) return false;
+				if (!loadedAutoTranslationSeenMessages[channelId]) loadedAutoTranslationSeenMessages[channelId] = {};
+				const wasSeen = !!loadedAutoTranslationSeenMessages[channelId][messageId];
+				loadedAutoTranslationSeenMessages[channelId][messageId] = true;
+				return wasSeen;
+			}
+
+			hasStoredOriginalMessageClone (messageId) {
+				return !!(messageId && oldMessages[messageId]);
 			}
 
 			persistReceivedSkipDecision (messageId, signature, reason, preview = "") {
@@ -7283,6 +7323,10 @@ module.exports = (_ => {
 				return receivedTranslationRuntime.scheduleAutoTranslationBackoff(this, ms);
 			}
 
+			awaitProviderBackoff () {
+				return receivedTranslationRuntime.awaitProviderBackoff(this);
+			}
+
 			requestWithTimeout (url, options, callback, timeoutMs = 30000) {
 				// Wraps BDFDB.LibraryRequires.request with a hard timeout and centralized 429/5xx
 				// backoff. On timeout it synthesizes a 504 response (no error) so existing
@@ -7875,7 +7919,9 @@ module.exports = (_ => {
 				if (!preparedItems.length || !this.isHistoricalTranslationJobCurrent(job)) return Promise.resolve(null);
 				const engineKey = this.getHistoricalAiBatchEngineKey(job.channelId);
 				if (!engineKey) return Promise.resolve(null);
-				return this.requestAiBatchTranslation(engineKey, preparedItems);
+				// Repair traffic shares the provider key with live requests; honoring the
+				// 429/5xx backoff window keeps repairs from extending a rate-limit storm.
+				return this.awaitProviderBackoff().then(_ => this.isHistoricalTranslationJobCurrent(job) ? this.requestAiBatchTranslation(engineKey, preparedItems) : null);
 			}
 
 			validateHistoricalTranslationJobResult (prepared, rawTranslation, job) {
@@ -7893,7 +7939,9 @@ module.exports = (_ => {
 				return new Promise(resolve => {
 					if (!prepared || !prepared.message || !this.isHistoricalTranslationJobCurrent(job)) return resolve({status: "failed", reason: "stale_job"});
 					const requestText = this.buildTranslationRequestText(prepared.originalContentData);
-					this.translateText(requestText, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
+					this.awaitProviderBackoff().then(_ => {
+						if (!this.isHistoricalTranslationJobCurrent(job)) return resolve({status: "failed", reason: "stale_job"});
+						this.translateText(requestText, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
 						if (!this.isHistoricalTranslationJobCurrent(job)) return resolve({status: "failed", reason: "stale_job"});
 						if (!translation) return resolve({status: meta.skipped ? "skipped" : "failed", reason: meta.skipped ? "same_language" : "provider_failed"});
 						const storedTranslation = this.createStoredReceivedTranslationData(prepared.message, job.channelId, prepared.originalContentData, prepared.signature, translation, input, output, true);
@@ -7901,6 +7949,7 @@ module.exports = (_ => {
 						if (!storedTranslation || rejectReason || this.isTranslationResultTooSimilar(storedTranslation)) return resolve({status: "skipped", reason: rejectReason || "too_similar"});
 						resolve({status: "translated", translation: storedTranslation});
 					}, null, {showToast: false, showFailureToast: false, trackBusy: false, auto: true, forcePlainTranslation: true, channelId: job.channelId});
+					});
 				});
 			}
 
@@ -9492,7 +9541,9 @@ module.exports = (_ => {
 								position: "center",
 								onClose: _ => BDFDB.TimeUtils.clear(toastInterval)
 							});
-							const timeoutTicks = Math.max(40, Math.min(120, Math.ceil((newText || "").length / 25)));
+							// The watchdog floor must cover requestWithTimeout's 30s window (60 ticks
+							// at 500ms); a shorter floor discards paid responses arriving after it.
+							const timeoutTicks = Math.max(64, Math.min(120, Math.ceil((newText || "").length / 25)));
 							toastInterval = BDFDB.TimeUtils.interval((_, count) => {
 								if (count < timeoutTicks) return;
 								finishTranslation("");

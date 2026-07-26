@@ -231,3 +231,54 @@ test("official provider connection checks use their native generation APIs", asy
 	assert.equal((await geminiPlugin.validateEngineConfig("gemini")).ok, true);
 	assert.match(geminiUrl, /gemini-2\.5-flash:generateContent\?key=gemini-key$/);
 });
+
+test("the silent-auto watchdog never fires before the request timeout window closes", () => {
+	const intervals = [];
+	const plugin = createPluginInstance({
+		callSetLanguages: false,
+		bdfdb: {
+			TimeUtils: {
+				clear: () => {},
+				interval: (callback, delay) => {
+					intervals.push({callback, delay});
+					return intervals.length;
+				},
+				timeout: () => 0
+			}
+		}
+	});
+	plugin.setLanguages();
+	plugin.settings.engines.translator = "googleapi";
+	plugin.settings.engines.backup = "----";
+	plugin.getLanguageChoice = direction => direction == "input" ? "auto" : "zh-CN";
+	plugin.googleApiTranslate = () => {};
+
+	let finished = false;
+	plugin.translateText("short message", "received", () => {finished = true;}, null, {
+		showToast: false,
+		showFailureToast: false,
+		trackBusy: false,
+		auto: true,
+		channelId: "channel-watchdog"
+	});
+
+	assert.equal(intervals.length, 1);
+	const {callback, delay} = intervals[0];
+	// The watchdog must not give up before requestWithTimeout's 30s window: with a
+	// 500ms tick that means at least 60 ticks before finishTranslation("") fires.
+	const minimumTicks = Math.ceil(30000 / delay);
+	for (let count = 0; count < minimumTicks; count++) callback(null, count);
+	assert.equal(finished, false, "watchdog fired before the provider timeout");
+});
+
+test("locally recomputable skip reasons do not occupy paid translation cache slots", () => {
+	const plugin = createPluginInstance({callSetLanguages: false});
+
+	plugin.persistReceivedSkipDecision("skip-symbol", "sig-1", "symbol_only", ":emoji:");
+	plugin.persistReceivedSkipDecision("skip-link", "sig-2", "link_only", "https://example.invalid");
+	plugin.persistReceivedSkipDecision("skip-lang", "sig-3", "same_language", "已是中文");
+
+	assert.equal(plugin.hasCachedTranslationEntry("skip-symbol"), false, "symbol_only must not persist");
+	assert.equal(plugin.hasCachedTranslationEntry("skip-link"), false, "link_only must not persist");
+	assert.equal(plugin.hasCachedTranslationEntry("skip-lang"), true, "same_language genuinely saves a request and stays");
+});
