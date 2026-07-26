@@ -1704,7 +1704,7 @@ git commit -m "feat: add received display diagnostics"
 - Create: `tests/received-display-ownership.test.js`
 - Modify: `tests/build-contract.test.js`
 
-- [ ] **Step 1: Add an absence test for replaced runtime symbols**
+- [x] **Step 1: Add an absence test for replaced runtime symbols**
 
 Create `tests/received-display-ownership.test.js`:
 
@@ -1743,13 +1743,13 @@ test("the received display compatibility path delegates to the display runtime",
 
 The source contract deliberately inspects only automatic received-display methods. Manual translation, sent-edit compatibility, reply previews, and embeds may still use `translatedMessages` or `oldMessages` until their own milestone.
 
-- [ ] **Step 2: Run the absence test and verify it fails**
+- [x] **Step 2: Run the absence test and verify it fails**
 
 ```powershell
 node --test tests/received-display-ownership.test.js
 ```
 
-- [ ] **Step 3: Delete replaced branches and compatibility methods**
+- [x] **Step 3: Delete replaced branches and compatibility methods**
 
 Run both audits before editing:
 
@@ -1762,7 +1762,7 @@ Delete automatic received writes and automatic original snapshots already replac
 
 Remove the test that asserts name-based `PatchUtils.forceAllUpdates` is the correct visible refresh. Replace it with adapter acknowledgement tests.
 
-- [ ] **Step 4: Verify module and artifact guardrails**
+- [x] **Step 4: Verify module and artifact guardrails**
 
 Add a first-milestone growth guard to `tests/build-contract.test.js`:
 
@@ -1774,7 +1774,7 @@ assert.ok(pluginBytes <= 700 * 1024, `generated plugin unexpectedly exceeds 700 
 
 The approved 350-450 KB target remains a final migration gate after all legacy modules are replaced. This first milestone must not remove behavior merely to reach that final target.
 
-- [ ] **Step 5: Run full verification and commit**
+- [x] **Step 5: Run full verification and commit**
 
 ```powershell
 npm run build
@@ -1783,6 +1783,8 @@ git diff --check
 git add src DiscordAITranslator.plugin.js tests
 git commit -m "refactor: remove legacy received display ownership"
 ```
+
+**Verification evidence (2026-07-26):** `345e406`; full `npm run verify` `288/288`; `git diff --check` clean; generated artifact `708180` bytes, inside the 700 KB first-milestone guard now enforced by `tests/build-contract.test.js`. Sequencing note: because Task 7 already severed every automatic legacy write, the ownership absence tests passed green on first run instead of the red phase the plan predicted — the red phase for this contract was observed in Task 7 (`179552a`). The `translatedMessages`/`oldMessages` audit confirmed every remaining access serves manual message translation, sent editing, reply previews, embeds, or titles, which this milestone explicitly keeps; `applyStoredTranslationToMessage` remains the single legacy writer with manual-only callers, so no additional deletions were required. The methodSlice contract tolerates `async` methods and object-literal method shorthand; the old `forceAllUpdates` refresh test was rescoped to the retained legacy manual-path helper instead of deleted, and adapter acknowledgement tests (Task 4 plus the integration suites) cover the received refresh contract.
 
 ## Task 10: Review, Deploy, And Complete The Display Milestone
 
