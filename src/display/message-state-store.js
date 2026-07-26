@@ -106,6 +106,7 @@ function createBaseRecord(messageId, channelId) {
 		archive: null,
 		status: MESSAGE_STATUSES.IDLE,
 		translation: null,
+		restoredTranslation: null,
 		reason: null,
 		origin: null,
 		manualOptions: null,
@@ -230,6 +231,13 @@ function createMessageStateStore({journal = null} = {}) {
 			.map(record => recordTransition(update(record.messageId, {
 				status: MESSAGE_STATUSES.CANCELLED,
 				translation: null,
+				// The message on screen still carries the painted translation, and the render
+				// pass that restores the original needs to recognise that paint as our own
+				// output - the automatic path has no source archive to anchor on. Dropping
+				// the translation outright left the cancelled record unable to prove the
+				// painted text was ours, so the next pass captured the translation as a new
+				// source and the original was never painted back.
+				restoredTranslation: record.translation ? freezeValue(record.translation) : record.restoredTranslation || null,
 				reason,
 				requestIdentity: null,
 				renderStatus: RENDER_STATUSES.PENDING,

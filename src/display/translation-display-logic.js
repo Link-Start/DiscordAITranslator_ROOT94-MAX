@@ -237,6 +237,18 @@ function createTranslationDisplayLogic({BDFDB} = {}) {
 			if (!translation && plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id)) {
 				message = e.instance.props.message = new BDFDB.DiscordObjects.Message(plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message);
 			}
+			// The automatic untranslate has no archive; the cancelled record's source and its
+			// restoredTranslation are what tell this render "the text on the message is our
+			// paint, put the original back". Without this, cancelling left the translation
+			// on screen because the content component can re-render without a stream pass.
+			if (!translation && message.id) {
+				const state = plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id);
+				if (state && state.status == "cancelled" && state.restoredTranslation && state.source && state.source.content
+					&& message.content !== state.source.content
+					&& plugin.matchesPaintedTranslationContent(message.content, state.restoredTranslation)) {
+					message.content = state.source.content;
+				}
+			}
 			if (!translation) translation = translationDisplayLogic.resolveLoadedMessageContentTranslation(plugin, message, channelId);
 			return {message, channelId, translation};
 		},

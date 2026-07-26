@@ -85,18 +85,27 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, set
 				const owner = scroller && findStreamOwner(scroller);
 				if (owner) BDFDB.ReactUtils.forceUpdate(owner);
 				await waitForPaint();
-				let confirmedIds = confirmViews(uniqueMessageIds, viewsByMessageId);
+				// Discord virtualises the list, so most of a historical batch has no DOM node
+				// at all. A row that is not mounted has nothing to confirm and nothing to fix:
+				// the store is its source of truth and it paints on mount. Only a row that IS
+				// mounted and still shows a stale revision justifies the fallback - which
+				// unmounts and rebuilds the entire chat layer, the most disruptive repaint
+				// BDFDB has. Counting virtualised rows as failures fired that fallback on
+				// essentially every batch commit, freezing the UI for seconds each time.
+				const presentIds = uniqueMessageIds.filter(messageId => findMessageElement(messageId));
+				let confirmedIds = confirmViews(presentIds, viewsByMessageId);
 				let fallbackUsed = false;
-				if (confirmedIds.length !== uniqueMessageIds.length) {
+				if (confirmedIds.length !== presentIds.length) {
 					fallbackUsed = true;
 					BDFDB.MessageUtils.rerenderAll(true);
 					await waitForFallbackPaint();
-					confirmedIds = confirmViews(uniqueMessageIds, viewsByMessageId);
+					confirmedIds = confirmViews(presentIds, viewsByMessageId);
 				}
 				const confirmedIdSet = new Set(confirmedIds.map(String));
+				const virtualisedIds = uniqueMessageIds.filter(messageId => !presentIds.includes(messageId));
 				outcome = {
-					confirmedIds,
-					missingIds: uniqueMessageIds.filter(messageId => !confirmedIdSet.has(String(messageId))),
+					confirmedIds: confirmedIds.concat(virtualisedIds),
+					missingIds: presentIds.filter(messageId => !confirmedIdSet.has(String(messageId))),
 					fallbackUsed
 				};
 			}

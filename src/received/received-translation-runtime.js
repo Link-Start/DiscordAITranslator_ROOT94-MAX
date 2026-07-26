@@ -267,23 +267,31 @@ function createReceivedTranslationRuntime({
 		// translated text while losing the translation - and with it the accent class that
 		// carries the whole colour treatment. It is also re-queued and re-translated, because
 		// as far as the plugin can tell the author just edited the message into Chinese.
-		resolveOriginalContentDataAnchor(plugin, message) {
-			const archive = message && message.id && plugin.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
-			if (archive && archive.originalContentData) return archive.originalContentData;
-			const record = message && message.id && plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id);
-			const translation = record && record.status == "translated" && record.translation;
-			if (!translation || !record.source || !record.source.content) return null;
-			const painted = plugin.normalizeExtractedMessageText(message.content || "").trim();
-			if (!painted) return null;
-			// The body is recomposed at render time from the current display settings, so a
-			// settings change made after the commit must still read as our own output rather
-			// than as a user edit.
+		// The shapes we could have painted for this translation. Recomposed at render time
+		// from the current display settings, so a settings change made after the commit must
+		// still read as our own output rather than as a user edit.
+		matchesPaintedTranslation(plugin, paintedText, translation) {
+			if (!translation) return false;
+			const painted = plugin.normalizeExtractedMessageText(paintedText || "").trim();
+			if (!painted) return false;
 			const known = [
 				translation.content,
 				translation.translatedContent,
 				plugin.buildReceivedDisplayContent(translation.translatedContent || translation.content, translation.originalContent || "")
 			].map(value => plugin.normalizeExtractedMessageText(value || "").trim()).filter(Boolean);
-			return known.includes(painted) ? record.source : null;
+			return known.includes(painted);
+		},
+		resolveOriginalContentDataAnchor(plugin, message) {
+			const archive = message && message.id && plugin.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
+			if (archive && archive.originalContentData) return archive.originalContentData;
+			const record = message && message.id && plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id);
+			// A cancelled record's translation is gone, but its paint is still on the message
+			// until a render pass swaps the original back. restoredTranslation is what lets
+			// this pass tell that paint from a real edit - without it, the cancel itself was
+			// captured as a source change and the original never came back.
+			const translation = record && (record.status == "translated" && record.translation || record.status == "cancelled" && record.restoredTranslation);
+			if (!translation || !record.source || !record.source.content) return null;
+			return receivedTranslationRuntime.matchesPaintedTranslation(plugin, message.content, translation) ? record.source : null;
 		},
 		createCheckMessageContext(plugin, message, channel, options = {}) {
 			const channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
@@ -370,6 +378,16 @@ function createReceivedTranslationRuntime({
 			}
 			else if (plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id)) {
 				stream.content.content = plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message.content;
+				messageChanged = true;
+			}
+			// The automatic path's untranslate: the record is cancelled, the message still
+			// carries the painted translation, and there is no archive to consume. The
+			// restoredTranslation is the proof the paint is ours; the record's source is
+			// the original to put back.
+			else if (storeView && storeView.status == "cancelled" && storeView.restoredTranslation && storeView.content
+				&& stream.content.content !== storeView.content
+				&& receivedTranslationRuntime.matchesPaintedTranslation(plugin, stream.content.content, storeView.restoredTranslation)) {
+				stream.content.content = storeView.content;
 				messageChanged = true;
 			}
 			return {translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage};

@@ -87,6 +87,7 @@ test("createDisplayView freezes the complete translated projection", () => {
 		"renderStatus",
 		"renderReason",
 		"translation",
+		"restoredTranslation",
 		"source",
 		"origin",
 		"generation",
