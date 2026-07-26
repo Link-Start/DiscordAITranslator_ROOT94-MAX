@@ -392,9 +392,6 @@ module.exports = (_ => {
 		var authKeys = {};
 		var channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {};
 		var translationEnabledStates = {globalDefault: false, channelOverrides: {}};
-		var replyPreviewTranslations = {};
-		var queuedReplyPreviewTranslations = {};
-		var autoTranslationEligibleReplyPreviewMessages = {};
 		// Backoff window set when the translation provider returns 429/5xx; the queue
 		// pauses until this timestamp to avoid hammering a rate-limited or ailing server.
 		const channelTitleStore = createChannelTitleStore();
@@ -1251,8 +1248,7 @@ module.exports = (_ => {
 				// to restore the original; the render path deletes the clone after consuming it.
 				if (!config.preserveSuppressed) plugin.ensureReceivedDisplayRuntime().clearSuppression(messageId);
 				if (config.clearReplyPreview) {
-					delete replyPreviewTranslations[messageId];
-					delete queuedReplyPreviewTranslations[messageId];
+					plugin.ensureReceivedDisplayRuntime().clearPreview(messageId);
 				}
 			},
 			getStoredTranslationChannelId(plugin, messageId, fallbackChannelId = null, translation = null) {
@@ -1260,7 +1256,7 @@ module.exports = (_ => {
 				if (translation && translation.channelId) return translation.channelId;
 				const displayedTranslation = plugin.ensureReceivedDisplayRuntime().getDisplayState(messageId);
 				if (displayedTranslation && displayedTranslation.channelId) return displayedTranslation.channelId;
-				const replyPreviewTranslation = replyPreviewTranslations[messageId];
+				const replyPreviewTranslation = plugin.ensureReceivedDisplayRuntime().getPreviewTranslation(messageId);
 				if (replyPreviewTranslation && replyPreviewTranslation.channelId) return replyPreviewTranslation.channelId;
 				const archive = plugin.ensureReceivedDisplayRuntime().peekSourceArchive(messageId);
 				return archive && archive.message.channel_id || null;
@@ -1308,8 +1304,7 @@ module.exports = (_ => {
 				const translation = plugin.getReplyPreviewTranslation(message, channelId);
 				if (!translation) return null;
 				if (!translationDisplayLogic.shouldDisplayStoredTranslation(plugin, translation, channelId)) {
-					delete replyPreviewTranslations[message.id];
-					delete queuedReplyPreviewTranslations[message.id];
+					plugin.ensureReceivedDisplayRuntime().clearPreview(message.id);
 					return null;
 				}
 				return translation;
@@ -2151,8 +2146,8 @@ module.exports = (_ => {
 				this.ensureSentTranslationStore().clearManualRequests();
 				this.ensureReceivedDisplayRuntime().clearAllSuppression();
 				this.ensureLiveTranslationQueue().clearAllQueuedMessages();
-				queuedReplyPreviewTranslations = {};
-				autoTranslationEligibleReplyPreviewMessages = {};
+				this.ensureReceivedDisplayRuntime().clearPreviews(null);
+				this.ensureReceivedDisplayRuntime().clearPreviewEligibility(null);
 				this.ensureLiveTranslationQueue().setBusyTranslating(false);
 				this.ensureLiveTranslationQueue().setLiveAutoTranslating(false);
 				this.clearLoadedAutoTranslationStatus();
@@ -4145,14 +4140,12 @@ module.exports = (_ => {
 
 			getReplyPreviewTranslation (message, channelId) {
 				if (!message || !message.id) return null;
-				const storedTranslation = replyPreviewTranslations[message.id];
-				if (!storedTranslation) return null;
-				const signature = this.createReplyPreviewSignature(message, channelId);
-				if (storedTranslation.signature != signature) {
-					delete replyPreviewTranslations[message.id];
-					return null;
-				}
-				return storedTranslation;
+				const display = this.ensureReceivedDisplayRuntime();
+				// Existence check first: building a signature resolves the channel language settings,
+				// and most reply renders have nothing stored to validate. The store evicts on a
+				// signature mismatch, which is what the inline comparison used to do here.
+				if (!display.getPreviewTranslation(message.id)) return null;
+				return display.getPreviewTranslation(message.id, {signature: this.createReplyPreviewSignature(message, channelId)});
 			}
 
 			createReplyPreviewTranslationData (message, channelId, translation) {
@@ -4227,7 +4220,7 @@ module.exports = (_ => {
 			}
 
 			queueReplyPreviewTranslation (message, channelId, contextOptions = {}) {
-				if (!message || !message.id || !channelId || queuedReplyPreviewTranslations[message.id]) return;
+				if (!message || !message.id || !channelId || this.ensureReceivedDisplayRuntime().isPreviewPending(message.id)) return;
 				const baseMessage = contextOptions.baseMessage || null;
 				if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId)) return;
 				if (this.ensureReceivedDisplayRuntime().isSuppressed(message.id)) return;
@@ -4235,24 +4228,22 @@ module.exports = (_ => {
 				const originalContent = (message.content || "").trim();
 				if (!originalContent) return;
 				const signature = this.createReplyPreviewSignature(message, channelId, originalContent);
-				const existingTranslation = replyPreviewTranslations[message.id];
+				const existingTranslation = this.ensureReceivedDisplayRuntime().getPreviewTranslation(message.id);
 				if (existingTranslation && existingTranslation.signature == signature) return;
 				const cachedTranslation = this.getCachedReceivedTranslation(message, channelId);
 				if (cachedTranslation) {
 					const previewTranslation = this.createReplyPreviewTranslationData(message, channelId, cachedTranslation);
-					if (previewTranslation) replyPreviewTranslations[message.id] = previewTranslation;
+					if (previewTranslation) this.ensureReceivedDisplayRuntime().commitPreviewResult({messageId: message.id, channelId, signature, translation: previewTranslation});
 					return;
 				}
-				const request = {channelId, signature};
-				queuedReplyPreviewTranslations[message.id] = request;
+				const request = this.ensureReceivedDisplayRuntime().markPreviewPending({messageId: message.id, channelId, signature});
 				this.translateText(originalContent, messageTypes.RECEIVED, (translation, input, output) => {
-					if (!pluginRuntimeActive || queuedReplyPreviewTranslations[message.id] !== request) return;
-					delete queuedReplyPreviewTranslations[message.id];
+					if (!pluginRuntimeActive || !this.ensureReceivedDisplayRuntime().releasePreviewPending(request)) return;
 					if (this.createReplyPreviewSignature(message, channelId, (message.content || "").trim()) != signature) return;
 					if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId)) return;
 					if (!this.isTranslationEnabled(channelId)) return;
 					if (translation) {
-						replyPreviewTranslations[message.id] = {
+						this.ensureReceivedDisplayRuntime().commitPreviewResult({messageId: message.id, channelId, signature, translation: {
 							signature,
 							channelId,
 							auto: true,
@@ -4260,7 +4251,7 @@ module.exports = (_ => {
 							originalContent,
 							input,
 							output
-						};
+						}});
 						this.scheduleTranslationRerender({batched: true});
 					}
 				}, null, {
@@ -4313,18 +4304,16 @@ module.exports = (_ => {
 			}
 
 			clearAutoTranslationEligibleReplyPreviewMessages (channelId = null) {
-				if (!channelId) autoTranslationEligibleReplyPreviewMessages = {};
-				else delete autoTranslationEligibleReplyPreviewMessages[channelId];
+								this.ensureReceivedDisplayRuntime().clearPreviewEligibility(channelId);
 			}
 
 			markAutoTranslationEligibleReplyPreviewMessage (channelId, messageId) {
 				if (!channelId || !messageId) return;
-				if (!autoTranslationEligibleReplyPreviewMessages[channelId]) autoTranslationEligibleReplyPreviewMessages[channelId] = {};
-				autoTranslationEligibleReplyPreviewMessages[channelId][messageId] = true;
+								this.ensureReceivedDisplayRuntime().markPreviewEligible(channelId, messageId);
 			}
 
 			isAutoTranslationEligibleReplyPreviewMessage (channelId, messageId) {
-				return !!(channelId && messageId && autoTranslationEligibleReplyPreviewMessages[channelId] && autoTranslationEligibleReplyPreviewMessages[channelId][messageId]);
+				return this.ensureReceivedDisplayRuntime().isPreviewEligible(channelId, messageId);
 			}
 
 			markReplyPreviewRenderMessage (message) {
@@ -4796,17 +4785,14 @@ module.exports = (_ => {
 				this.invalidateSentAutomaticTranslationRequests(channelId);
 				this.ensureLiveTranslationQueue().clearQueue(channelId);
 				if (!channelId) {
-					queuedReplyPreviewTranslations = {};
-					autoTranslationEligibleReplyPreviewMessages = {};
+					this.ensureReceivedDisplayRuntime().clearPreviews(null);
+					this.ensureReceivedDisplayRuntime().clearPreviewEligibility(null);
 					loadedTranslationStatusStore.resetSeen(null);
 					this.clearLoadedAutoTranslationStatus();
 					return;
 				}
-				for (const messageId of Object.keys(queuedReplyPreviewTranslations)) {
-					const request = queuedReplyPreviewTranslations[messageId];
-					if (request == channelId || request && request.channelId == channelId) delete queuedReplyPreviewTranslations[messageId];
-				}
-				delete autoTranslationEligibleReplyPreviewMessages[channelId];
+				this.ensureReceivedDisplayRuntime().clearPreviews(channelId);
+				this.ensureReceivedDisplayRuntime().clearPreviewEligibility(channelId);
 				loadedTranslationStatusStore.resetSeen(channelId);
 				if (loadedTranslationStatusStore.isForChannel(channelId)) this.clearLoadedAutoTranslationStatus();
 			}
@@ -4816,11 +4802,7 @@ module.exports = (_ => {
 					if (channelId && this.getDisplayedTranslationChannelId(record.messageId) != channelId) continue;
 					this.clearDisplayedTranslationState(record.messageId);
 				}
-				for (const messageId of Object.keys(replyPreviewTranslations)) {
-					if (channelId && replyPreviewTranslations[messageId].channelId != channelId) continue;
-					delete replyPreviewTranslations[messageId];
-					delete queuedReplyPreviewTranslations[messageId];
-				}
+				this.ensureReceivedDisplayRuntime().clearPreviews(channelId);
 			}
 
 			clearDisplayedAutoTranslations (channelId = null) {
@@ -4831,12 +4813,10 @@ module.exports = (_ => {
 					if (channelId && this.getDisplayedTranslationChannelId(record.messageId) != channelId) continue;
 					this.clearDisplayedTranslationState(record.messageId);
 				}
-				for (const messageId of Object.keys(replyPreviewTranslations)) {
-					const translation = replyPreviewTranslations[messageId];
-					if (!translation || !translation.auto) continue;
-					if (channelId && translation.channelId != channelId) continue;
-					delete replyPreviewTranslations[messageId];
-					delete queuedReplyPreviewTranslations[messageId];
+				for (const record of this.ensureReceivedDisplayRuntime().listPreviewed()) {
+					if (!record.preview || !record.preview.auto) continue;
+					if (channelId && record.preview.channelId != channelId) continue;
+					this.ensureReceivedDisplayRuntime().clearPreview(record.messageId);
 				}
 				this.clearChannelTitleTranslations(channelId);
 			}
@@ -5811,7 +5791,7 @@ module.exports = (_ => {
 				this.resetAutoTranslationTracking();
 				this.clearLoadedAutoTranslationStatus();
 				this.ensureLiveTranslationQueue().setLiveAutoTranslating(false);
-				replyPreviewTranslations = {};
+				this.ensureReceivedDisplayRuntime().clearPreviews(null);
 				this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers();
 				
 				this.setLanguages();
