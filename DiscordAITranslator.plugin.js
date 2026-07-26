@@ -4309,6 +4309,223 @@ var require_historical_job_registry = __commonJS({
   }
 });
 
+// src/protection/protection-logic.js
+var require_protection_logic = __commonJS({
+  "src/protection/protection-logic.js"(exports2, module2) {
+    var MESSAGE_PLACES = Object.freeze({
+      RECEIVED: "received",
+      SENT: "sent"
+    }), TRANSLATION_PROTECTION_SIGNATURE_VERSION = "2026-06-16-auto-protect-v11";
+    function createProtectionLogic({
+      // The only thing protection needs from the library is the "is this a usable array"
+      // guard it applies to the three user-editable exception lists. Defaulted so the
+      // module is constructible on its own; the plugin injects the real library.
+      BDFDB = { ArrayUtils: { is: Array.isArray } }
+    } = {}) {
+      let protectionLogic = {
+        escapeRegExp(_plugin, string) {
+          return (string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        },
+        getExceptionScopeSetting(plugin, key, fallback = !0) {
+          let exceptions = plugin.settings && plugin.settings.exceptions || {};
+          return exceptions[key] == null ? !!fallback : !!exceptions[key];
+        },
+        shouldProtectConfiguredTermsForPlace(plugin, place) {
+          return place == MESSAGE_PLACES.SENT ? protectionLogic.getExceptionScopeSetting(plugin, "protectedTermsForSent", !0) : protectionLogic.getExceptionScopeSetting(plugin, "protectedTermsForReceived", !0);
+        },
+        shouldProtectWrappedTextForPlace(plugin, place) {
+          return place == MESSAGE_PLACES.SENT ? protectionLogic.getExceptionScopeSetting(plugin, "wrapperPairsForSent", !0) : protectionLogic.getExceptionScopeSetting(plugin, "wrapperPairsForReceived", !0);
+        },
+        getProtectedTermsList(plugin) {
+          let protectedTerms = BDFDB.ArrayUtils.is(plugin.settings.exceptions.protectedTerms) ? plugin.settings.exceptions.protectedTerms : [];
+          return [...new Set(protectedTerms.map((term) => (term || "").trim()).filter(Boolean))].sort((termA, termB) => termB.length - termA.length);
+        },
+        trimTrailingProtectedPunctuation(_plugin, text) {
+          if (!text) return { protectedText: text, trailingText: "" };
+          let trailingMatch = text.match(/([,.;:!?'"`)\]}>，。！？；：）】」》、]+)$/);
+          return !trailingMatch || trailingMatch.index < 1 ? { protectedText: text, trailingText: "" } : {
+            protectedText: text.slice(0, trailingMatch.index),
+            trailingText: trailingMatch[0]
+          };
+        },
+        protectRegexMatches(plugin, string, regex, protectedSegments = {}, count = 0, options = {}) {
+          if (!string || !(regex instanceof RegExp)) return { string, protectedSegments, count };
+          regex.lastIndex = 0;
+          let lastIndex = 0, nextString = "", hasMatch = !1, match;
+          for (; match = regex.exec(string); ) {
+            let fullMatch = match[0];
+            if (!fullMatch) {
+              regex.global && regex.lastIndex === match.index && regex.lastIndex++;
+              continue;
+            }
+            let protectedText = fullMatch, trailingText = "";
+            if (typeof options.normalize == "function") {
+              let normalized = options.normalize(fullMatch, match, string) || {};
+              protectedText = normalized.protectedText != null ? normalized.protectedText : protectedText, trailingText = normalized.trailingText || "";
+            }
+            if (!(!protectedText || !String(protectedText).trim()) && (hasMatch = !0, nextString += string.slice(lastIndex, match.index), protectedSegments[count] = protectedText, nextString += `${protectionLogic.createProtectionPlaceholder(plugin, count++)}${trailingText}`, lastIndex = match.index + fullMatch.length, !regex.global))
+              break;
+          }
+          return hasMatch ? (nextString += string.slice(lastIndex), { string: nextString, protectedSegments, count }) : { string, protectedSegments, count };
+        },
+        protectCodeBlockSegments(plugin, string, protectedSegments = {}, count = 0) {
+          return protectionLogic.protectRegexMatches(plugin, string, /```[\s\S]*?```/g, protectedSegments, count);
+        },
+        protectAutoDetectedSegments(plugin, string, protectedSegments = {}, count = 0) {
+          let result = protectionLogic.protectRegexMatches(plugin, string, /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}\b/gi, protectedSegments, count);
+          string = result.string, protectedSegments = result.protectedSegments, count = result.count;
+          let trimTrailing = /* @__PURE__ */ __name((fullMatch) => protectionLogic.trimTrailingProtectedPunctuation(plugin, fullMatch), "trimTrailing");
+          return result = protectionLogic.protectRegexMatches(plugin, string, /\bhttps?:\/\/[^\s<>()\u3000]+/gi, protectedSegments, count, { normalize: trimTrailing }), string = result.string, protectedSegments = result.protectedSegments, count = result.count, result = protectionLogic.protectRegexMatches(plugin, string, /\b(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?:\/[^\s<>()\u3000]*)?/gi, protectedSegments, count, {
+            normalize: /* @__PURE__ */ __name((fullMatch) => {
+              let trimmed = trimTrailing(fullMatch);
+              return /[./]/.test(trimmed.protectedText || "") ? trimmed : { protectedText: "", trailingText: fullMatch };
+            }, "normalize")
+          }), string = result.string, protectedSegments = result.protectedSegments, count = result.count, result = protectionLogic.protectRegexMatches(plugin, string, /\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b/g, protectedSegments, count), string = result.string, protectedSegments = result.protectedSegments, count = result.count, string = string.replace(/(^|\s)(\/[A-Za-z][A-Za-z0-9_-]{1,32})(?=\s|$)/g, (fullMatch, leading, command) => (protectedSegments[count] = command, `${leading || ""}${protectionLogic.createProtectionPlaceholder(plugin, count++)}`)), { string, protectedSegments, count };
+        },
+        protectDiscordMarkupSegments(plugin, string, protectedSegments = {}, count = 0) {
+          return string ? protectionLogic.protectRegexMatches(plugin, string, /<a?:[A-Za-z0-9_~]+:\d+>|<@[!&]?\d+>|<#\d+>|<@&\d+>|<t:\d+(?::[tTdDfFR])?>/g, protectedSegments, count) : { string, protectedSegments, count };
+        },
+        protectQuotedTextSegments(plugin, string, protectedSegments = {}, count = 0) {
+          if (!plugin.settings.general.protectQuotedText || !string) return { string, protectedSegments, count };
+          let quotedRegex = /"([^"\r\n]+)"|“([^”\r\n]+)”/g;
+          return string = string.replace(quotedRegex, (fullMatch) => !fullMatch || !fullMatch.slice(1, -1).trim() ? fullMatch : (protectedSegments[count] = fullMatch, protectionLogic.createProtectionPlaceholder(plugin, count++))), { string, protectedSegments, count };
+        },
+        protectWrappedTextSegments(plugin, string, protectedSegments = {}, count = 0, place = null) {
+          if (!protectionLogic.shouldProtectWrappedTextForPlace(plugin, place) || !string) return { string, protectedSegments, count };
+          for (let rule of plugin.getProtectedWrapperRules()) {
+            let cursor = 0, nextString = "";
+            for (; cursor < string.length; ) {
+              let startIndex = string.indexOf(rule.left, cursor);
+              if (startIndex < 0) {
+                nextString += string.slice(cursor);
+                break;
+              }
+              let contentStart = startIndex + rule.left.length, endIndex = string.indexOf(rule.right, contentStart);
+              if (endIndex < 0) {
+                nextString += string.slice(cursor);
+                break;
+              }
+              let fullText = string.slice(startIndex, endIndex + rule.right.length), innerText = string.slice(contentStart, endIndex);
+              nextString += string.slice(cursor, startIndex), innerText.trim() && !/[\r\n]/.test(fullText) ? (protectedSegments[count] = fullText, nextString += protectionLogic.createProtectionPlaceholder(plugin, count++)) : nextString += fullText, cursor = endIndex + rule.right.length;
+            }
+            string = nextString;
+          }
+          return { string, protectedSegments, count };
+        },
+        protectConfiguredTerms(plugin, string, protectedSegments = {}, count = 0) {
+          let protectedTerms = protectionLogic.getProtectedTermsList(plugin), boundaryChars = "A-Za-z0-9_";
+          for (let term of protectedTerms) {
+            if (term = (term || "").trim(), !term) continue;
+            let startsWithWord = new RegExp(`^[${boundaryChars}]`).test(term), endsWithWord = new RegExp(`[${boundaryChars}]$`).test(term), termPattern = term.split(/\s+/).filter(Boolean).map((part) => protectionLogic.escapeRegExp(plugin, part)).join("\\s*"), regex = new RegExp(`${startsWithWord ? `(^|[^${boundaryChars}])` : "()"}(${termPattern})${endsWithWord ? `(?=$|[^${boundaryChars}])` : ""}`, "gi");
+            string = string.replace(regex, (match, leading, protectedTerm) => protectedTerm ? (protectedSegments[count] = protectedTerm, `${leading || ""}${protectionLogic.createProtectionPlaceholder(plugin, count++)}`) : match);
+          }
+          return { string, protectedSegments, count };
+        },
+        protectAutoTechnicalTerms(plugin, string, protectedSegments = {}, count = 0) {
+          if (!string) return { string, protectedSegments, count };
+          let protectToken = /* @__PURE__ */ __name((fullMatch, offset, fullString) => {
+            if (!fullMatch || fullMatch.length < 2) return fullMatch;
+            let left = fullString[offset - 1] || "", right = fullString[offset + fullMatch.length] || "";
+            return /[A-Za-z0-9_]/.test(left) || /[A-Za-z0-9_]/.test(right) ? fullMatch : (protectedSegments[count] = fullMatch, protectionLogic.createProtectionPlaceholder(plugin, count++));
+          }, "protectToken");
+          string = string.replace(/\b[A-Za-z0-9_.-]{2,}\/[A-Za-z0-9_.-]{2,}(?:\/[A-Za-z0-9_.-]+)*\b/g, protectToken), string = string.replace(/\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|json|yml|yaml|toml|env|py|java|go|rs|cpp|c|h|css|html|md|txt|zip|rar|7z|exe|dll|png|jpg|jpeg|webp|gif|mp4|mov|psd|fig)\b/gi, protectToken), string = string.replace(/\bv\d+(?:\.\d+){1,4}(?:[-+][A-Za-z0-9.-]+)?\b|\b\d+(?:\.\d+){2,4}(?:[-+][A-Za-z0-9.-]+)?\b/gi, protectToken);
+          let originalForShoutCheck = String(string);
+          return (() => {
+            let latinLetters = originalForShoutCheck.match(/[A-Za-z]/g) || [];
+            return latinLetters.length < 4 || latinLetters.reduce((n, c) => n + (c >= "A" && c <= "Z" ? 1 : 0), 0) / latinLetters.length < 0.8 ? !1 : (originalForShoutCheck.match(/[一-鿿぀-ヿ가-힯]/g) || []).length * 2 < latinLetters.length;
+          })() || (string = string.replace(/\b[A-Z][A-Z0-9]{1,}(?:[-_/+.][A-Z0-9]+)*\b/g, protectToken)), string = string.replace(/\b[A-Za-z]+(?:[A-Z][a-z0-9]+){1,}[A-Za-z0-9]*\b/g, protectToken), string = string.replace(/\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+){1,}\b/g, protectToken), { string, protectedSegments, count };
+        },
+        protectMixedLanguageLatinTokens(_plugin, string, protectedSegments = {}, count = 0) {
+          return { string, protectedSegments, count };
+        },
+        getUnicodeEmojiDetector() {
+          try {
+            return new RegExp("[\\u200D\\uFE0E\\uFE0F\\u20E3]|\\p{Extended_Pictographic}|\\p{Regional_Indicator}", "u");
+          } catch {
+            return /[\u200D\uFE0E\uFE0F\u20E3\u2600-\u27BF]|[\uD83C-\uDBFF][\uDC00-\uDFFF]/;
+          }
+        },
+        isUnicodeEmojiGrapheme(_plugin, segment) {
+          if (!segment || typeof segment != "string" || /^(?:\d|#|\*)$/.test(segment)) return !1;
+          let detector = protectionLogic.getUnicodeEmojiDetector();
+          return !!(detector && detector.test(segment));
+        },
+        getUnicodeEmojiRegex() {
+          try {
+            return new RegExp("(?:\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20E3|\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?(?:\\p{Emoji_Modifier})?(?:\\u200D\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?(?:\\p{Emoji_Modifier})?)*)", "gu");
+          } catch {
+            return /(?:[\u2600-\u27BF]\uFE0F?|[\uD83C-\uDBFF][\uDC00-\uDFFF](?:\uFE0F|\uFE0E)?(?:\u200D[\uD83C-\uDBFF][\uDC00-\uDFFF](?:\uFE0F|\uFE0E)?)*)/g;
+          }
+        },
+        protectUnicodeEmojiSegments(plugin, string, protectedSegments = {}, count = 0) {
+          if (!string) return { string, protectedSegments, count };
+          if (typeof Intl < "u" && Intl.Segmenter) {
+            let detector = protectionLogic.getUnicodeEmojiDetector(), segmenter = new Intl.Segmenter(void 0, { granularity: "grapheme" }), nextString = "";
+            for (let part of segmenter.segment(string)) {
+              let segment = part && part.segment || "";
+              segment && detector && protectionLogic.isUnicodeEmojiGrapheme(plugin, segment) ? (protectedSegments[count] = segment, nextString += protectionLogic.createProtectionPlaceholder(plugin, count++)) : nextString += segment;
+            }
+            return { string: nextString, protectedSegments, count };
+          }
+          return protectionLogic.protectRegexMatches(plugin, string, protectionLogic.getUnicodeEmojiRegex(), protectedSegments, count);
+        },
+        createProtectionPlaceholder(_plugin, count) {
+          return `⟦${count}⟧`;
+        },
+        getProtectionPlaceholderRegex(_plugin, count) {
+          return new RegExp(`(?:⟦\\s*(?:DTA\\s*)?${count}\\s*⟧|【\\s*${count}\\s*】|\\[\\s*${count}\\s*\\]|<\\s*<\\s*<\\s*${count}\\s*>\\s*>\\s*>|[｛\\{]\\s*[｛\\{]\\s*${count}\\s*[｝\\}]\\s*[｝\\}])`, "g");
+        },
+        formatProtectedExceptionForDisplay(_plugin, exception) {
+          return exception == null ? "" : (exception = String(exception), /^<a?:[A-Za-z0-9_~]+:\d+>$/.test(exception) || /^<@!?\d+>$/.test(exception) || /^<@&\d+>$/.test(exception) || /^<#\d+>$/.test(exception), exception);
+        },
+        hasAllProtectionPlaceholders(plugin, string, protectedSegments) {
+          return !protectedSegments || !Object.keys(protectedSegments).length ? !0 : Object.keys(protectedSegments).every((count) => protectionLogic.getProtectionPlaceholderRegex(plugin, count).test(string || ""));
+        },
+        addExceptions(plugin, string, protectedSegments) {
+          for (let count in protectedSegments) {
+            let exception = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) && plugin.settings.exceptions.wordStart.some((n) => String(protectedSegments[count]).indexOf(n) == 0) ? String(protectedSegments[count]).slice(1) : String(protectedSegments[count]), replacement = protectionLogic.formatProtectedExceptionForDisplay(plugin, exception);
+            string = string.replace(protectionLogic.getProtectionPlaceholderRegex(plugin, count), replacement);
+          }
+          return string;
+        },
+        removeExceptions(plugin, string, place) {
+          let protectedSegments = {}, newString = [], count = 0, discordMarkupResult = protectionLogic.protectDiscordMarkupSegments(plugin, string, protectedSegments, count);
+          string = discordMarkupResult.string, protectedSegments = discordMarkupResult.protectedSegments, count = discordMarkupResult.count;
+          let codeBlockResult = protectionLogic.protectCodeBlockSegments(plugin, string, protectedSegments, count);
+          string = codeBlockResult.string, protectedSegments = codeBlockResult.protectedSegments, count = codeBlockResult.count;
+          let wrappedTextResult = protectionLogic.protectWrappedTextSegments(plugin, string, protectedSegments, count, place);
+          string = wrappedTextResult.string, protectedSegments = wrappedTextResult.protectedSegments, count = wrappedTextResult.count;
+          let autoProtectedResult = protectionLogic.protectAutoDetectedSegments(plugin, string, protectedSegments, count);
+          if (string = autoProtectedResult.string, protectedSegments = autoProtectedResult.protectedSegments, count = autoProtectedResult.count, protectionLogic.shouldProtectConfiguredTermsForPlace(plugin, place)) {
+            let protectedTermsResult = protectionLogic.protectConfiguredTerms(plugin, string, protectedSegments, count);
+            string = protectedTermsResult.string, protectedSegments = protectedTermsResult.protectedSegments, count = protectedTermsResult.count;
+          }
+          let autoTechnicalTermsResult = protectionLogic.protectAutoTechnicalTerms(plugin, string, protectedSegments, count);
+          string = autoTechnicalTermsResult.string, protectedSegments = autoTechnicalTermsResult.protectedSegments, count = autoTechnicalTermsResult.count;
+          let emojiProtectedResult = protectionLogic.protectUnicodeEmojiSegments(plugin, string, protectedSegments, count);
+          if (string = emojiProtectedResult.string, protectedSegments = emojiProtectedResult.protectedSegments, count = emojiProtectedResult.count, place == MESSAGE_PLACES.RECEIVED)
+            newString.push(string);
+          else {
+            let usedExceptions = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) ? plugin.settings.exceptions.wordStart : [];
+            string.split(" ").forEach((word) => {
+              word.indexOf("<@!") == 0 || word.indexOf("<#") == 0 || word.indexOf(":") == 0 || word.indexOf("<:") == 0 || word.indexOf("<a:") == 0 || word.indexOf("@") == 0 || word.indexOf("#") == 0 || usedExceptions.some((n) => word.indexOf(n) == 0 && word.length > 1) ? (newString.push(protectionLogic.createProtectionPlaceholder(plugin, count)), protectedSegments[count] = word, count++) : newString.push(word);
+            });
+          }
+          let maskedString = newString.join(place == MESSAGE_PLACES.RECEIVED ? "" : " "), hasTranslatableContent = maskedString.replace(/(?:⟦\s*(?:DTA\s*)?\d+\s*⟧|【\s*\d+\s*】|\[\s*\d+\s*\]|<<<\s*\d+\s*>>>|\{\{\d+\}\})/g, "").trim().length > 0;
+          return [maskedString, protectedSegments, hasTranslatableContent];
+        }
+      };
+      return Object.freeze(protectionLogic);
+    }
+    __name(createProtectionLogic, "createProtectionLogic");
+    module2.exports = {
+      MESSAGE_PLACES,
+      TRANSLATION_PROTECTION_SIGNATURE_VERSION,
+      createProtectionLogic
+    };
+  }
+});
+
 // src/settings/settings-store.js
 var require_settings_store = __commonJS({
   "src/settings/settings-store.js"(exports2, module2) {
@@ -6214,7 +6431,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a, _b, _c;
-        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), {
+        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), {
           createSettingsStore,
           createEmptyChannelEnablementState,
           normalizeStoredChannelEnablementState,
@@ -6224,7 +6441,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           channelEnablementStatesEqual
         } = require_settings_store(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
         var _this;
-        let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
+        let translationProtectionSignatureVersion = TRANSLATION_PROTECTION_SIGNATURE_VERSION, translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
           render() {
             let enabled = _this.isTranslationEnabled(this.props.channelId);
             return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.ChannelTextAreaButton, {
@@ -6840,199 +7057,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           }
         };
         __name(_HistoricalTranslationJob, "HistoricalTranslationJob");
-        let HistoricalTranslationJob = _HistoricalTranslationJob, protectionLogic = {
-          escapeRegExp(_plugin, string) {
-            return (string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          },
-          getExceptionScopeSetting(plugin, key, fallback = !0) {
-            let exceptions = plugin.settings && plugin.settings.exceptions || {};
-            return exceptions[key] == null ? !!fallback : !!exceptions[key];
-          },
-          shouldProtectConfiguredTermsForPlace(plugin, place) {
-            return place == messageTypes.SENT ? protectionLogic.getExceptionScopeSetting(plugin, "protectedTermsForSent", !0) : protectionLogic.getExceptionScopeSetting(plugin, "protectedTermsForReceived", !0);
-          },
-          shouldProtectWrappedTextForPlace(plugin, place) {
-            return place == messageTypes.SENT ? protectionLogic.getExceptionScopeSetting(plugin, "wrapperPairsForSent", !0) : protectionLogic.getExceptionScopeSetting(plugin, "wrapperPairsForReceived", !0);
-          },
-          getProtectedTermsList(plugin) {
-            let protectedTerms = BDFDB.ArrayUtils.is(plugin.settings.exceptions.protectedTerms) ? plugin.settings.exceptions.protectedTerms : [];
-            return [...new Set(protectedTerms.map((term) => (term || "").trim()).filter(Boolean))].sort((termA, termB) => termB.length - termA.length);
-          },
-          trimTrailingProtectedPunctuation(_plugin, text) {
-            if (!text) return { protectedText: text, trailingText: "" };
-            let trailingMatch = text.match(/([,.;:!?'"`)\]}>，。！？；：）】」》、]+)$/);
-            return !trailingMatch || trailingMatch.index < 1 ? { protectedText: text, trailingText: "" } : {
-              protectedText: text.slice(0, trailingMatch.index),
-              trailingText: trailingMatch[0]
-            };
-          },
-          protectRegexMatches(plugin, string, regex, protectedSegments = {}, count = 0, options = {}) {
-            if (!string || !(regex instanceof RegExp)) return { string, protectedSegments, count };
-            regex.lastIndex = 0;
-            let lastIndex = 0, nextString = "", hasMatch = !1, match;
-            for (; match = regex.exec(string); ) {
-              let fullMatch = match[0];
-              if (!fullMatch) {
-                regex.global && regex.lastIndex === match.index && regex.lastIndex++;
-                continue;
-              }
-              let protectedText = fullMatch, trailingText = "";
-              if (typeof options.normalize == "function") {
-                let normalized = options.normalize(fullMatch, match, string) || {};
-                protectedText = normalized.protectedText != null ? normalized.protectedText : protectedText, trailingText = normalized.trailingText || "";
-              }
-              if (!(!protectedText || !String(protectedText).trim()) && (hasMatch = !0, nextString += string.slice(lastIndex, match.index), protectedSegments[count] = protectedText, nextString += `${protectionLogic.createProtectionPlaceholder(plugin, count++)}${trailingText}`, lastIndex = match.index + fullMatch.length, !regex.global))
-                break;
-            }
-            return hasMatch ? (nextString += string.slice(lastIndex), { string: nextString, protectedSegments, count }) : { string, protectedSegments, count };
-          },
-          protectCodeBlockSegments(plugin, string, protectedSegments = {}, count = 0) {
-            return protectionLogic.protectRegexMatches(plugin, string, /```[\s\S]*?```/g, protectedSegments, count);
-          },
-          protectAutoDetectedSegments(plugin, string, protectedSegments = {}, count = 0) {
-            let result = protectionLogic.protectRegexMatches(plugin, string, /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}\b/gi, protectedSegments, count);
-            string = result.string, protectedSegments = result.protectedSegments, count = result.count;
-            let trimTrailing = /* @__PURE__ */ __name((fullMatch) => protectionLogic.trimTrailingProtectedPunctuation(plugin, fullMatch), "trimTrailing");
-            return result = protectionLogic.protectRegexMatches(plugin, string, /\bhttps?:\/\/[^\s<>()\u3000]+/gi, protectedSegments, count, { normalize: trimTrailing }), string = result.string, protectedSegments = result.protectedSegments, count = result.count, result = protectionLogic.protectRegexMatches(plugin, string, /\b(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?:\/[^\s<>()\u3000]*)?/gi, protectedSegments, count, {
-              normalize: /* @__PURE__ */ __name((fullMatch) => {
-                let trimmed = trimTrailing(fullMatch);
-                return /[./]/.test(trimmed.protectedText || "") ? trimmed : { protectedText: "", trailingText: fullMatch };
-              }, "normalize")
-            }), string = result.string, protectedSegments = result.protectedSegments, count = result.count, result = protectionLogic.protectRegexMatches(plugin, string, /\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b/g, protectedSegments, count), string = result.string, protectedSegments = result.protectedSegments, count = result.count, string = string.replace(/(^|\s)(\/[A-Za-z][A-Za-z0-9_-]{1,32})(?=\s|$)/g, (fullMatch, leading, command) => (protectedSegments[count] = command, `${leading || ""}${protectionLogic.createProtectionPlaceholder(plugin, count++)}`)), { string, protectedSegments, count };
-          },
-          protectDiscordMarkupSegments(plugin, string, protectedSegments = {}, count = 0) {
-            return string ? protectionLogic.protectRegexMatches(plugin, string, /<a?:[A-Za-z0-9_~]+:\d+>|<@[!&]?\d+>|<#\d+>|<@&\d+>|<t:\d+(?::[tTdDfFR])?>/g, protectedSegments, count) : { string, protectedSegments, count };
-          },
-          protectQuotedTextSegments(plugin, string, protectedSegments = {}, count = 0) {
-            if (!plugin.settings.general.protectQuotedText || !string) return { string, protectedSegments, count };
-            let quotedRegex = /"([^"\r\n]+)"|“([^”\r\n]+)”/g;
-            return string = string.replace(quotedRegex, (fullMatch) => !fullMatch || !fullMatch.slice(1, -1).trim() ? fullMatch : (protectedSegments[count] = fullMatch, protectionLogic.createProtectionPlaceholder(plugin, count++))), { string, protectedSegments, count };
-          },
-          protectWrappedTextSegments(plugin, string, protectedSegments = {}, count = 0, place = null) {
-            if (!protectionLogic.shouldProtectWrappedTextForPlace(plugin, place) || !string) return { string, protectedSegments, count };
-            for (let rule of plugin.getProtectedWrapperRules()) {
-              let cursor = 0, nextString = "";
-              for (; cursor < string.length; ) {
-                let startIndex = string.indexOf(rule.left, cursor);
-                if (startIndex < 0) {
-                  nextString += string.slice(cursor);
-                  break;
-                }
-                let contentStart = startIndex + rule.left.length, endIndex = string.indexOf(rule.right, contentStart);
-                if (endIndex < 0) {
-                  nextString += string.slice(cursor);
-                  break;
-                }
-                let fullText = string.slice(startIndex, endIndex + rule.right.length), innerText = string.slice(contentStart, endIndex);
-                nextString += string.slice(cursor, startIndex), innerText.trim() && !/[\r\n]/.test(fullText) ? (protectedSegments[count] = fullText, nextString += protectionLogic.createProtectionPlaceholder(plugin, count++)) : nextString += fullText, cursor = endIndex + rule.right.length;
-              }
-              string = nextString;
-            }
-            return { string, protectedSegments, count };
-          },
-          protectConfiguredTerms(plugin, string, protectedSegments = {}, count = 0) {
-            let protectedTerms = protectionLogic.getProtectedTermsList(plugin), boundaryChars = "A-Za-z0-9_";
-            for (let term of protectedTerms) {
-              if (term = (term || "").trim(), !term) continue;
-              let startsWithWord = new RegExp(`^[${boundaryChars}]`).test(term), endsWithWord = new RegExp(`[${boundaryChars}]$`).test(term), termPattern = term.split(/\s+/).filter(Boolean).map((part) => protectionLogic.escapeRegExp(plugin, part)).join("\\s*"), regex = new RegExp(`${startsWithWord ? `(^|[^${boundaryChars}])` : "()"}(${termPattern})${endsWithWord ? `(?=$|[^${boundaryChars}])` : ""}`, "gi");
-              string = string.replace(regex, (match, leading, protectedTerm) => protectedTerm ? (protectedSegments[count] = protectedTerm, `${leading || ""}${protectionLogic.createProtectionPlaceholder(plugin, count++)}`) : match);
-            }
-            return { string, protectedSegments, count };
-          },
-          protectAutoTechnicalTerms(plugin, string, protectedSegments = {}, count = 0) {
-            if (!string) return { string, protectedSegments, count };
-            let protectToken = /* @__PURE__ */ __name((fullMatch, offset, fullString) => {
-              if (!fullMatch || fullMatch.length < 2) return fullMatch;
-              let left = fullString[offset - 1] || "", right = fullString[offset + fullMatch.length] || "";
-              return /[A-Za-z0-9_]/.test(left) || /[A-Za-z0-9_]/.test(right) ? fullMatch : (protectedSegments[count] = fullMatch, protectionLogic.createProtectionPlaceholder(plugin, count++));
-            }, "protectToken");
-            string = string.replace(/\b[A-Za-z0-9_.-]{2,}\/[A-Za-z0-9_.-]{2,}(?:\/[A-Za-z0-9_.-]+)*\b/g, protectToken), string = string.replace(/\b[A-Za-z0-9_.-]+\.(?:js|jsx|ts|tsx|json|yml|yaml|toml|env|py|java|go|rs|cpp|c|h|css|html|md|txt|zip|rar|7z|exe|dll|png|jpg|jpeg|webp|gif|mp4|mov|psd|fig)\b/gi, protectToken), string = string.replace(/\bv\d+(?:\.\d+){1,4}(?:[-+][A-Za-z0-9.-]+)?\b|\b\d+(?:\.\d+){2,4}(?:[-+][A-Za-z0-9.-]+)?\b/gi, protectToken);
-            let originalForShoutCheck = String(string);
-            return (() => {
-              let latinLetters = originalForShoutCheck.match(/[A-Za-z]/g) || [];
-              return latinLetters.length < 4 || latinLetters.reduce((n, c) => n + (c >= "A" && c <= "Z" ? 1 : 0), 0) / latinLetters.length < 0.8 ? !1 : (originalForShoutCheck.match(/[一-鿿぀-ヿ가-힯]/g) || []).length * 2 < latinLetters.length;
-            })() || (string = string.replace(/\b[A-Z][A-Z0-9]{1,}(?:[-_/+.][A-Z0-9]+)*\b/g, protectToken)), string = string.replace(/\b[A-Za-z]+(?:[A-Z][a-z0-9]+){1,}[A-Za-z0-9]*\b/g, protectToken), string = string.replace(/\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+){1,}\b/g, protectToken), { string, protectedSegments, count };
-          },
-          protectMixedLanguageLatinTokens(_plugin, string, protectedSegments = {}, count = 0) {
-            return { string, protectedSegments, count };
-          },
-          getUnicodeEmojiDetector() {
-            try {
-              return new RegExp("[\\u200D\\uFE0E\\uFE0F\\u20E3]|\\p{Extended_Pictographic}|\\p{Regional_Indicator}", "u");
-            } catch {
-              return /[\u200D\uFE0E\uFE0F\u20E3\u2600-\u27BF]|[\uD83C-\uDBFF][\uDC00-\uDFFF]/;
-            }
-          },
-          isUnicodeEmojiGrapheme(_plugin, segment) {
-            if (!segment || typeof segment != "string" || /^(?:\d|#|\*)$/.test(segment)) return !1;
-            let detector = protectionLogic.getUnicodeEmojiDetector();
-            return !!(detector && detector.test(segment));
-          },
-          getUnicodeEmojiRegex() {
-            try {
-              return new RegExp("(?:\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20E3|\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?(?:\\p{Emoji_Modifier})?(?:\\u200D\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?(?:\\p{Emoji_Modifier})?)*)", "gu");
-            } catch {
-              return /(?:[\u2600-\u27BF]\uFE0F?|[\uD83C-\uDBFF][\uDC00-\uDFFF](?:\uFE0F|\uFE0E)?(?:\u200D[\uD83C-\uDBFF][\uDC00-\uDFFF](?:\uFE0F|\uFE0E)?)*)/g;
-            }
-          },
-          protectUnicodeEmojiSegments(plugin, string, protectedSegments = {}, count = 0) {
-            if (!string) return { string, protectedSegments, count };
-            if (typeof Intl < "u" && Intl.Segmenter) {
-              let detector = protectionLogic.getUnicodeEmojiDetector(), segmenter = new Intl.Segmenter(void 0, { granularity: "grapheme" }), nextString = "";
-              for (let part of segmenter.segment(string)) {
-                let segment = part && part.segment || "";
-                segment && detector && protectionLogic.isUnicodeEmojiGrapheme(plugin, segment) ? (protectedSegments[count] = segment, nextString += protectionLogic.createProtectionPlaceholder(plugin, count++)) : nextString += segment;
-              }
-              return { string: nextString, protectedSegments, count };
-            }
-            return protectionLogic.protectRegexMatches(plugin, string, protectionLogic.getUnicodeEmojiRegex(), protectedSegments, count);
-          },
-          createProtectionPlaceholder(_plugin, count) {
-            return `⟦${count}⟧`;
-          },
-          getProtectionPlaceholderRegex(_plugin, count) {
-            return new RegExp(`(?:⟦\\s*(?:DTA\\s*)?${count}\\s*⟧|【\\s*${count}\\s*】|\\[\\s*${count}\\s*\\]|<\\s*<\\s*<\\s*${count}\\s*>\\s*>\\s*>|[｛\\{]\\s*[｛\\{]\\s*${count}\\s*[｝\\}]\\s*[｝\\}])`, "g");
-          },
-          formatProtectedExceptionForDisplay(_plugin, exception) {
-            return exception == null ? "" : (exception = String(exception), /^<a?:[A-Za-z0-9_~]+:\d+>$/.test(exception) || /^<@!?\d+>$/.test(exception) || /^<@&\d+>$/.test(exception) || /^<#\d+>$/.test(exception), exception);
-          },
-          hasAllProtectionPlaceholders(plugin, string, protectedSegments) {
-            return !protectedSegments || !Object.keys(protectedSegments).length ? !0 : Object.keys(protectedSegments).every((count) => protectionLogic.getProtectionPlaceholderRegex(plugin, count).test(string || ""));
-          },
-          addExceptions(plugin, string, protectedSegments) {
-            for (let count in protectedSegments) {
-              let exception = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) && plugin.settings.exceptions.wordStart.some((n) => String(protectedSegments[count]).indexOf(n) == 0) ? String(protectedSegments[count]).slice(1) : String(protectedSegments[count]), replacement = protectionLogic.formatProtectedExceptionForDisplay(plugin, exception);
-              string = string.replace(protectionLogic.getProtectionPlaceholderRegex(plugin, count), replacement);
-            }
-            return string;
-          },
-          removeExceptions(plugin, string, place) {
-            let protectedSegments = {}, newString = [], count = 0, discordMarkupResult = protectionLogic.protectDiscordMarkupSegments(plugin, string, protectedSegments, count);
-            string = discordMarkupResult.string, protectedSegments = discordMarkupResult.protectedSegments, count = discordMarkupResult.count;
-            let codeBlockResult = protectionLogic.protectCodeBlockSegments(plugin, string, protectedSegments, count);
-            string = codeBlockResult.string, protectedSegments = codeBlockResult.protectedSegments, count = codeBlockResult.count;
-            let wrappedTextResult = protectionLogic.protectWrappedTextSegments(plugin, string, protectedSegments, count, place);
-            string = wrappedTextResult.string, protectedSegments = wrappedTextResult.protectedSegments, count = wrappedTextResult.count;
-            let autoProtectedResult = protectionLogic.protectAutoDetectedSegments(plugin, string, protectedSegments, count);
-            if (string = autoProtectedResult.string, protectedSegments = autoProtectedResult.protectedSegments, count = autoProtectedResult.count, protectionLogic.shouldProtectConfiguredTermsForPlace(plugin, place)) {
-              let protectedTermsResult = protectionLogic.protectConfiguredTerms(plugin, string, protectedSegments, count);
-              string = protectedTermsResult.string, protectedSegments = protectedTermsResult.protectedSegments, count = protectedTermsResult.count;
-            }
-            let autoTechnicalTermsResult = protectionLogic.protectAutoTechnicalTerms(plugin, string, protectedSegments, count);
-            string = autoTechnicalTermsResult.string, protectedSegments = autoTechnicalTermsResult.protectedSegments, count = autoTechnicalTermsResult.count;
-            let emojiProtectedResult = protectionLogic.protectUnicodeEmojiSegments(plugin, string, protectedSegments, count);
-            if (string = emojiProtectedResult.string, protectedSegments = emojiProtectedResult.protectedSegments, count = emojiProtectedResult.count, place == messageTypes.RECEIVED)
-              newString.push(string);
-            else {
-              let usedExceptions = BDFDB.ArrayUtils.is(plugin.settings.exceptions.wordStart) ? plugin.settings.exceptions.wordStart : [];
-              string.split(" ").forEach((word) => {
-                word.indexOf("<@!") == 0 || word.indexOf("<#") == 0 || word.indexOf(":") == 0 || word.indexOf("<:") == 0 || word.indexOf("<a:") == 0 || word.indexOf("@") == 0 || word.indexOf("#") == 0 || usedExceptions.some((n) => word.indexOf(n) == 0 && word.length > 1) ? (newString.push(protectionLogic.createProtectionPlaceholder(plugin, count)), protectedSegments[count] = word, count++) : newString.push(word);
-              });
-            }
-            let maskedString = newString.join(place == messageTypes.RECEIVED ? "" : " "), hasTranslatableContent = maskedString.replace(/(?:⟦\s*(?:DTA\s*)?\d+\s*⟧|【\s*\d+\s*】|\[\s*\d+\s*\]|<<<\s*\d+\s*>>>|\{\{\d+\}\})/g, "").trim().length > 0;
-            return [maskedString, protectedSegments, hasTranslatableContent];
-          }
-        }, receivedTranslationRuntime = {
+        let HistoricalTranslationJob = _HistoricalTranslationJob, protectionLogic = createProtectionLogic({ BDFDB }), receivedTranslationRuntime = {
           // Drains queued live items that can share one AI batch request with the first
           // item: same channel, no cached result, and not already batch-rejected.
           // Returns a burst item to the single-message path, preserving the queue's
