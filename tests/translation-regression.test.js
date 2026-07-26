@@ -2120,3 +2120,38 @@ test("a real edit after an automatic translation is still treated as an edit", (
 	message.content = "Good evening everyone";
 	assert.equal(plugin.extractOriginalContentData(message).content, "Good evening everyone", "a genuine edit must become the new original");
 });
+
+test("manual untranslate works on an automatically translated message", () => {
+	// Nothing covered this, which is how it shipped broken. It broke indirectly: once the
+	// laundering bug had replaced the record with a fresh idle one, translateMessage saw
+	// no translation to remove and fell into the translate branch instead - clicking
+	// "cancel translation" re-translated the message.
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+	plugin.lockManualTranslationScroll = () => {};
+
+	const message = {id: "untranslate-1", channel_id: "channel-untranslate", content: "Good morning", embeds: [], author: {id: "other-user"}};
+	const display = plugin.ensureReceivedDisplayRuntime();
+	display.setChannelGeneration("channel-untranslate", 1);
+	const originalContentData = plugin.extractOriginalContentData(message);
+	const signature = plugin.createReceivedTranslationSignature(message, "channel-untranslate", originalContentData);
+	display.captureSource({messageId: message.id, channelId: "channel-untranslate", generation: 1, sourceSignature: signature, source: {content: originalContentData.content, embeds: []}});
+	display.commitMessageResult({
+		messageId: message.id,
+		channelId: "channel-untranslate",
+		generation: 1,
+		sourceSignature: signature,
+		origin: "automatic",
+		translation: {channelId: "channel-untranslate", auto: true, content: "早上好", translatedContent: "早上好", originalContent: originalContentData.content}
+	}, {refresh: false});
+
+	let translateAttempted = false;
+	const hasTranslatableMessageContent = plugin.hasTranslatableMessageContent.bind(plugin);
+	plugin.hasTranslatableMessageContent = data => {translateAttempted = true; return hasTranslatableMessageContent(data);};
+
+	plugin.translateMessage(message, {id: "channel-untranslate"}, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false});
+
+	assert.equal(translateAttempted, false, "cancelling a translation must not ask the provider for another one");
+	assert.equal(display.isSuppressed(message.id), true, "the message must be suppressed so the automatic path leaves it alone");
+});
