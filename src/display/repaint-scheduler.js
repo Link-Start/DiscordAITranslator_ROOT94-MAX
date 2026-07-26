@@ -25,6 +25,11 @@ function createDisplayRepaintScheduler({
 	isSettingsSurfaceOpen = () => false,
 	isTextAreaFocused = () => false,
 	repaintAll = () => {},
+	// Pass BDFDB.TimeUtils.timeout/clear here, never the globals these default to.
+	// Every timer below ends in a full-list repaint, and a raw timer outlives the plugin
+	// instance that armed it, so after a reload a dead instance keeps repainting
+	// alongside the live one. The defaults exist only so a unit test can drive the
+	// scheduler without BDFDB; the managed-timer contract test pins the real wiring.
 	setTimeout: scheduleTimer = setTimeout,
 	clearTimeout: cancelTimer = clearTimeout
 }) {
