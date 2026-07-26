@@ -2026,3 +2026,97 @@ test("a store-backed automatic translation carries the colour treatment too", ()
 	assert.match(String(props.className || ""), /translator-translated-message/, "the accent class must reach a store-backed translation");
 	assert.equal(props.style && props.style["--translator-text-color"], "#00ff40");
 });
+
+test("a reply preview translation is committed when the provider answers", () => {
+	// markPreviewPending returns a token string; releasePreviewPending keys on the message
+	// id and treats the token as a guard. Passing the token where the id belongs made the
+	// store look up a record named "preview-1", find nothing, return false - so the
+	// translateText callback returned early every time and no preview was ever committed.
+	// The pending slot also stayed set, which blocked every later retry for that message.
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+	plugin.settings.general.showOriginalInReplyPreview = true;
+	plugin.shouldAutoTranslateReplyPreview = () => true;
+
+	const message = {id: "preview-msg-1", channel_id: "channel-preview", content: "Good morning", embeds: [], author: {id: "other-user"}};
+	let capturedCallback = null;
+	plugin.translateText = (text, place, callback) => {capturedCallback = callback;};
+
+	plugin.queueReplyPreviewTranslation(message, "channel-preview", message);
+	assert.ok(capturedCallback, "the preview should have asked the provider");
+	assert.ok(plugin.ensureReceivedDisplayRuntime().getPreviewPending(message.id), "the pending slot should be held while in flight");
+
+	capturedCallback("早上好", {id: "en"}, {id: "zh-CN"});
+
+	assert.ok(plugin.ensureReceivedDisplayRuntime().getPreviewTranslation(message.id), "the answer must reach the preview store");
+	assert.equal(plugin.ensureReceivedDisplayRuntime().getPreviewPending(message.id), null, "the pending slot must be released so a later retry can run");
+});
+
+function commitAutomaticTranslation(plugin, message, channelId, translatedContent) {
+	const display = plugin.ensureReceivedDisplayRuntime();
+	display.setChannelGeneration(channelId, 1);
+	const originalContentData = plugin.extractOriginalContentData(message);
+	const signature = plugin.createReceivedTranslationSignature(message, channelId, originalContentData);
+	display.captureSource({
+		messageId: message.id,
+		channelId,
+		generation: 1,
+		sourceSignature: signature,
+		source: {content: originalContentData.content, embeds: originalContentData.embeds || []}
+	});
+	display.commitMessageResult({
+		messageId: message.id,
+		channelId,
+		generation: 1,
+		sourceSignature: signature,
+		origin: "automatic",
+		translation: {
+			channelId,
+			auto: true,
+			content: translatedContent,
+			translatedContent,
+			originalContent: originalContentData.content
+		}
+	}, {refresh: false});
+	return signature;
+}
+
+test("a second render pass does not launder an automatic translation into the source", () => {
+	// The stream pass writes the painted text onto the message the channel stream holds.
+	// extractOriginalContentData had nothing to anchor on - an automatic commit mints no
+	// source archive - so the next pass read the plugin's own Chinese back as the
+	// "original", the recomputed signature changed, and captureSource replaced the record
+	// with a fresh idle one. The message kept translated text and lost the translation,
+	// which is why historical messages showed no colour, were re-queued, and were paid for
+	// a second time.
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+
+	const message = {id: "launder-1", channel_id: "channel-launder", content: "Good morning", embeds: [], author: {id: "other-user"}};
+	const signature = commitAutomaticTranslation(plugin, message, "channel-launder", "早上好");
+	const display = plugin.ensureReceivedDisplayRuntime();
+	assert.equal(display.getDisplayState(message.id).status, "translated", "the commit must land before we test what survives it");
+
+	// This is exactly what the stream pass does: paint the translation onto the message.
+	message.content = "早上好";
+
+	const rederived = plugin.extractOriginalContentData(message);
+	assert.equal(rederived.content, "Good morning", "our own paint must not become the new original");
+	assert.equal(plugin.createReceivedTranslationSignature(message, "channel-launder", rederived), signature, "an unedited message keeps its signature across passes");
+});
+
+test("a real edit after an automatic translation is still treated as an edit", () => {
+	// The anchor must recognise our own paint and nothing else, or a genuine edit would be
+	// invisible and the message would keep showing a translation of text that is gone.
+	const plugin = createPluginInstance();
+	plugin.isTranslationEnabled = () => true;
+	plugin.isReceivedAutoTranslationEnabled = () => true;
+
+	const message = {id: "launder-2", channel_id: "channel-launder", content: "Good morning", embeds: [], author: {id: "other-user"}};
+	commitAutomaticTranslation(plugin, message, "channel-launder", "早上好");
+
+	message.content = "Good evening everyone";
+	assert.equal(plugin.extractOriginalContentData(message).content, "Good evening everyone", "a genuine edit must become the new original");
+});

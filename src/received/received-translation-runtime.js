@@ -260,6 +260,31 @@ function createReceivedTranslationRuntime({
 			}
 			receivedTranslationRuntime.finishProcessMessages(plugin, context);
 		},
+		// An automatic commit mints no source archive, and the stream pass writes the painted
+		// text onto the message the channel stream holds. With no anchor, the NEXT stream pass
+		// reads that painted text back as the "original", the recomputed signature changes,
+		// captureSource replaces the record with a fresh idle one, and the message keeps its
+		// translated text while losing the translation - and with it the accent class that
+		// carries the whole colour treatment. It is also re-queued and re-translated, because
+		// as far as the plugin can tell the author just edited the message into Chinese.
+		resolveOriginalContentDataAnchor(plugin, message) {
+			const archive = message && message.id && plugin.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
+			if (archive && archive.originalContentData) return archive.originalContentData;
+			const record = message && message.id && plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id);
+			const translation = record && record.status == "translated" && record.translation;
+			if (!translation || !record.source || !record.source.content) return null;
+			const painted = plugin.normalizeExtractedMessageText(message.content || "").trim();
+			if (!painted) return null;
+			// The body is recomposed at render time from the current display settings, so a
+			// settings change made after the commit must still read as our own output rather
+			// than as a user edit.
+			const known = [
+				translation.content,
+				translation.translatedContent,
+				plugin.buildReceivedDisplayContent(translation.translatedContent || translation.content, translation.originalContent || "")
+			].map(value => plugin.normalizeExtractedMessageText(value || "").trim()).filter(Boolean);
+			return known.includes(painted) ? record.source : null;
+		},
 		createCheckMessageContext(plugin, message, channel, options = {}) {
 			const channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
 			const sourceChanged = plugin.refreshReceivedMessageSourceState(message, channelId);

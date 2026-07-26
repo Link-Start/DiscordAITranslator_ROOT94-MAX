@@ -807,7 +807,10 @@ var require_display_runtime = __commonJS({
         markPreviewPending: /* @__PURE__ */ __name((request) => store.markPreviewPending(request), "markPreviewPending"),
         isPreviewPending: /* @__PURE__ */ __name((messageId) => store.isPreviewPending(messageId), "isPreviewPending"),
         getPreviewPending: /* @__PURE__ */ __name((messageId) => store.getPreviewPending(messageId), "getPreviewPending"),
-        releasePreviewPending: /* @__PURE__ */ __name((request) => store.releasePreviewPending(request), "releasePreviewPending"),
+        // Two arguments, not one: markPreviewPending hands back a token string, and the
+        // store keys the release on the message id with the token as the guard against a
+        // superseded request releasing its successor's slot.
+        releasePreviewPending: /* @__PURE__ */ __name((messageId, token) => store.releasePreviewPending(messageId, token), "releasePreviewPending"),
         getPreviewTranslation: /* @__PURE__ */ __name((messageId, options) => store.getPreviewTranslation(messageId, options), "getPreviewTranslation"),
         getPreviewCandidates: /* @__PURE__ */ __name((messageId) => store.getPreviewCandidates(messageId), "getPreviewCandidates"),
         getReplyPreviewProjection: /* @__PURE__ */ __name((messageId, options) => store.getReplyPreviewProjection(messageId, options), "getReplyPreviewProjection"),
@@ -6647,6 +6650,25 @@ var require_received_translation_runtime = __commonJS({
             receivedTranslationRuntime.processChannelStreamEntry(plugin, e.instance.props.channelStream[index], context);
           receivedTranslationRuntime.finishProcessMessages(plugin, context);
         },
+        // An automatic commit mints no source archive, and the stream pass writes the painted
+        // text onto the message the channel stream holds. With no anchor, the NEXT stream pass
+        // reads that painted text back as the "original", the recomputed signature changes,
+        // captureSource replaces the record with a fresh idle one, and the message keeps its
+        // translated text while losing the translation - and with it the accent class that
+        // carries the whole colour treatment. It is also re-queued and re-translated, because
+        // as far as the plugin can tell the author just edited the message into Chinese.
+        resolveOriginalContentDataAnchor(plugin, message) {
+          let archive = message && message.id && plugin.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
+          if (archive && archive.originalContentData) return archive.originalContentData;
+          let record = message && message.id && plugin.ensureReceivedDisplayRuntime().getDisplayState(message.id), translation = record && record.status == "translated" && record.translation;
+          if (!translation || !record.source || !record.source.content) return null;
+          let painted = plugin.normalizeExtractedMessageText(message.content || "").trim();
+          return painted && [
+            translation.content,
+            translation.translatedContent,
+            plugin.buildReceivedDisplayContent(translation.translatedContent || translation.content, translation.originalContent || "")
+          ].map((value) => plugin.normalizeExtractedMessageText(value || "").trim()).filter(Boolean).includes(painted) ? record.source : null;
+        },
         createCheckMessageContext(plugin, message, channel, options = {}) {
           let channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), sourceChanged = plugin.refreshReceivedMessageSourceState(message, channelId), originalContentData = plugin.extractOriginalContentData(message), channelState = plugin.getAutoTranslationChannelState(channelId), autoTranslateBoundaryId = options.autoTranslateBoundaryId != null ? options.autoTranslateBoundaryId : channelState && channelState.boundaryMessageId, expectedSignature = plugin.createReceivedTranslationSignature(message, channelId, originalContentData), pendingSourceChanged = plugin.invalidateHistoricalTranslationMessage(message.id, channelId, expectedSignature), liveSourceChanged = plugin.invalidateLiveTranslationMessage(message.id, channelId, expectedSignature);
           return {
@@ -9346,7 +9368,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             ].map((value) => this.normalizeExtractedMessageText(value).trim()).filter(Boolean).includes(currentContent) ? !1 : (this.ensureReceivedDisplayRuntime().dropSourceArchive(message.id), this.clearDisplayedTranslationState(message.id, { clearReplyPreview: !0 }), this.clearCachedTranslation(message.id), !0);
           }
           extractOriginalContentData(message, options = {}) {
-            let extractArchive = message && message.id && this.ensureReceivedDisplayRuntime().peekSourceArchive(message.id), storedOriginalContentData = extractArchive && extractArchive.originalContentData;
+            let storedOriginalContentData = receivedTranslationRuntime.resolveOriginalContentDataAnchor(this, message);
             if (storedOriginalContentData) return this.cloneOriginalContentData(storedOriginalContentData);
             let messageContent = this.normalizeExtractedMessageText(message && message.content || "");
             options && options.ignoreReferencedPreview && (messageContent = this.stripReferencedPreviewFromContent(message, messageContent));
@@ -9655,7 +9677,7 @@ __________________ __________________ __________________
             }
             let request = this.ensureReceivedDisplayRuntime().markPreviewPending({ messageId: message.id, channelId, signature });
             this.translateText(originalContent, messageTypes.RECEIVED, (translation, input, output) => {
-              !pluginRuntimeActive || !this.ensureReceivedDisplayRuntime().releasePreviewPending(request) || this.createReplyPreviewSignature(message, channelId, (message.content || "").trim()) == signature && (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId) || this.isTranslationEnabled(channelId) && translation && (this.ensureReceivedDisplayRuntime().commitPreviewResult({ messageId: message.id, channelId, signature, translation: {
+              !pluginRuntimeActive || !this.ensureReceivedDisplayRuntime().releasePreviewPending(message.id, request) || this.createReplyPreviewSignature(message, channelId, (message.content || "").trim()) == signature && (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId) || this.isTranslationEnabled(channelId) && translation && (this.ensureReceivedDisplayRuntime().commitPreviewResult({ messageId: message.id, channelId, signature, translation: {
                 signature,
                 channelId,
                 auto: !0,
