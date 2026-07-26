@@ -771,8 +771,7 @@ module.exports = (_ => {
 			}
 
 			extractOriginalContentData (message, options = {}) {
-				const extractArchive = message && message.id && this.ensureReceivedDisplayRuntime().peekSourceArchive(message.id);
-				const storedOriginalContentData = extractArchive && extractArchive.originalContentData;
+				const storedOriginalContentData = receivedTranslationRuntime.resolveOriginalContentDataAnchor(this, message);
 				if (storedOriginalContentData) return this.cloneOriginalContentData(storedOriginalContentData);
 				let messageContent = this.normalizeExtractedMessageText(message && message.content || "");
 				if (options && options.ignoreReferencedPreview) messageContent = this.stripReferencedPreviewFromContent(message, messageContent);
@@ -1177,7 +1176,7 @@ module.exports = (_ => {
 				}
 				const request = this.ensureReceivedDisplayRuntime().markPreviewPending({messageId: message.id, channelId, signature});
 				this.translateText(originalContent, messageTypes.RECEIVED, (translation, input, output) => {
-					if (!pluginRuntimeActive || !this.ensureReceivedDisplayRuntime().releasePreviewPending(request)) return;
+					if (!pluginRuntimeActive || !this.ensureReceivedDisplayRuntime().releasePreviewPending(message.id, request)) return;
 					if (this.createReplyPreviewSignature(message, channelId, (message.content || "").trim()) != signature) return;
 					if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId)) return;
 					if (!this.isTranslationEnabled(channelId)) return;

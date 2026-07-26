@@ -56,7 +56,10 @@ function createDisplayRuntime(dependencies) {
 		markPreviewPending: request => store.markPreviewPending(request),
 		isPreviewPending: messageId => store.isPreviewPending(messageId),
 		getPreviewPending: messageId => store.getPreviewPending(messageId),
-		releasePreviewPending: request => store.releasePreviewPending(request),
+		// Two arguments, not one: markPreviewPending hands back a token string, and the
+		// store keys the release on the message id with the token as the guard against a
+		// superseded request releasing its successor's slot.
+		releasePreviewPending: (messageId, token) => store.releasePreviewPending(messageId, token),
 		getPreviewTranslation: (messageId, options) => store.getPreviewTranslation(messageId, options),
 		getPreviewCandidates: messageId => store.getPreviewCandidates(messageId),
 		getReplyPreviewProjection: (messageId, options) => store.getReplyPreviewProjection(messageId, options),
