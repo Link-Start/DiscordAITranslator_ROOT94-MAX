@@ -3351,6 +3351,143 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
   }
 });
 
+// src/sent/sent-translation-store.js
+var require_sent_translation_store = __commonJS({
+  "src/sent/sent-translation-store.js"(exports2, module2) {
+    function createSentTranslationStore({
+      now = Date.now,
+      // The plugin can be stopped while a translation call is still in flight; a request
+      // created before the stop must not be able to commit its result afterwards.
+      isRuntimeActive = /* @__PURE__ */ __name(() => !0, "isRuntimeActive"),
+      isTranslationEnabled = /* @__PURE__ */ __name(() => !0, "isTranslationEnabled"),
+      isOwnMessage = /* @__PURE__ */ __name(() => !1, "isOwnMessage")
+    } = {}) {
+      let requests = {}, requestSequence = 0, generation = 0, pendingOriginals = [], originalsByMessageId = {}, manualRequests = {};
+      function pruneExpiredPendingOriginals() {
+        let cutoff = now() - 12e4;
+        pendingOriginals = pendingOriginals.filter((entry) => entry && entry.createdAt >= cutoff);
+      }
+      __name(pruneExpiredPendingOriginals, "pruneExpiredPendingOriginals");
+      function isCurrentRequest(request) {
+        return !!(request && !request.completed && isRuntimeActive() && request.generation == generation && requests[request.id] === request && isTranslationEnabled(request.channelId));
+      }
+      __name(isCurrentRequest, "isCurrentRequest");
+      function finishRequest(request) {
+        return !request || request.completed ? !1 : (request.completed = !0, requests[request.id] === request && delete requests[request.id], !0);
+      }
+      __name(finishRequest, "finishRequest");
+      function appendPendingOriginal(channelId, originalText, submittedText) {
+        return originalText = String(originalText || ""), submittedText = String(submittedText || ""), !channelId || !originalText || !submittedText || originalText == submittedText ? !1 : (pruneExpiredPendingOriginals(), pendingOriginals.push({ channelId, originalText, submittedText, createdAt: now() }), pendingOriginals.length > 200 && pendingOriginals.splice(0, pendingOriginals.length - 200), !0);
+      }
+      __name(appendPendingOriginal, "appendPendingOriginal");
+      function rememberOriginalForMessage(messageId, channelId, originalText, submittedText) {
+        if (!messageId) return !1;
+        if (originalText = String(originalText || ""), submittedText = String(submittedText || ""), !originalText || !submittedText || originalText == submittedText)
+          return delete originalsByMessageId[messageId], !1;
+        pruneExpiredPendingOriginals(), originalsByMessageId[messageId] = { channelId, originalText, submittedText, capturedAt: now() };
+        let messageIds = Object.keys(originalsByMessageId);
+        return messageIds.length > 200 && messageIds.sort((left, right) => originalsByMessageId[left].capturedAt - originalsByMessageId[right].capturedAt).slice(0, messageIds.length - 200).forEach((id) => delete originalsByMessageId[id]), !0;
+      }
+      return __name(rememberOriginalForMessage, "rememberOriginalForMessage"), Object.freeze({
+        // A request is the receipt for one send or edit that may be rewritten before it
+        // reaches Discord. It carries the generation it was born in so a late callback
+        // can be told apart from a live one.
+        createRequest(channelId, originalText, messageId = null) {
+          if (!channelId) return null;
+          let request = {
+            id: ++requestSequence,
+            generation,
+            channelId,
+            messageId: messageId ? String(messageId) : null,
+            originalText: String(originalText || ""),
+            completed: !1
+          };
+          return requests[request.id] = request, request;
+        },
+        isRequestCurrent(request) {
+          return isCurrentRequest(request);
+        },
+        // Always submits something: a superseded request falls back to the untranslated
+        // text rather than dropping the user's message on the floor. Only a still-current
+        // request is allowed to record an original, because only then was one substituted.
+        completeRequest(request, translatedText, submit) {
+          if (!request || request.completed || typeof submit != "function") return Promise.resolve(!1);
+          let current = isCurrentRequest(request), nextText = current ? translatedText : request.originalText;
+          return finishRequest(request), Promise.resolve(submit(nextText)).then((_) => (current && (request.messageId ? rememberOriginalForMessage(request.messageId, request.channelId, request.originalText, nextText) : appendPendingOriginal(request.channelId, request.originalText, nextText)), !0));
+        },
+        // Without a channel this is a runtime-wide invalidation, so the generation moves
+        // and every request ever issued becomes stale. A channel-scoped call only drops
+        // that channel's requests; requests elsewhere stay live.
+        invalidateRequests(channelId = null) {
+          channelId || generation++;
+          for (let requestId of Object.keys(requests)) {
+            let request = requests[requestId];
+            channelId && request.channelId != channelId || delete requests[requestId];
+          }
+        },
+        trackPendingOriginal(channelId, originalText, submittedText) {
+          return appendPendingOriginal(channelId, originalText, submittedText);
+        },
+        // Discord echoes our own sent message back; matching it against a pending entry is
+        // what promotes an anonymous send into a message id we can prefill on edit.
+        captureEcho(message, channelId = null) {
+          if (!message || !message.id || !isOwnMessage(message)) return !1;
+          channelId = channelId || message.channel_id || null;
+          let submittedText = String(message.content || "");
+          if (!channelId || !submittedText) return !1;
+          pruneExpiredPendingOriginals();
+          let pendingIndex = pendingOriginals.findIndex((entry) => entry.channelId == channelId && entry.submittedText == submittedText);
+          if (pendingIndex < 0) return !1;
+          let pending = pendingOriginals.splice(pendingIndex, 1)[0];
+          return rememberOriginalForMessage(String(message.id), channelId, pending.originalText, submittedText);
+        },
+        // Editing a translated message must show the user what they typed, not what we
+        // sent. If the visible text no longer matches what we sent, someone else changed
+        // the message and the record is worthless.
+        getEditableText(messageId, currentText) {
+          pruneExpiredPendingOriginals();
+          let stored = messageId && originalsByMessageId[messageId];
+          return stored ? String(currentText || "") != stored.submittedText ? (delete originalsByMessageId[messageId], currentText) : stored.originalText : currentText;
+        },
+        // A restart must not let anything issued by the previous run commit. Remembered
+        // originals deliberately survive, so an edit still prefills after a reload.
+        resetForStart() {
+          generation++, requests = {}, pendingOriginals = [];
+        },
+        clearPendingOriginals() {
+          pendingOriginals = [];
+        },
+        // Manual requests are keyed by channel and message rather than by an id, because
+        // the guard they exist for is "this exact message is already being translated by
+        // hand"; the same message in a popout and in the chat list is one request.
+        createManualRequestKey(channelId, messageId) {
+          return `${channelId || "__global"}:${String(messageId)}`;
+        },
+        hasManualRequest(key) {
+          return !!manualRequests[key];
+        },
+        beginManualRequest(key) {
+          let request = {};
+          return manualRequests[key] = request, request;
+        },
+        // A second manual translation of the same message replaces the first; the first
+        // must then discard its result instead of painting over the newer one.
+        isManualRequestCurrent(key, request) {
+          return manualRequests[key] === request;
+        },
+        releaseManualRequest(key, request) {
+          return !key || manualRequests[key] !== request ? !1 : (delete manualRequests[key], !0);
+        },
+        clearManualRequests() {
+          manualRequests = {};
+        }
+      });
+    }
+    __name(createSentTranslationStore, "createSentTranslationStore");
+    module2.exports = { SENT_ORIGINAL_MATCH_TTL: 12e4, MAX_SENT_ORIGINAL_ENTRIES: 200, createSentTranslationStore };
+  }
+});
+
 // src/i18n/labels.js
 var require_labels = __commonJS({
   "src/i18n/labels.js"(exports2, module2) {
@@ -4909,7 +5046,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a, _b, _c;
-        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
+        let { createDisplayRuntime } = require_display_runtime(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
         var _this;
         let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
           render() {
@@ -5389,10 +5526,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           "−−−−−": "0",
           _: "··−−·−"
         };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map();
+        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map();
         let channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
-        var pluginRuntimeActive = !0, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {};
-        let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, LIVE_AI_BATCH_ITEM_LIMIT = 10, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
+        var pluginRuntimeActive = !0, deferredSettingsRerenderTimer = null;
+        let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, LIVE_AI_BATCH_ITEM_LIMIT = 10, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
         }, languageTypes = {
@@ -6470,68 +6607,6 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           buildSentTranslationMessageValue(plugin, originalText, translation, input, output) {
             return plugin.shouldSendOriginalInsteadOfSentTranslation(originalText, translation, input, output) ? originalText : plugin.settings.general.sendOriginalMessage ? translation + plugin.formatOriginalTextForMessage(originalText) : translation;
           }
-        }, sentAutomaticTranslationRuntime = {
-          create(plugin, channelId, originalText, messageId = null) {
-            if (!channelId) return null;
-            let request = {
-              id: ++sentAutomaticTranslationRequestSequence,
-              generation: sentAutomaticTranslationRuntimeGeneration,
-              channelId,
-              messageId: messageId ? String(messageId) : null,
-              originalText: String(originalText || ""),
-              completed: !1
-            };
-            return sentAutomaticTranslationRequests[request.id] = request, request;
-          },
-          isCurrent(plugin, request) {
-            return !!(request && !request.completed && pluginRuntimeActive && request.generation == sentAutomaticTranslationRuntimeGeneration && sentAutomaticTranslationRequests[request.id] === request && plugin.isTranslationEnabled(request.channelId));
-          },
-          finish(_plugin, request) {
-            return !request || request.completed ? !1 : (request.completed = !0, sentAutomaticTranslationRequests[request.id] === request && delete sentAutomaticTranslationRequests[request.id], !0);
-          },
-          complete(plugin, request, translatedText, submit) {
-            if (!request || request.completed || typeof submit != "function") return Promise.resolve(!1);
-            let isCurrent = sentAutomaticTranslationRuntime.isCurrent(plugin, request), nextText = isCurrent ? translatedText : request.originalText;
-            return sentAutomaticTranslationRuntime.finish(plugin, request), Promise.resolve(submit(nextText)).then((_2) => (isCurrent && (request.messageId ? sentAutomaticTranslationRuntime.rememberMessage(plugin, request.messageId, request.channelId, request.originalText, nextText) : sentAutomaticTranslationRuntime.trackPending(plugin, request.channelId, request.originalText, nextText)), !0));
-          },
-          prune(_plugin) {
-            let cutoff = Date.now() - SENT_ORIGINAL_MATCH_TTL;
-            pendingSentOriginalMessages = pendingSentOriginalMessages.filter((entry) => entry && entry.createdAt >= cutoff);
-          },
-          trackPending(plugin, channelId, originalText, submittedText) {
-            return originalText = String(originalText || ""), submittedText = String(submittedText || ""), !channelId || !originalText || !submittedText || originalText == submittedText ? !1 : (sentAutomaticTranslationRuntime.prune(plugin), pendingSentOriginalMessages.push({ channelId, originalText, submittedText, createdAt: Date.now() }), pendingSentOriginalMessages.length > MAX_SENT_ORIGINAL_ENTRIES && pendingSentOriginalMessages.splice(0, pendingSentOriginalMessages.length - MAX_SENT_ORIGINAL_ENTRIES), !0);
-          },
-          rememberMessage(plugin, messageId, channelId, originalText, submittedText) {
-            if (!messageId) return !1;
-            if (originalText = String(originalText || ""), submittedText = String(submittedText || ""), !originalText || !submittedText || originalText == submittedText)
-              return delete sentOriginalMessages[messageId], !1;
-            sentAutomaticTranslationRuntime.prune(plugin), sentOriginalMessages[messageId] = { channelId, originalText, submittedText, capturedAt: Date.now() };
-            let messageIds = Object.keys(sentOriginalMessages);
-            return messageIds.length > MAX_SENT_ORIGINAL_ENTRIES && messageIds.sort((left, right) => sentOriginalMessages[left].capturedAt - sentOriginalMessages[right].capturedAt).slice(0, messageIds.length - MAX_SENT_ORIGINAL_ENTRIES).forEach((id) => delete sentOriginalMessages[id]), !0;
-          },
-          captureEcho(plugin, message, channelId = null) {
-            if (!message || !message.id || !plugin.isOwnMessage(message)) return !1;
-            channelId = channelId || message.channel_id || null;
-            let submittedText = String(message.content || "");
-            if (!channelId || !submittedText) return !1;
-            sentAutomaticTranslationRuntime.prune(plugin);
-            let pendingIndex = pendingSentOriginalMessages.findIndex((entry) => entry.channelId == channelId && entry.submittedText == submittedText);
-            if (pendingIndex < 0) return !1;
-            let pending = pendingSentOriginalMessages.splice(pendingIndex, 1)[0];
-            return sentAutomaticTranslationRuntime.rememberMessage(plugin, String(message.id), channelId, pending.originalText, submittedText);
-          },
-          getEditableText(plugin, messageId, currentText) {
-            sentAutomaticTranslationRuntime.prune(plugin);
-            let stored = messageId && sentOriginalMessages[messageId];
-            return stored ? String(currentText || "") != stored.submittedText ? (delete sentOriginalMessages[messageId], currentText) : stored.originalText : currentText;
-          },
-          invalidate(_plugin, channelId = null) {
-            channelId || sentAutomaticTranslationRuntimeGeneration++;
-            for (let requestId of Object.keys(sentAutomaticTranslationRequests)) {
-              let request = sentAutomaticTranslationRequests[requestId];
-              channelId && request.channelId != channelId || delete sentAutomaticTranslationRequests[requestId];
-            }
-          }
         }, languageDetectionRuntime = {
           getStrategy(plugin) {
             let strategy = plugin.settings && plugin.settings.filters && plugin.settings.filters.languageDetectionStrategy;
@@ -6904,7 +6979,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             });
           }
           onStart() {
-            pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), liveTranslationRuntimeGeneration++, liveTranslationRequests = {}, sentAutomaticTranslationRuntimeGeneration++, sentAutomaticTranslationRequests = {}, pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
+            pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), liveTranslationRuntimeGeneration++, liveTranslationRequests = {}, this.ensureSentTranslationStore().resetForStart(), historicalTranslationRuntimeGeneration++, this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
               e.methodArguments[1] && oldMessages[e.methodArguments[1]] && oldMessages[e.methodArguments[1]].content ? e.methodArguments[2] = oldMessages[e.methodArguments[1]].content : e.methodArguments[1] && (e.methodArguments[2] = this.getEditableSentMessageText(e.methodArguments[1], e.methodArguments[2]));
             }, "before") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "editMessage", { instead: /* @__PURE__ */ __name((e) => this.handleEditedMessageSubmit(e.methodArguments, (...args) => e.originalMethod(...args)), "instead") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageToolbarUtils, "useMessageMenu", { after: /* @__PURE__ */ __name((e) => {
               if (e.instance.props.message && e.instance.props.channel) {
@@ -6921,7 +6996,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "after") }), this.forceUpdateAll();
           }
           onStop() {
-            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), this.ensureMessageViewportStore().clearManualScrollLock(), deferredSettingsRerenderTimer = null, this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
+            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), this.ensureSentTranslationStore().clearPendingOriginals(), historicalTranslationRuntimeGeneration++, channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), this.ensureMessageViewportStore().clearManualScrollLock(), deferredSettingsRerenderTimer = null, this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), this.ensureSentTranslationStore().clearManualRequests(), suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
             let settingsPanel;
@@ -9787,6 +9862,13 @@ __________________ __________________ __________________
           get modelCatalogState() {
             return this.ensureProviderClient().getModelCatalogState();
           }
+          ensureSentTranslationStore() {
+            return this.sentTranslationStoreInstance || (this.sentTranslationStoreInstance = createSentTranslationStore({
+              isRuntimeActive: /* @__PURE__ */ __name(() => pluginRuntimeActive, "isRuntimeActive"),
+              isTranslationEnabled: /* @__PURE__ */ __name((channelId) => this.isTranslationEnabled(channelId), "isTranslationEnabled"),
+              isOwnMessage: /* @__PURE__ */ __name((message) => this.isOwnMessage(message), "isOwnMessage")
+            })), this.sentTranslationStoreInstance;
+          }
           ensureProviderClient() {
             return this.providerClientInstance || (this.providerClientInstance = createProviderClient({
               request: /* @__PURE__ */ __name((url, options, callback) => BDFDB.LibraryRequires.request(url, options, callback), "request"),
@@ -10443,36 +10525,36 @@ __________________ __________________ __________________
             return sentTranslationPolicy.shouldAutoTranslateSentMessage(this, text, channelId, callback, forcedOutputLanguage);
           }
           createSentAutomaticTranslationRequest(channelId, originalText, messageId = null) {
-            return sentAutomaticTranslationRuntime.create(this, channelId, originalText, messageId);
+            return this.ensureSentTranslationStore().createRequest(channelId, originalText, messageId);
           }
           isSentAutomaticTranslationRequestCurrent(request) {
-            return sentAutomaticTranslationRuntime.isCurrent(this, request);
+            return this.ensureSentTranslationStore().isRequestCurrent(request);
           }
           completeSentAutomaticTranslationRequest(request, translatedText, submit) {
-            return sentAutomaticTranslationRuntime.complete(this, request, translatedText, submit);
+            return this.ensureSentTranslationStore().completeRequest(request, translatedText, submit);
           }
           invalidateSentAutomaticTranslationRequests(channelId = null) {
-            return sentAutomaticTranslationRuntime.invalidate(this, channelId);
+            return this.ensureSentTranslationStore().invalidateRequests(channelId);
           }
           trackPendingSentOriginal(channelId, originalText, submittedText) {
-            return sentAutomaticTranslationRuntime.trackPending(this, channelId, originalText, submittedText);
+            return this.ensureSentTranslationStore().trackPendingOriginal(channelId, originalText, submittedText);
           }
           captureSentOriginalMessage(message, channelId = null) {
-            return sentAutomaticTranslationRuntime.captureEcho(this, message, channelId);
+            return this.ensureSentTranslationStore().captureEcho(message, channelId);
           }
           getEditableSentMessageText(messageId, currentText) {
-            return sentAutomaticTranslationRuntime.getEditableText(this, messageId, currentText);
+            return this.ensureSentTranslationStore().getEditableText(messageId, currentText);
           }
           translateMessage(message, channel, options = {}) {
             return new Promise((callback) => {
               let liveRequest = options.auto && options.liveRequest || null, manualRequestKey = null, manualRequest = null, finish = /* @__PURE__ */ __name((result) => {
-                liveRequest && this.finishLiveTranslationRequest(liveRequest), manualRequestKey && manualMessageTranslationRequests[manualRequestKey] === manualRequest && delete manualMessageTranslationRequests[manualRequestKey], callback(result);
+                liveRequest && this.finishLiveTranslationRequest(liveRequest), this.ensureSentTranslationStore().releaseManualRequest(manualRequestKey, manualRequest), callback(result);
               }, "finish");
               if (!message) return finish(null);
               let channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), isManualTranslation = !!options.manual || !options.auto;
-              isManualTranslation && (manualRequestKey = `${channelId || "__global"}:${String(message.id)}`);
+              isManualTranslation && (manualRequestKey = this.ensureSentTranslationStore().createManualRequestKey(channelId, message.id));
               let activeTranslation = this.getActiveMessageTranslation(message, channelId), storeDisplayView = !activeTranslation && this.getReceivedDisplayRuntimeView(message.id), storeTranslated = !!(storeDisplayView && storeDisplayView.translated && storeDisplayView.origin === "automatic");
-              if (isManualTranslation && !activeTranslation && !storeTranslated && manualMessageTranslationRequests[manualRequestKey]) return finish(!1);
+              if (isManualTranslation && !activeTranslation && !storeTranslated && this.ensureSentTranslationStore().hasManualRequest(manualRequestKey)) return finish(!1);
               if (isManualTranslation && this.lockManualTranslationScroll(message.id), activeTranslation) {
                 if (options.auto) return finish(!1);
                 suppressedAutoTranslations[message.id] = !0, this.clearDisplayedTranslationState(message.id, {
@@ -10531,11 +10613,11 @@ __________________ __________________ __________________
                 let allTextsToTranslate = this.buildTranslationRequestText(originalContentData);
                 message.embeds.forEach((embed) => embed.message_id = message.id);
                 let embedIds = message.embeds.map((embed) => embed.id);
-                isManualTranslation && (manualRequest = {}, manualMessageTranslationRequests[manualRequestKey] = manualRequest);
+                isManualTranslation && (manualRequest = this.ensureSentTranslationStore().beginManualRequest(manualRequestKey));
                 try {
                   this.translateText(allTextsToTranslate, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
                     try {
-                      if (options.auto && !this.isLiveTranslationRequestCurrent(liveRequest, message) || isManualTranslation && manualMessageTranslationRequests[manualRequestKey] !== manualRequest) return finish(!1);
+                      if (options.auto && !this.isLiveTranslationRequestCurrent(liveRequest, message) || isManualTranslation && !this.ensureSentTranslationStore().isManualRequestCurrent(manualRequestKey, manualRequest)) return finish(!1);
                       if (translation) {
                         let strings = translation.split(/\n{0,1}__________________ __________________ __________________\n{0,1}/), oldContent = (originalContentData.content || "").trim(), translatedContent = (strings.shift() || "").trim(), content = this.buildReceivedDisplayContent(translatedContent, oldContent), embeds = strings.reduce((dict, segment, index) => {
                           let embedId = embedIds[index], segmentLines = segment.split(`
