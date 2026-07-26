@@ -1111,3 +1111,26 @@ test("validation accepts a reasoning model that spent its budget before answerin
 	assert.equal((await normalPending).ok, true);
 	assert.match(normal.toasts[normal.toasts.length - 1].message, /Hallo/);
 });
+
+test("deepseek requests ask for the non-thinking mode, other engines are untouched", () => {
+	// DeepSeek v4 thinks by default. Every thinking token is billed as output and waited
+	// on before the answer starts, and translation gains nothing from a chain of thought.
+	// The flag is deepseek-only: "oaicompat" points at arbitrary OpenAI-compatible servers
+	// and some reject a request carrying an unknown top-level field.
+	const single = createHarness({authKeys: {deepseek: {key: "k", model: "deepseek-v4-flash"}}});
+	single.client.translate("deepseek", translationData(), () => {});
+	assert.deepEqual(JSON.parse(single.calls[0].options.body).thinking, {type: "disabled"});
+
+	const batch = createHarness({authKeys: {deepseek: {key: "k", model: "deepseek-v4-flash"}}});
+	batch.client.requestAiBatchTranslation("deepseek", preparedItems());
+	assert.deepEqual(JSON.parse(batch.calls[0].options.body).thinking, {type: "disabled"});
+
+	const probe = createHarness({authKeys: {deepseek: {key: "k", model: "deepseek-v4-flash"}}});
+	probe.client.validateEngineConfig("deepseek");
+	assert.deepEqual(JSON.parse(probe.calls[0].options.body).thinking, {type: "disabled"});
+
+	// A generic OpenAI-compatible endpoint must not receive the DeepSeek-specific field.
+	const compat = createHarness({authKeys: {oaicompat: {key: "k", endpoint: "https://host.test/v1/chat/completions", model: "m"}}});
+	compat.client.translate("oaicompat", translationData(), () => {});
+	assert.equal(JSON.parse(compat.calls[0].options.body).thinking, undefined);
+});

@@ -68,7 +68,8 @@ const translationEngines = {
 		languages: googleLanguages,
 		key: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 		endpoint: "https://api.deepseek.com/chat/completions",
-		model: "deepseek-v3"
+		// deepseek-chat and deepseek-reasoner were retired; v4-flash is the cheap tier.
+		model: "deepseek-v4-flash"
 	},
 	openai: {
 		name: "OpenAI",
@@ -235,6 +236,16 @@ const CREDENTIAL_REQUIRED_ENGINES = ["microsoft", "googlecloud", "deepl", "deeps
 const VALIDATABLE_ENGINES = ["googlecloud", "microsoft", "deepl", "deepseek", "openai", "gemini", "oaicompat"];
 // LLM engines: they need an explicit model id and can list their models.
 const AI_MODEL_ENGINES = ["deepseek", "openai", "gemini", "oaicompat"];
+
+// DeepSeek's v4 models think by default, and every thinking token is billed as output
+// and waited on before the first character of the answer arrives. Translation gains
+// nothing from a chain of thought, so the plugin asks for the non-thinking mode.
+// Deepseek-only on purpose: "oaicompat" points at arbitrary OpenAI-compatible servers,
+// and some reject a request carrying an unknown top-level field.
+// https://api-docs.deepseek.com/zh-cn/guides/thinking_mode
+function engineRequestExtras(engineKey) {
+	return engineKey === "deepseek" ? {thinking: {type: "disabled"}} : {};
+}
 
 // Baidu signs every request with MD5(appid + text + salt + secret); no dependency is
 // worth adding for one signature, so the historical implementation moves verbatim.
@@ -837,7 +848,8 @@ function createProviderClient({
 							// Room for a reasoning model to think and still answer. At 32 the
 							// whole budget went to reasoning_content, content came back empty,
 							// and a perfectly good configuration reported validate_failed.
-							max_tokens: 512
+							max_tokens: 512,
+							...engineRequestExtras(engineKey)
 						})
 					}, (error, response, body) => {
 						if (!error && body && response && response && response.statusCode == 200) {
@@ -1089,7 +1101,8 @@ function createProviderClient({
 					{role: "user", content: prompt.prompt}
 				],
 				temperature: 0.2,
-				top_p: 0.8
+				top_p: 0.8,
+				...engineRequestExtras(engineKey)
 			})
 		}, body => parseOpenAiResponseText(body).replace(/\[NEWLINE\]/g, "\n"), callback);
 	}
@@ -1369,7 +1382,7 @@ function createProviderClient({
 			requestWithTimeout(apiEndpoint, {
 				method: "post",
 				headers: {"Content-Type": "application/json", "Authorization": `Bearer ${apiKey}`},
-				body: JSON.stringify({model: modelId, messages: [{role: "system", content: systemPrompt}, {role: "user", content: batchPrompt}], temperature: 0.1, top_p: 0.8})
+				body: JSON.stringify({model: modelId, messages: [{role: "system", content: systemPrompt}, {role: "user", content: batchPrompt}], temperature: 0.1, top_p: 0.8, ...engineRequestExtras(engineKey)})
 			}, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
 		});
 	}

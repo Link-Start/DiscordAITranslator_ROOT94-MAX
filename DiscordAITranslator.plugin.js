@@ -2098,7 +2098,8 @@ var require_provider_client = __commonJS({
         languages: googleLanguages,
         key: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         endpoint: "https://api.deepseek.com/chat/completions",
-        model: "deepseek-v3"
+        // deepseek-chat and deepseek-reasoner were retired; v4-flash is the cheap tier.
+        model: "deepseek-v4-flash"
       },
       openai: {
         name: "OpenAI",
@@ -2254,6 +2255,10 @@ var require_provider_client = __commonJS({
         primaryLabelEn: "Open Baidu Translate Open Platform"
       }
     }, CREDENTIAL_REQUIRED_ENGINES = ["microsoft", "googlecloud", "deepl", "deepseek", "openai", "gemini", "oaicompat"], VALIDATABLE_ENGINES = ["googlecloud", "microsoft", "deepl", "deepseek", "openai", "gemini", "oaicompat"], AI_MODEL_ENGINES = ["deepseek", "openai", "gemini", "oaicompat"];
+    function engineRequestExtras(engineKey) {
+      return engineKey === "deepseek" ? { thinking: { type: "disabled" } } : {};
+    }
+    __name(engineRequestExtras, "engineRequestExtras");
     function MD5(e) {
       function h(a2, b2) {
         var e2 = a2 & 2147483648, f2 = b2 & 2147483648, c2 = a2 & 1073741824, d2 = b2 & 1073741824, g = (a2 & 1073741823) + (b2 & 1073741823);
@@ -2710,7 +2715,8 @@ ${sample.text}`
                   // Room for a reasoning model to think and still answer. At 32 the
                   // whole budget went to reasoning_content, content came back empty,
                   // and a perfectly good configuration reported validate_failed.
-                  max_tokens: 512
+                  max_tokens: 512,
+                  ...engineRequestExtras(engineKey)
                 })
               }, (error, response, body) => {
                 if (!error && body && response && response && response.statusCode == 200)
@@ -2887,7 +2893,8 @@ ${sample.text}`
               { role: "user", content: prompt.prompt }
             ],
             temperature: 0.2,
-            top_p: 0.8
+            top_p: 0.8,
+            ...engineRequestExtras(engineKey)
           })
         }, (body) => parseOpenAiResponseText(body).replace(/\[NEWLINE\]/g, `
 `), callback);
@@ -3101,7 +3108,7 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
           requestWithTimeout(apiEndpoint, {
             method: "post",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({ model: modelId, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: batchPrompt }], temperature: 0.1, top_p: 0.8 })
+            body: JSON.stringify({ model: modelId, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: batchPrompt }], temperature: 0.1, top_p: 0.8, ...engineRequestExtras(engineKey) })
           }, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
         });
       }
