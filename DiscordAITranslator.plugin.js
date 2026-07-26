@@ -2697,7 +2697,7 @@ var require_provider_client = __commonJS({
             method: "get",
             headers: requestHeaders
           }, (error, response, body) => {
-            if (!error && body && response && response.statusCode == 200)
+            if (!error && body && response && response && response.statusCode == 200)
               try {
                 body = JSON.parse(body);
                 let items = (engineKey == "gemini" ? (body && body.models || []).filter((item) => !item || !Array.isArray(item.supportedGenerationMethods) || item.supportedGenerationMethods.includes("generateContent")) : body && body.data || []).map((item) => typeof item == "string" ? item : engineKey == "gemini" ? item && item.name && item.name.replace(/^models\//, "") : item && item.id).filter((item) => typeof item == "string" && item.trim()).sort((modelA, modelB) => modelA.localeCompare(modelB));
@@ -2765,11 +2765,11 @@ var require_provider_client = __commonJS({
                 method: "post",
                 form
               }, (error, response, body) => {
-                if (!error && body && response && response.statusCode == 200)
+                if (!error && body && response && response && response.statusCode == 200)
                   try {
                     body = JSON.parse(body);
                     let translation = body && body.data && body.data.translations && body.data.translations[0] && body.data.translations[0].translatedText;
-                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
                   } catch {
                   }
                 return finish(!1, failMessage(response && response.statusCode, body), normalized);
@@ -2790,11 +2790,11 @@ var require_provider_client = __commonJS({
                   to: mapLanguageCodeForEngine("microsoft", sample.target)
                 }
               }, (error, response, body) => {
-                if (!error && body && response && response.statusCode == 200)
+                if (!error && body && response && response && response.statusCode == 200)
                   try {
                     body = JSON.parse(body);
                     let translation = body && body[0] && body[0].translations && body[0].translations[0] && body[0].translations[0].text;
-                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
                   } catch {
                   }
                 return finish(!1, failMessage(response && response.statusCode, body), normalized);
@@ -2814,11 +2814,11 @@ var require_provider_client = __commonJS({
                   target_lang: mapLanguageCodeForEngine("deepl", sample.target)
                 })
               }, (error, response, body) => {
-                if (!error && body && response && response.statusCode == 200)
+                if (!error && body && response && response && response.statusCode == 200)
                   try {
                     body = JSON.parse(body);
                     let translation = body && body.translations && body.translations[0] && body.translations[0].text;
-                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response.statusCode, body), normalized);
+                    return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
                   } catch {
                   }
                 return finish(!1, failMessage(response && response.statusCode, body), normalized);
@@ -2837,7 +2837,7 @@ ${sample.text}`,
                   store: !1
                 })
               }, (error, response, body) => {
-                let translation = !error && response && response.statusCode == 200 ? parseOpenAiResponseText(body) : "";
+                let translation = !error && response && response && response.statusCode == 200 ? parseOpenAiResponseText(body) : "";
                 return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
               });
             case "gemini": {
@@ -2852,7 +2852,7 @@ ${sample.text}`,
 ${sample.text}` }] }]
                 })
               }, (error, response, body) => {
-                let translation = !error && response && response.statusCode == 200 ? parseGeminiResponseText(body) : "";
+                let translation = !error && response && response && response.statusCode == 200 ? parseGeminiResponseText(body) : "";
                 return finish(!!translation, translation ? successMessage(translation) : failMessage(response && response.statusCode, body), normalized);
               });
             }
@@ -2879,11 +2879,11 @@ ${sample.text}`
                   max_tokens: 32
                 })
               }, (error, response, body) => {
-                if (!error && body && response && response.statusCode == 200)
+                if (!error && body && response && response && response.statusCode == 200)
                   try {
                     body = JSON.parse(body);
                     let translation = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
-                    return finish(!!translation, translation ? successMessage(translation.trim()) : failMessage(response.statusCode, body), normalized);
+                    return finish(!!translation, translation ? successMessage(translation.trim()) : failMessage(response && response.statusCode, body), normalized);
                   } catch {
                   }
                 return finish(!1, failMessage(response && response.statusCode, body), normalized);
@@ -2906,14 +2906,14 @@ ${sample.text}`
           }
         }, (error, response, body) => {
           let labels = getLabels(), languages = getLanguages();
-          if (!error && body && response.statusCode == 200)
+          if (!error && body && response && response && response.statusCode == 200)
             try {
               body = JSON.parse(body), !data.specialCase && body.src && body.src && languages[body.src] && (data.input.id = body.src, data.input.name = languages[body.src].name, data.input.ownlang = languages[body.src].ownlang), callback(body.sentences.map((n) => n && n.trans).filter((n) => n).join(""));
             } catch {
               callback("");
             }
           else
-            response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+            response && response && response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
         });
       }
       __name(googleApiTranslate, "googleApiTranslate");
@@ -2930,7 +2930,7 @@ ${sample.text}`
           }, data.input.auto ? {} : { source: data.input.id })
         }, (error, response, body) => {
           let labels = getLabels(), languages = getLanguages();
-          if (!error && body && response.statusCode == 200)
+          if (!error && body && response && response && response.statusCode == 200)
             try {
               body = JSON.parse(body);
               let translations = body && body.data && body.data.translations || [];
@@ -2939,7 +2939,7 @@ ${sample.text}`
               callback("");
             }
           else
-            response && (response.statusCode == 401 || response.statusCode == 403) ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : response && response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+            response && (response.statusCode == 401 || response && response && response.statusCode == 403) ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : response && response && response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
         });
       }
       __name(googleCloudTranslate, "googleCloudTranslate");
@@ -2958,14 +2958,14 @@ ${sample.text}`
           }, data.input.auto ? {} : { from: mapLanguageCodeForEngine("microsoft", data.input.id) })
         }, (error, response, body) => {
           let labels = getLabels(), languages = getLanguages();
-          if (!error && body && response.statusCode == 200)
+          if (!error && body && response && response && response.statusCode == 200)
             try {
               body = JSON.parse(body)[0], !data.specialCase && body.detectedLanguage && body.detectedLanguage.language && languages[body.detectedLanguage.language.toLowerCase()] && (data.input.name = languages[body.detectedLanguage.language.toLowerCase()].name, data.input.ownlang = languages[body.detectedLanguage.language.toLowerCase()].ownlang), callback(body.translations.map((n) => n && n.text).filter((n) => n).join(""));
             } catch {
               callback("");
             }
           else
-            response.statusCode == 403 || response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response.statusCode == 401 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+            response && response && response.statusCode == 403 || response && response && response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response && response && response.statusCode == 401 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
         });
       }
       __name(microsoftTranslate, "microsoftTranslate");
@@ -2983,20 +2983,20 @@ ${sample.text}`
           }, data.input.auto ? {} : { source_lang: mapLanguageCodeForEngine("deepl", data.input.id) }))
         }, (error, response, body) => {
           let labels = getLabels(), languages = getLanguages();
-          if (!error && body && response.statusCode == 200)
+          if (!error && body && response && response && response.statusCode == 200)
             try {
               body = JSON.parse(body), !data.specialCase && body.translations[0] && body.translations[0].detected_source_language && languages[body.translations[0].detected_source_language.toLowerCase()] && (data.input.name = languages[body.translations[0].detected_source_language.toLowerCase()].name, data.input.ownlang = languages[body.translations[0].detected_source_language.toLowerCase()].ownlang), callback(body.translations.map((n) => n && n.text).filter((n) => n).join(""));
             } catch {
               callback("");
             }
           else
-            response.statusCode == 429 || response.statusCode == 456 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response.statusCode == 403 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+            response && response && response.statusCode == 429 || response && response && response.statusCode == 456 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response && response && response.statusCode == 403 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
         });
       }
       __name(deepLTranslate, "deepLTranslate");
       function requestAiProviderTranslation(engineKey, url, options, parseResponse, callback) {
         requestWithTimeout(url, options, (error, response, body) => {
-          if (!error && body && response && response.statusCode == 200) {
+          if (!error && body && response && response && response.statusCode == 200) {
             let translatedText = parseResponse(body);
             if (translatedText) return callback(translatedText);
           }
@@ -3083,14 +3083,14 @@ ${sample.text}`
             })
           }, (error, response, body) => {
             let labels = getLabels(), languages = getLanguages();
-            if (!error && response && response.statusCode == 200)
+            if (!error && response && response && response.statusCode == 200)
               try {
                 body = JSON.parse(body), !data.specialCase && body.source && body.source.dialect && languages[body.source.dialect] && (data.input.id = body.source.dialect, data.input.name = languages[body.source.dialect].name, data.input.ownlang = languages[body.source.dialect].ownlang), callback(body.target.text);
               } catch {
                 callback("");
               }
             else
-              response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response.statusCode == 403 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
+              response && response && response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_dailylimit}`) : response && response && response.statusCode == 403 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}`), callback("");
           });
         }, "translate");
         getAuth("itranslate").key || data.engine.APIkey ? translate2() : request("https://www.itranslate.com/js/webapp/main.js", { gzip: !0 }, (error, response, body) => {
@@ -3111,7 +3111,7 @@ ${sample.text}`
           }
         }, (error, response, body) => {
           let labels = getLabels(), languages = getLanguages();
-          if (!error && body && response.statusCode == 200)
+          if (!error && body && response && response && response.statusCode == 200)
             try {
               let parsed = createElementFromHtml(body), translation = parsed && parsed.querySelector("text"), detected = parsed && parsed.querySelector("detected");
               if (translation && detected) {
@@ -3141,7 +3141,7 @@ ${sample.text}`
             }
           }, (error, response, body) => {
             let labels = getLabels();
-            if (!error && body && response.statusCode == 200)
+            if (!error && body && response && response && response.statusCode == 200)
               try {
                 let message = (JSON.parse(body) || {}).message, result = message && (message.body || message.result);
                 result && result.translatedText ? callback(result.translatedText) : callback("");
@@ -3149,7 +3149,7 @@ ${sample.text}`
                 callback("");
               }
             else
-              response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}/${labels.error_keyoutdated}`), callback("");
+              response && response && response.statusCode == 429 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_hourlylimit}`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_serverdown}/${labels.error_keyoutdated}`), callback("");
           });
         }, "doTranslate");
         data.input.auto ? request("https://openapi.naver.com/v1/papago/detectLangs", {
@@ -3164,7 +3164,7 @@ ${sample.text}`
           }
         }, (error, response, body) => {
           let languages = getLanguages(), langCode = "en";
-          if (!error && body && response.statusCode == 200)
+          if (!error && body && response && response && response.statusCode == 200)
             try {
               langCode = JSON.parse(body).langCode;
             } catch {
@@ -3189,7 +3189,7 @@ ${sample.text}`
           }
         }, (error, response, result) => {
           let labels = getLabels();
-          if (!error && result && response.statusCode == 200)
+          if (!error && result && response && response && response.statusCode == 200)
             try {
               if (result = JSON.parse(result) || {}, result.error_code)
                 result.error_code == 54004 ? dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_monthlylimit}.`) : dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${result.error_code} : ${result.error_msg}.`), callback("");
@@ -3253,20 +3253,20 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
               method: "post",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
               body: JSON.stringify({ model: modelId, instructions: systemPrompt, input: batchPrompt, store: !1 })
-            }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+            }, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
           if (engineKey == "gemini") {
             let geminiModelId = String(modelId || "").replace(/^models\//, ""), requestUrl = `${apiEndpoint}/${encodeURIComponent(geminiModelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
             return requestWithTimeout(requestUrl, {
               method: "post",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ system_instruction: { parts: [{ text: systemPrompt }] }, contents: [{ role: "user", parts: [{ text: batchPrompt }] }], generationConfig: { temperature: 0.1, topP: 0.8 } })
-            }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseGeminiResponseText(body)) : resolve(null));
+            }, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseGeminiResponseText(body)) : resolve(null));
           }
           requestWithTimeout(apiEndpoint, {
             method: "post",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
             body: JSON.stringify({ model: modelId, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: batchPrompt }], temperature: 0.1, top_p: 0.8 })
-          }, (error, response, body) => !error && body && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+          }, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
         });
       }
       return __name(requestAiBatchTranslation, "requestAiBatchTranslation"), Object.freeze({
