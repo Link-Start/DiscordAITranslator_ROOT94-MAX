@@ -22,7 +22,8 @@ function read(...parts) {
 // makes this file fail loudly rather than silently stop checking anything.
 const SOURCES = {
 	runtime: read("src", "legacy", "runtime.js"),
-	displayLogic: read("src", "display", "translation-display-logic.js")
+	displayLogic: read("src", "display", "translation-display-logic.js"),
+	received: read("src", "received", "received-translation-runtime.js")
 };
 
 // Named here so a rename cannot silently turn every assertion below into a tautology.
@@ -76,7 +77,7 @@ test("the received display commit path delegates to the display runtime", () => 
 
 test("automatic translation flows never fall back to the whole-list repaint", () => {
 	const flowSlices = [
-		methodSlice("runtime", "commitCachedDisplayResult", "resolveCheckMessageDisplay"),
+		methodSlice("received", "commitCachedDisplayResult", "resolveCheckMessageDisplay"),
 		methodSlice("displayLogic", "resolveLoadedMessageContentTranslation", "prepareMessageContentDisplay")
 	];
 	for (const flow of flowSlices) {

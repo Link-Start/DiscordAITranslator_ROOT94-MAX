@@ -6473,6 +6473,246 @@ var require_language_heuristics = __commonJS({
   }
 });
 
+// src/received/received-translation-runtime.js
+var require_received_translation_runtime = __commonJS({
+  "src/received/received-translation-runtime.js"(exports2, module2) {
+    var { LANGUAGE_DIRECTIONS, MESSAGE_DIRECTIONS } = require_language_heuristics(), foreignLanguageDecisionRuntime = {
+      isDetectedLanguageForeign(plugin, detectedLanguageId, targetLanguageId) {
+        return !!detectedLanguageId && !plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId);
+      },
+      isReceivedMessageForeignAsync(plugin, text, targetLanguageId, callback) {
+        if (plugin.isClearlyForeignLanguageMessage(text, targetLanguageId)) return callback(!0);
+        if (!text || !targetLanguageId || targetLanguageId == "auto") return callback(!1);
+        plugin.detectLanguage(text, (detectedLanguageId) => callback(foreignLanguageDecisionRuntime.isDetectedLanguageForeign(plugin, detectedLanguageId, targetLanguageId)));
+      }
+    }, receivedMessageFilterRuntime = {
+      isTranslationResultTooSimilar(plugin, translation) {
+        if (!translation) return !1;
+        let normalizedTranslation = plugin.normalizeStoredTranslationData(translation), originalContent = (normalizedTranslation.originalContent || "").trim(), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
+        if (!originalContent || !translatedContent) return !1;
+        let normalizedOriginal = plugin.normalizeComparisonText(originalContent), normalizedTranslated = plugin.normalizeComparisonText(translatedContent);
+        return !normalizedOriginal || !normalizedTranslated ? !1 : normalizedOriginal == normalizedTranslated ? !0 : plugin.getTextSimilarityScore(originalContent, translatedContent) >= Math.max(0.92, plugin.getTranslationSimilarityThreshold());
+      },
+      getAutoTranslatedResultRejectReason(plugin, translation, channelId) {
+        if (!translation || !translation.translatedContent) return "local_guard";
+        if (receivedMessageFilterRuntime.isTranslationResultTooSimilar(plugin, translation)) return "too_similar";
+        let detectedLanguageId = translation.input && translation.input.id, targetLanguageId = translation.output && translation.output.id || plugin.getLanguageChoice(LANGUAGE_DIRECTIONS.OUTPUT, MESSAGE_DIRECTIONS.RECEIVED, channelId);
+        if (plugin.shouldSkipSameLanguageReceivedMessages() && detectedLanguageId && plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId)) return "same_language";
+        let sourceLanguages = plugin.getReceivedAutoTranslateSourceLanguages();
+        return sourceLanguages.length && detectedLanguageId && !plugin.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages) ? "source_filter" : plugin.shouldDropSimilarTranslations() && plugin.getTextSimilarityScore(translation.originalContent, translation.translatedContent) >= plugin.getTranslationSimilarityThreshold() ? "too_similar" : null;
+      },
+      shouldKeepAutoTranslatedResult(plugin, translation, channelId) {
+        return !receivedMessageFilterRuntime.getAutoTranslatedResultRejectReason(plugin, translation, channelId);
+      },
+      buildAutoTranslateAnalysisText(plugin, originalContentData) {
+        let rawText = plugin.buildTranslationRequestText(originalContentData), [maskedText, , hasUnprotectedContent] = plugin.removeExceptions(rawText, MESSAGE_DIRECTIONS.RECEIVED);
+        return { text: maskedText || "", hasUnprotectedContent };
+      },
+      isLinkOnlyReceivedContent(plugin, originalContentData) {
+        if (!originalContentData) return !1;
+        let content = (originalContentData.content || "").trim();
+        if (!content) return !1;
+        let [maskedContent, , hasUnprotectedContent] = plugin.removeExceptions(content, MESSAGE_DIRECTIONS.RECEIVED);
+        if (hasUnprotectedContent) return !1;
+        let counts = plugin.countScriptFamilies(maskedContent);
+        return !!maskedContent && Object.keys(counts).every((family) => !counts[family]);
+      },
+      buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId) {
+        if (!originalContentData || !channelId) return null;
+        let targetLanguageId = plugin.getLanguageChoice(LANGUAGE_DIRECTIONS.OUTPUT, MESSAGE_DIRECTIONS.RECEIVED, channelId), analysisSource = receivedMessageFilterRuntime.buildAutoTranslateAnalysisText(plugin, originalContentData), analysis = plugin.analyzeTextForAutoTranslate(analysisSource.text, targetLanguageId);
+        return { targetLanguageId, analysisSource, analysis };
+      },
+      getReceivedAutoTranslateSkipReason(plugin, originalContentData, channelId) {
+        if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, originalContentData)) return "link_only";
+        if (!plugin.hasTranslatableMessageContent(originalContentData)) return "symbol_only";
+        let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId);
+        if (!receivedAnalysis || !receivedAnalysis.analysisSource.hasUnprotectedContent) return "symbol_only";
+        let { targetLanguageId, analysis } = receivedAnalysis;
+        return analysis.totalLetters ? plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId) || plugin.shouldSkipSameLanguageReceivedMessages() && plugin.isMostlyTargetLanguageMessage(analysis, targetLanguageId) ? "same_language" : null : "symbol_only";
+      },
+      shouldSkipReceivedTranslationBeforeRequest(plugin, originalContentData, channelId) {
+        if (!originalContentData || !channelId) return !1;
+        if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, originalContentData)) return !0;
+        let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId);
+        if (!receivedAnalysis) return !1;
+        let { targetLanguageId, analysisSource, analysis } = receivedAnalysis, targetLanguage = plugin.ensureSettingsStore().getLanguage(targetLanguageId);
+        return !targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special || !analysisSource || !analysisSource.hasUnprotectedContent ? !1 : plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId);
+      },
+      shouldSkipByLocalLanguagePrecheck(plugin, text, analysis, targetLanguageId) {
+        if (!plugin.useLocalLanguagePrecheck()) return !1;
+        let localDetection = plugin.detectMessageLanguageLocal(text, analysis, targetLanguageId);
+        if (!localDetection.confident || !localDetection.languageId) return !1;
+        if (plugin.isSameLanguageOrVariant(localDetection.languageId, targetLanguageId)) return !0;
+        let sourceLanguages = plugin.getReceivedAutoTranslateSourceLanguages();
+        return sourceLanguages.length && !plugin.matchesConfiguredSourceLanguage(localDetection.languageId, sourceLanguages);
+      },
+      shouldAutoTranslateReceivedMessage(plugin, message, channel, originalContentData = null, ignoreQueued = !1) {
+        if (!channel || !channel.id || !message || !message.id || !plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message) || plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id) || plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return !1;
+        let sourceData = originalContentData || plugin.extractOriginalContentData(message);
+        if (plugin.getCachedReceivedSkipDecision(message, channel.id, sourceData) || receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, sourceData) || !plugin.hasTranslatableMessageContent(sourceData)) return !1;
+        let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, sourceData, channel.id);
+        if (!receivedAnalysis || !receivedAnalysis.analysisSource.hasUnprotectedContent) return !1;
+        let { analysisSource, targetLanguageId, analysis } = receivedAnalysis;
+        return !(!analysis.totalLetters || analysis.totalLetters < plugin.getAutoTranslateMinimumLengthForAnalysis(analysis) || plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId) || plugin.shouldSkipSameLanguageReceivedMessages() && plugin.isMostlyTargetLanguageMessage(analysis, targetLanguageId) || receivedMessageFilterRuntime.shouldSkipByLocalLanguagePrecheck(plugin, analysisSource.text, analysis, targetLanguageId));
+      }
+    };
+    function createReceivedTranslationRuntime({
+      // Only ArrayUtils.is and SelectedChannelStore.getChannelId are used. Defaulted so
+      // the module is constructible on its own; the plugin injects the real library.
+      BDFDB = { ArrayUtils: { is: Array.isArray }, LibraryStores: { SelectedChannelStore: { getChannelId: /* @__PURE__ */ __name(() => null, "getChannelId") } } },
+      // Only the batch counters are read here. Every other call into the status store
+      // goes through the plugin, which owns the banner.
+      loadedTranslationStatusStore = { getNextBatchNumber: /* @__PURE__ */ __name(() => 0, "getNextBatchNumber"), getCurrentBatchNumber: /* @__PURE__ */ __name(() => 0, "getCurrentBatchNumber") }
+    } = {}) {
+      let receivedTranslationRuntime = {
+        // One object threaded through the whole stream walk, so the per-entry step stays
+        // a pure function of (entry, context). It also decides, once per render, whether
+        // this is the channel's first pass in loaded-messages scope - the only moment
+        // the historical collection banner may be opened.
+        //
+        // (The legacy copy of this method carried a comment about draining live batch
+        // items. That comment belonged to collectBatchItems, which moved to
+        // orchestrator/live-translation-queue.js; it is not repeated here.)
+        createProcessMessagesContext(plugin, e) {
+          e.instance.props.channelStream = [].concat(e.instance.props.channelStream);
+          let channel = e.instance.props.channel, channelId = channel && channel.id;
+          plugin.prepareAutoTranslationChannelSession(channelId);
+          let channelState = plugin.getAutoTranslationChannelState(channelId), shouldInitializeAutoTranslation = !!(channelId && plugin.isTranslationEnabled(channelId) && channelState && !channelState.initialized), historicalLoadedPass = shouldInitializeAutoTranslation && plugin.getReceivedAutoTranslateScope() == "loaded_messages";
+          if (historicalLoadedPass) {
+            let retainedFailedCount = plugin.getFailedHistoricalTranslationCount(channelId);
+            plugin.attachAutoTranslationScrollWatcher(), plugin.updateLoadedAutoTranslationStatus({ active: !0, collecting: !0, done: !1, channelId, batch: loadedTranslationStatusStore.getNextBatchNumber(), total: 0, processed: 0, displayed: 0, skipped: 0, failed: 0, retryable: retainedFailedCount, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" });
+          }
+          return {
+            channel,
+            channelId,
+            channelState,
+            shouldInitializeAutoTranslation,
+            historicalLoadedPass,
+            skipInitialLoadedMessages: shouldInitializeAutoTranslation && plugin.shouldDeferInitialAutoTranslate(channelId),
+            autoTranslateBoundaryId: channelState ? channelState.boundaryMessageId : null,
+            highestMessageId: channelState ? channelState.boundaryMessageId : null,
+            collectedHistoricalMessages: !1
+          };
+        },
+        shouldCollectHistoricalStreamMessage(plugin, message, context) {
+          if (!message || !message.id || !context.channelId) return !1;
+          let wasSeen = plugin.markLoadedAutoTranslationMessageSeen(context.channelId, message.id);
+          return plugin.getReceivedAutoTranslateScope() != "loaded_messages" ? !1 : context.historicalLoadedPass ? !0 : !wasSeen && !plugin.isMessageIdNewer(message.id, context.autoTranslateBoundaryId);
+        },
+        processChannelStreamEntry(plugin, entry, context) {
+          let message = entry && entry.content;
+          if (!message) return context.highestMessageId;
+          if (BDFDB.ArrayUtils.is(message.attachments)) {
+            let historicalLoad = receivedTranslationRuntime.shouldCollectHistoricalStreamMessage(plugin, message, context);
+            return historicalLoad && (context.collectedHistoricalMessages = !0), context.highestMessageId = plugin.getNewestMessageId(context.highestMessageId, message.id), plugin.checkMessage(entry, message, context.channel, {
+              skipAutoQueue: context.skipInitialLoadedMessages,
+              autoTranslateBoundaryId: context.autoTranslateBoundaryId,
+              historicalLoad,
+              deferHistoricalSnapshotStart: historicalLoad
+            }), context.highestMessageId;
+          }
+          if (BDFDB.ArrayUtils.is(message)) for (let index in message) {
+            let childMessage = message[index].content;
+            if (!childMessage || !BDFDB.ArrayUtils.is(childMessage.attachments)) continue;
+            let historicalLoad = receivedTranslationRuntime.shouldCollectHistoricalStreamMessage(plugin, childMessage, context);
+            historicalLoad && (context.collectedHistoricalMessages = !0), context.highestMessageId = plugin.getNewestMessageId(context.highestMessageId, childMessage.id), plugin.checkMessage(message[index], childMessage, context.channel, {
+              skipAutoQueue: context.skipInitialLoadedMessages,
+              autoTranslateBoundaryId: context.autoTranslateBoundaryId,
+              historicalLoad,
+              deferHistoricalSnapshotStart: historicalLoad
+            });
+          }
+          return context.highestMessageId;
+        },
+        finishProcessMessages(plugin, context) {
+          if (context.channelState && (context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, context.highestMessageId), context.shouldInitializeAutoTranslation && (context.channelState.initialized = !0)), context.historicalLoadedPass || context.collectedHistoricalMessages) {
+            context.collectedHistoricalMessages && !plugin.isUserActivelyScrollingMessages(context.channelId) && plugin.finishHistoricalTranslationSnapshot(context.channelId);
+            let historicalEntry = plugin.getHistoricalTranslationJobQueue(context.channelId, !1);
+            historicalEntry && (historicalEntry.runningPromise || historicalEntry.jobs.length) || plugin.updateLoadedAutoTranslationStatus({ active: !1, collecting: !1, done: !0, channelId: context.channelId, batch: loadedTranslationStatusStore.getCurrentBatchNumber(), total: 0, processed: 0 });
+          }
+        },
+        processMessages(plugin, e) {
+          let context = receivedTranslationRuntime.createProcessMessagesContext(plugin, e);
+          for (let index in e.instance.props.channelStream)
+            receivedTranslationRuntime.processChannelStreamEntry(plugin, e.instance.props.channelStream[index], context);
+          receivedTranslationRuntime.finishProcessMessages(plugin, context);
+        },
+        createCheckMessageContext(plugin, message, channel, options = {}) {
+          let channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), sourceChanged = plugin.refreshReceivedMessageSourceState(message, channelId), originalContentData = plugin.extractOriginalContentData(message), channelState = plugin.getAutoTranslationChannelState(channelId), autoTranslateBoundaryId = options.autoTranslateBoundaryId != null ? options.autoTranslateBoundaryId : channelState && channelState.boundaryMessageId, expectedSignature = plugin.createReceivedTranslationSignature(message, channelId, originalContentData), pendingSourceChanged = plugin.invalidateHistoricalTranslationMessage(message.id, channelId, expectedSignature), liveSourceChanged = plugin.invalidateLiveTranslationMessage(message.id, channelId, expectedSignature);
+          return {
+            channelId,
+            channelState,
+            originalContentData,
+            expectedSignature,
+            forceQueue: sourceChanged || pendingSourceChanged || liveSourceChanged,
+            skipAutoQueue: !!options.skipAutoQueue,
+            isNewerThanBoundary: plugin.isMessageIdNewer(message.id, autoTranslateBoundaryId),
+            historicalLoad: !!options.historicalLoad,
+            deferHistoricalSnapshotStart: !!options.deferHistoricalSnapshotStart
+          };
+        },
+        captureReceivedDisplaySource(plugin, message, context) {
+          if (!context.channelId || plugin.isOwnMessage(message) || !plugin.isTranslationEnabled(context.channelId)) return null;
+          let previousView = plugin.getReceivedDisplayRuntimeView(message.id), generation = plugin.getReceivedDisplayGeneration(context.channelId), record = plugin.captureReceivedMessageSource({
+            messageId: message.id,
+            channelId: context.channelId,
+            generation: generation === void 0 ? 1 : generation,
+            sourceSignature: context.expectedSignature,
+            source: {
+              content: context.originalContentData && context.originalContentData.content || "",
+              embeds: context.originalContentData && context.originalContentData.embeds || []
+            }
+          });
+          return previousView && record && previousView.status !== "idle" && previousView.generation === record.generation && previousView.sourceSignature !== record.sourceSignature && (context.forceQueue = !0, plugin.clearCachedTranslation(message.id)), record;
+        },
+        commitCachedDisplayResult(plugin, message, context, cachedTranslation) {
+          let storedTranslation = plugin.refreshTranslationDisplay(Object.assign({ channelId: context.channelId, auto: !0 }, cachedTranslation)), commit = plugin.commitReceivedDisplayResult(plugin.createReceivedDisplayCommitResult(message, context.channelId, {
+            sourceSignature: storedTranslation.signature != null ? String(storedTranslation.signature) : context.expectedSignature,
+            status: "translated",
+            translation: storedTranslation
+          }), { refresh: !1 });
+          commit && commit.catch && commit.catch((_) => {
+          });
+          let committedView = plugin.getReceivedDisplayRuntimeView(message.id);
+          return !!(committedView && committedView.translated);
+        },
+        resolveCheckMessageDisplay(plugin, stream, message, context) {
+          let hadDisplayedTranslation = !!plugin.ensureReceivedDisplayRuntime().getDisplayView(message.id), translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature), messageChanged = hadDisplayedTranslation && !translation, canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id), canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary), cachedTranslation = null, storeCommitted = !1;
+          canAutoTranslateReplyPreviewForBase && plugin.markAutoTranslationEligibleReplyPreviewMessage(context.channelId, message.id), !translation && canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad || context.forceQueue || messageChanged || context.isNewerThanBoundary) && (cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData), cachedTranslation && !context.historicalLoad && (storeCommitted = receivedTranslationRuntime.commitCachedDisplayResult(plugin, message, context, cachedTranslation)));
+          let storeView = !translation && plugin.getReceivedDisplayRuntimeView(message.id);
+          return translation ? (plugin.refreshTranslationDisplay(translation), stream.content.content = translation.content) : storeView && storeView.translated ? plugin.applyReceivedDisplayViewToStream(stream, storeView) : plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (stream.content.content = plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message.content, messageChanged = !0), { translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage };
+        },
+        queueCheckMessageTranslation(plugin, message, channel, context, outcome) {
+          if (!(outcome.translation || outcome.storeCommitted || context.skipAutoQueue || !outcome.canAutoTranslateMessage) && (context.channelState && (context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, message.id)), context.forceQueue || outcome.messageChanged || context.isNewerThanBoundary || context.historicalLoad)) {
+            let liveMessage = !context.historicalLoad && (context.isNewerThanBoundary || plugin.isLikelyLiveAutoTranslateMessage(message, context.channelId));
+            plugin.queueAutoTranslateMessage(message, channel || { id: context.channelId }, context.originalContentData, {
+              historicalLoad: context.historicalLoad && !liveMessage,
+              deferHistoricalSnapshotStart: context.deferHistoricalSnapshotStart,
+              deferWhileReading: !1,
+              cachedTranslation: context.historicalLoad && !liveMessage ? outcome.cachedTranslation : null
+            });
+          }
+        },
+        checkMessage(plugin, stream, message, channel, options = {}) {
+          if (!message || !stream || !stream.content) return;
+          plugin.captureSentOriginalMessage(message, channel && channel.id || message.channel_id || null);
+          let context = receivedTranslationRuntime.createCheckMessageContext(plugin, message, channel, options);
+          receivedTranslationRuntime.captureReceivedDisplaySource(plugin, message, context);
+          let outcome = receivedTranslationRuntime.resolveCheckMessageDisplay(plugin, stream, message, context);
+          receivedTranslationRuntime.queueCheckMessageTranslation(plugin, message, channel, context, outcome);
+        }
+      };
+      return Object.freeze({ receivedTranslationRuntime });
+    }
+    __name(createReceivedTranslationRuntime, "createReceivedTranslationRuntime");
+    module2.exports = {
+      foreignLanguageDecisionRuntime,
+      receivedMessageFilterRuntime,
+      createReceivedTranslationRuntime
+    };
+  }
+});
+
 // src/settings/settings-store.js
 var require_settings_store = __commonJS({
   "src/settings/settings-store.js"(exports2, module2) {
@@ -8379,6 +8619,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
       } : (([Plugin, BDFDB]) => {
         var _a;
         let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), {
+          foreignLanguageDecisionRuntime,
+          receivedMessageFilterRuntime,
+          createReceivedTranslationRuntime
+        } = require_received_translation_runtime(), {
           LOADED_AUTO_TRANSLATE_RANGE_MODES,
           loadedAutoTranslatePolicy,
           aiDecisionPolicy,
@@ -8648,219 +8892,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }, messageTypes = {
           RECEIVED: "received",
           SENT: "sent"
-        }, AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__", protectionLogic = createProtectionLogic({ BDFDB }), receivedTranslationRuntime = {
-          // Drains queued live items that can share one AI batch request with the first
-          // item: same channel, no cached result, and not already batch-rejected.
-          // Returns a burst item to the single-message path, preserving the queue's
-          // newest-first order so a retry is never starved behind later arrivals.
-          createProcessMessagesContext(plugin, e) {
-            e.instance.props.channelStream = [].concat(e.instance.props.channelStream);
-            let channel = e.instance.props.channel, channelId = channel && channel.id;
-            plugin.prepareAutoTranslationChannelSession(channelId);
-            let channelState = plugin.getAutoTranslationChannelState(channelId), shouldInitializeAutoTranslation = !!(channelId && plugin.isTranslationEnabled(channelId) && channelState && !channelState.initialized), historicalLoadedPass = shouldInitializeAutoTranslation && plugin.getReceivedAutoTranslateScope() == "loaded_messages";
-            if (historicalLoadedPass) {
-              let retainedFailedCount = plugin.getFailedHistoricalTranslationCount(channelId);
-              plugin.attachAutoTranslationScrollWatcher(), plugin.updateLoadedAutoTranslationStatus({ active: !0, collecting: !0, done: !1, channelId, batch: loadedTranslationStatusStore.getNextBatchNumber(), total: 0, processed: 0, displayed: 0, skipped: 0, failed: 0, retryable: retainedFailedCount, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" });
-            }
-            return {
-              channel,
-              channelId,
-              channelState,
-              shouldInitializeAutoTranslation,
-              historicalLoadedPass,
-              skipInitialLoadedMessages: shouldInitializeAutoTranslation && plugin.shouldDeferInitialAutoTranslate(channelId),
-              autoTranslateBoundaryId: channelState ? channelState.boundaryMessageId : null,
-              highestMessageId: channelState ? channelState.boundaryMessageId : null,
-              collectedHistoricalMessages: !1
-            };
-          },
-          shouldCollectHistoricalStreamMessage(plugin, message, context) {
-            if (!message || !message.id || !context.channelId) return !1;
-            let wasSeen = plugin.markLoadedAutoTranslationMessageSeen(context.channelId, message.id);
-            return plugin.getReceivedAutoTranslateScope() != "loaded_messages" ? !1 : context.historicalLoadedPass ? !0 : !wasSeen && !plugin.isMessageIdNewer(message.id, context.autoTranslateBoundaryId);
-          },
-          processChannelStreamEntry(plugin, entry, context) {
-            let message = entry && entry.content;
-            if (!message) return context.highestMessageId;
-            if (BDFDB.ArrayUtils.is(message.attachments)) {
-              let historicalLoad = receivedTranslationRuntime.shouldCollectHistoricalStreamMessage(plugin, message, context);
-              return historicalLoad && (context.collectedHistoricalMessages = !0), context.highestMessageId = plugin.getNewestMessageId(context.highestMessageId, message.id), plugin.checkMessage(entry, message, context.channel, {
-                skipAutoQueue: context.skipInitialLoadedMessages,
-                autoTranslateBoundaryId: context.autoTranslateBoundaryId,
-                historicalLoad,
-                deferHistoricalSnapshotStart: historicalLoad
-              }), context.highestMessageId;
-            }
-            if (BDFDB.ArrayUtils.is(message)) for (let index in message) {
-              let childMessage = message[index].content;
-              if (!childMessage || !BDFDB.ArrayUtils.is(childMessage.attachments)) continue;
-              let historicalLoad = receivedTranslationRuntime.shouldCollectHistoricalStreamMessage(plugin, childMessage, context);
-              historicalLoad && (context.collectedHistoricalMessages = !0), context.highestMessageId = plugin.getNewestMessageId(context.highestMessageId, childMessage.id), plugin.checkMessage(message[index], childMessage, context.channel, {
-                skipAutoQueue: context.skipInitialLoadedMessages,
-                autoTranslateBoundaryId: context.autoTranslateBoundaryId,
-                historicalLoad,
-                deferHistoricalSnapshotStart: historicalLoad
-              });
-            }
-            return context.highestMessageId;
-          },
-          finishProcessMessages(plugin, context) {
-            if (context.channelState && (context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, context.highestMessageId), context.shouldInitializeAutoTranslation && (context.channelState.initialized = !0)), context.historicalLoadedPass || context.collectedHistoricalMessages) {
-              context.collectedHistoricalMessages && !plugin.isUserActivelyScrollingMessages(context.channelId) && plugin.finishHistoricalTranslationSnapshot(context.channelId);
-              let historicalEntry = plugin.getHistoricalTranslationJobQueue(context.channelId, !1);
-              historicalEntry && (historicalEntry.runningPromise || historicalEntry.jobs.length) || plugin.updateLoadedAutoTranslationStatus({ active: !1, collecting: !1, done: !0, channelId: context.channelId, batch: loadedTranslationStatusStore.getCurrentBatchNumber(), total: 0, processed: 0 });
-            }
-          },
-          processMessages(plugin, e) {
-            let context = receivedTranslationRuntime.createProcessMessagesContext(plugin, e);
-            for (let index in e.instance.props.channelStream)
-              receivedTranslationRuntime.processChannelStreamEntry(plugin, e.instance.props.channelStream[index], context);
-            receivedTranslationRuntime.finishProcessMessages(plugin, context);
-          },
-          createCheckMessageContext(plugin, message, channel, options = {}) {
-            let channelId = channel && channel.id || BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), sourceChanged = plugin.refreshReceivedMessageSourceState(message, channelId), originalContentData = plugin.extractOriginalContentData(message), channelState = plugin.getAutoTranslationChannelState(channelId), autoTranslateBoundaryId = options.autoTranslateBoundaryId != null ? options.autoTranslateBoundaryId : channelState && channelState.boundaryMessageId, expectedSignature = plugin.createReceivedTranslationSignature(message, channelId, originalContentData), pendingSourceChanged = plugin.invalidateHistoricalTranslationMessage(message.id, channelId, expectedSignature), liveSourceChanged = plugin.invalidateLiveTranslationMessage(message.id, channelId, expectedSignature);
-            return {
-              channelId,
-              channelState,
-              originalContentData,
-              expectedSignature,
-              forceQueue: sourceChanged || pendingSourceChanged || liveSourceChanged,
-              skipAutoQueue: !!options.skipAutoQueue,
-              isNewerThanBoundary: plugin.isMessageIdNewer(message.id, autoTranslateBoundaryId),
-              historicalLoad: !!options.historicalLoad,
-              deferHistoricalSnapshotStart: !!options.deferHistoricalSnapshotStart
-            };
-          },
-          captureReceivedDisplaySource(plugin, message, context) {
-            if (!context.channelId || plugin.isOwnMessage(message) || !plugin.isTranslationEnabled(context.channelId)) return null;
-            let previousView = plugin.getReceivedDisplayRuntimeView(message.id), generation = plugin.getReceivedDisplayGeneration(context.channelId), record = plugin.captureReceivedMessageSource({
-              messageId: message.id,
-              channelId: context.channelId,
-              generation: generation === void 0 ? 1 : generation,
-              sourceSignature: context.expectedSignature,
-              source: {
-                content: context.originalContentData && context.originalContentData.content || "",
-                embeds: context.originalContentData && context.originalContentData.embeds || []
-              }
-            });
-            return previousView && record && previousView.status !== "idle" && previousView.generation === record.generation && previousView.sourceSignature !== record.sourceSignature && (context.forceQueue = !0, plugin.clearCachedTranslation(message.id)), record;
-          },
-          commitCachedDisplayResult(plugin, message, context, cachedTranslation) {
-            let storedTranslation = plugin.refreshTranslationDisplay(Object.assign({ channelId: context.channelId, auto: !0 }, cachedTranslation)), commit = plugin.commitReceivedDisplayResult(plugin.createReceivedDisplayCommitResult(message, context.channelId, {
-              sourceSignature: storedTranslation.signature != null ? String(storedTranslation.signature) : context.expectedSignature,
-              status: "translated",
-              translation: storedTranslation
-            }), { refresh: !1 });
-            commit && commit.catch && commit.catch((_2) => {
-            });
-            let committedView = plugin.getReceivedDisplayRuntimeView(message.id);
-            return !!(committedView && committedView.translated);
-          },
-          resolveCheckMessageDisplay(plugin, stream, message, context) {
-            let hadDisplayedTranslation = !!plugin.ensureReceivedDisplayRuntime().getDisplayView(message.id), translation = plugin.getActiveMessageTranslation(message, context.channelId, context.expectedSignature), messageChanged = hadDisplayedTranslation && !translation, canAutoTranslateMessage = plugin.isTranslationEnabled(context.channelId) && !plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id), canAutoTranslateReplyPreviewForBase = canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad ? plugin.isMessageWithinLoadedRange(message) : context.isNewerThanBoundary), cachedTranslation = null, storeCommitted = !1;
-            canAutoTranslateReplyPreviewForBase && plugin.markAutoTranslationEligibleReplyPreviewMessage(context.channelId, message.id), !translation && canAutoTranslateMessage && !context.skipAutoQueue && (context.historicalLoad || context.forceQueue || messageChanged || context.isNewerThanBoundary) && (cachedTranslation = plugin.getCachedReceivedTranslation(message, context.channelId, context.originalContentData), cachedTranslation && !context.historicalLoad && (storeCommitted = receivedTranslationRuntime.commitCachedDisplayResult(plugin, message, context, cachedTranslation)));
-            let storeView = !translation && plugin.getReceivedDisplayRuntimeView(message.id);
-            return translation ? (plugin.refreshTranslationDisplay(translation), stream.content.content = translation.content) : storeView && storeView.translated ? plugin.applyReceivedDisplayViewToStream(stream, storeView) : plugin.ensureReceivedDisplayRuntime().hasSourceArchive(message.id) && (stream.content.content = plugin.ensureReceivedDisplayRuntime().consumeSourceArchive(message.id).message.content, messageChanged = !0), { translation, storeCommitted, messageChanged, cachedTranslation, canAutoTranslateMessage };
-          },
-          queueCheckMessageTranslation(plugin, message, channel, context, outcome) {
-            if (!(outcome.translation || outcome.storeCommitted || context.skipAutoQueue || !outcome.canAutoTranslateMessage) && (context.channelState && (context.channelState.boundaryMessageId = plugin.getNewestMessageId(context.channelState.boundaryMessageId, message.id)), context.forceQueue || outcome.messageChanged || context.isNewerThanBoundary || context.historicalLoad)) {
-              let liveMessage = !context.historicalLoad && (context.isNewerThanBoundary || plugin.isLikelyLiveAutoTranslateMessage(message, context.channelId));
-              plugin.queueAutoTranslateMessage(message, channel || { id: context.channelId }, context.originalContentData, {
-                historicalLoad: context.historicalLoad && !liveMessage,
-                deferHistoricalSnapshotStart: context.deferHistoricalSnapshotStart,
-                deferWhileReading: !1,
-                cachedTranslation: context.historicalLoad && !liveMessage ? outcome.cachedTranslation : null
-              });
-            }
-          },
-          checkMessage(plugin, stream, message, channel, options = {}) {
-            if (!message || !stream || !stream.content) return;
-            plugin.captureSentOriginalMessage(message, channel && channel.id || message.channel_id || null);
-            let context = receivedTranslationRuntime.createCheckMessageContext(plugin, message, channel, options);
-            receivedTranslationRuntime.captureReceivedDisplaySource(plugin, message, context);
-            let outcome = receivedTranslationRuntime.resolveCheckMessageDisplay(plugin, stream, message, context);
-            receivedTranslationRuntime.queueCheckMessageTranslation(plugin, message, channel, context, outcome);
-          }
-        }, translationDisplayLogic = createTranslationDisplayLogic({ BDFDB }), foreignLanguageDecisionRuntime = {
-          isDetectedLanguageForeign(plugin, detectedLanguageId, targetLanguageId) {
-            return !!detectedLanguageId && !plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId);
-          },
-          isReceivedMessageForeignAsync(plugin, text, targetLanguageId, callback) {
-            if (plugin.isClearlyForeignLanguageMessage(text, targetLanguageId)) return callback(!0);
-            if (!text || !targetLanguageId || targetLanguageId == "auto") return callback(!1);
-            plugin.detectLanguage(text, (detectedLanguageId) => callback(foreignLanguageDecisionRuntime.isDetectedLanguageForeign(plugin, detectedLanguageId, targetLanguageId)));
-          }
-        }, receivedMessageFilterRuntime = {
-          isTranslationResultTooSimilar(plugin, translation) {
-            if (!translation) return !1;
-            let normalizedTranslation = plugin.normalizeStoredTranslationData(translation), originalContent = (normalizedTranslation.originalContent || "").trim(), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
-            if (!originalContent || !translatedContent) return !1;
-            let normalizedOriginal = plugin.normalizeComparisonText(originalContent), normalizedTranslated = plugin.normalizeComparisonText(translatedContent);
-            return !normalizedOriginal || !normalizedTranslated ? !1 : normalizedOriginal == normalizedTranslated ? !0 : plugin.getTextSimilarityScore(originalContent, translatedContent) >= Math.max(0.92, plugin.getTranslationSimilarityThreshold());
-          },
-          getAutoTranslatedResultRejectReason(plugin, translation, channelId) {
-            if (!translation || !translation.translatedContent) return "local_guard";
-            if (receivedMessageFilterRuntime.isTranslationResultTooSimilar(plugin, translation)) return "too_similar";
-            let detectedLanguageId = translation.input && translation.input.id, targetLanguageId = translation.output && translation.output.id || plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId);
-            if (plugin.shouldSkipSameLanguageReceivedMessages() && detectedLanguageId && plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId)) return "same_language";
-            let sourceLanguages = plugin.getReceivedAutoTranslateSourceLanguages();
-            return sourceLanguages.length && detectedLanguageId && !plugin.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages) ? "source_filter" : plugin.shouldDropSimilarTranslations() && plugin.getTextSimilarityScore(translation.originalContent, translation.translatedContent) >= plugin.getTranslationSimilarityThreshold() ? "too_similar" : null;
-          },
-          shouldKeepAutoTranslatedResult(plugin, translation, channelId) {
-            return !receivedMessageFilterRuntime.getAutoTranslatedResultRejectReason(plugin, translation, channelId);
-          },
-          buildAutoTranslateAnalysisText(plugin, originalContentData) {
-            let rawText = plugin.buildTranslationRequestText(originalContentData), [maskedText, , hasUnprotectedContent] = plugin.removeExceptions(rawText, messageTypes.RECEIVED);
-            return { text: maskedText || "", hasUnprotectedContent };
-          },
-          isLinkOnlyReceivedContent(plugin, originalContentData) {
-            if (!originalContentData) return !1;
-            let content = (originalContentData.content || "").trim();
-            if (!content) return !1;
-            let [maskedContent, , hasUnprotectedContent] = plugin.removeExceptions(content, messageTypes.RECEIVED);
-            if (hasUnprotectedContent) return !1;
-            let counts = plugin.countScriptFamilies(maskedContent);
-            return !!maskedContent && Object.keys(counts).every((family) => !counts[family]);
-          },
-          buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId) {
-            if (!originalContentData || !channelId) return null;
-            let targetLanguageId = plugin.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId), analysisSource = receivedMessageFilterRuntime.buildAutoTranslateAnalysisText(plugin, originalContentData), analysis = plugin.analyzeTextForAutoTranslate(analysisSource.text, targetLanguageId);
-            return { targetLanguageId, analysisSource, analysis };
-          },
-          getReceivedAutoTranslateSkipReason(plugin, originalContentData, channelId) {
-            if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, originalContentData)) return "link_only";
-            if (!plugin.hasTranslatableMessageContent(originalContentData)) return "symbol_only";
-            let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId);
-            if (!receivedAnalysis || !receivedAnalysis.analysisSource.hasUnprotectedContent) return "symbol_only";
-            let { targetLanguageId, analysis } = receivedAnalysis;
-            return analysis.totalLetters ? plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId) || plugin.shouldSkipSameLanguageReceivedMessages() && plugin.isMostlyTargetLanguageMessage(analysis, targetLanguageId) ? "same_language" : null : "symbol_only";
-          },
-          shouldSkipReceivedTranslationBeforeRequest(plugin, originalContentData, channelId) {
-            if (!originalContentData || !channelId) return !1;
-            if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, originalContentData)) return !0;
-            let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, originalContentData, channelId);
-            if (!receivedAnalysis) return !1;
-            let { targetLanguageId, analysisSource, analysis } = receivedAnalysis, targetLanguage = plugin.ensureSettingsStore().getLanguage(targetLanguageId);
-            return !targetLanguageId || targetLanguageId == "auto" || targetLanguage && targetLanguage.special || !analysisSource || !analysisSource.hasUnprotectedContent ? !1 : plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId);
-          },
-          shouldSkipByLocalLanguagePrecheck(plugin, text, analysis, targetLanguageId) {
-            if (!plugin.useLocalLanguagePrecheck()) return !1;
-            let localDetection = plugin.detectMessageLanguageLocal(text, analysis, targetLanguageId);
-            if (!localDetection.confident || !localDetection.languageId) return !1;
-            if (plugin.isSameLanguageOrVariant(localDetection.languageId, targetLanguageId)) return !0;
-            let sourceLanguages = plugin.getReceivedAutoTranslateSourceLanguages();
-            return sourceLanguages.length && !plugin.matchesConfiguredSourceLanguage(localDetection.languageId, sourceLanguages);
-          },
-          shouldAutoTranslateReceivedMessage(plugin, message, channel, originalContentData = null, ignoreQueued = !1) {
-            if (!channel || !channel.id || !message || !message.id || !plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message) || plugin.ensureReceivedDisplayRuntime().isSuppressed(message.id) || plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && plugin.ensureLiveTranslationQueue().isMessageQueued(message.id)) return !1;
-            let sourceData = originalContentData || plugin.extractOriginalContentData(message);
-            if (plugin.getCachedReceivedSkipDecision(message, channel.id, sourceData) || receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, sourceData) || !plugin.hasTranslatableMessageContent(sourceData)) return !1;
-            let receivedAnalysis = receivedMessageFilterRuntime.buildReceivedAutoTranslateAnalysis(plugin, sourceData, channel.id);
-            if (!receivedAnalysis || !receivedAnalysis.analysisSource.hasUnprotectedContent) return !1;
-            let { analysisSource, targetLanguageId, analysis } = receivedAnalysis;
-            return !(!analysis.totalLetters || analysis.totalLetters < plugin.getAutoTranslateMinimumLengthForAnalysis(analysis) || plugin.isClearlyTargetLanguageMessage(analysis, targetLanguageId) || plugin.shouldSkipSameLanguageReceivedMessages() && plugin.isMostlyTargetLanguageMessage(analysis, targetLanguageId) || receivedMessageFilterRuntime.shouldSkipByLocalLanguagePrecheck(plugin, analysisSource.text, analysis, targetLanguageId));
-          }
-        };
+        }, AI_SKIP_TRANSLATION_TOKEN = "__SKIP_TRANSLATION__", protectionLogic = createProtectionLogic({ BDFDB }), { receivedTranslationRuntime } = createReceivedTranslationRuntime({ BDFDB, loadedTranslationStatusStore }), translationDisplayLogic = createTranslationDisplayLogic({ BDFDB });
         return _a = class extends Plugin {
           getVersion() {
             return normalizeSemverVersion(this.version);
