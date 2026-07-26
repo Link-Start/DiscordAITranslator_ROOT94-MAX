@@ -1396,6 +1396,78 @@ var require_styles = __commonJS({
   }
 });
 
+// src/channel-title/channel-title-store.js
+var require_channel_title_store = __commonJS({
+  "src/channel-title/channel-title-store.js"(exports2, module2) {
+    function createChannelTitleStore({ now = Date.now } = {}) {
+      let translated = {}, pending = {}, failed = {}, requestSequence = 0;
+      function normalizeChannelId(channelId) {
+        return channelId == null ? "" : String(channelId);
+      }
+      return __name(normalizeChannelId, "normalizeChannelId"), Object.freeze({
+        // A translated title only counts while its signature still matches the current
+        // configuration; a stale entry is dropped on read so it cannot resurface.
+        getTranslatedTitle(channelId, signature) {
+          let key = normalizeChannelId(channelId), entry = translated[key];
+          return entry ? entry.signature !== signature ? (delete translated[key], null) : entry.text : null;
+        },
+        hasTranslatedTitle(channelId) {
+          let key = normalizeChannelId(channelId);
+          return key ? !!translated[key] : !!Object.keys(translated).length;
+        },
+        // Returns null when a request for this exact signature is already settled,
+        // in flight, or inside its failure cooldown.
+        beginRequest(channelId, signature) {
+          let key = normalizeChannelId(channelId);
+          if (!key || !signature || translated[key] && translated[key].signature === signature || pending[key] && pending[key].signature === signature) return null;
+          let failure = failed[key];
+          if (failure && failure.signature === signature && failure.retryAfter > now()) return null;
+          let request = { id: ++requestSequence, channelId: key, signature };
+          return pending[key] = request, request;
+        },
+        isRequestCurrent(request) {
+          return !!request && pending[normalizeChannelId(request.channelId)] === request;
+        },
+        completeRequest(request, text) {
+          let key = normalizeChannelId(request && request.channelId);
+          return !key || pending[key] !== request ? !1 : (delete pending[key], translated[key] = { signature: request.signature, text }, delete failed[key], !0);
+        },
+        failRequest(request) {
+          let key = normalizeChannelId(request && request.channelId);
+          return !key || pending[key] !== request ? !1 : (delete pending[key], failed[key] = { signature: request.signature, retryAfter: now() + 3e4 }, !0);
+        },
+        // Drops an in-flight request without recording a failure, so the next render
+        // may retry immediately.
+        abandonRequest(request) {
+          let key = normalizeChannelId(request && request.channelId);
+          return !key || pending[key] !== request ? !1 : (delete pending[key], !0);
+        },
+        cancelPending(channelId = null) {
+          let key = normalizeChannelId(channelId);
+          if (!key) {
+            pending = {}, failed = {};
+            return;
+          }
+          delete pending[key], delete failed[key];
+        },
+        // Returns whether a visible title was actually removed, so the caller knows
+        // if a component refresh is warranted.
+        clear(channelId = null) {
+          let key = normalizeChannelId(channelId), hadTranslatedTitle = this.hasTranslatedTitle(channelId);
+          return this.cancelPending(channelId), key ? delete translated[key] : translated = {}, hadTranslatedTitle;
+        },
+        // Invalidates every in-flight request without touching displayed titles;
+        // used when the plugin stops so late callbacks cannot commit.
+        invalidateInFlight() {
+          requestSequence++, pending = {};
+        }
+      });
+    }
+    __name(createChannelTitleStore, "createChannelTitleStore");
+    module2.exports = { CHANNEL_TITLE_FAILURE_RETRY_MS: 3e4, createChannelTitleStore };
+  }
+});
+
 // src/i18n/labels.js
 var require_labels = __commonJS({
   "src/i18n/labels.js"(exports2, module2) {
@@ -2954,8 +3026,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a, _b, _c;
+        let { createDisplayRuntime } = require_display_runtime(), { createTranslatorStyles } = require_styles(), { createChannelTitleStore } = require_channel_title_store(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text();
         var _this;
-        let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
+        let translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11", RECEIVED_SKIP_CACHE_POLICY_VERSION = 2, translateIconGeneral = '<svg name="Translate" width="24" height="24" viewBox="0 0 24 24"><mask/><path fill="currentColor" mask="url(#translateIconMask)" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/><extra/></svg>', translateIconMask = '<mask id="translateIconMask" fill="black"><path fill="white" d="M 0 0 H 24 V 24 H 0 Z"/><path fill="black" d="M24 12 H 12 V 24 H 24 Z"/></mask>', translateIcon = translateIconGeneral.replace("<extra/>", "").replace("<mask/>", "").replace(' mask="url(#translateIconMask)"', ""), translateIconUntranslate = translateIconGeneral.replace("<extra/>", '<path fill="none" stroke="#f04747" stroke-width="2" d="m 14.702359,14.702442 8.596228,8.596148 m 0,-8.597139 -8.59722,8.596147 z"/>').replace("<mask/>", translateIconMask), TranslateButtonComponent = (_a = class extends BdApi.React.Component {
           render() {
             let enabled = _this.isTranslationEnabled(this.props.channelId);
             return BDFDB.ReactUtils.createElement(BDFDB.LibraryComponents.ChannelTextAreaButton, {
@@ -3631,7 +3704,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             primaryLabelEn: "Open Baidu Translate Open Platform"
           }
         };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, translationCache = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationCacheSaveTimer = null, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, lastAutoTranslationUserScrollTime = 0, autoTranslationUserScrollChannelId = null, autoTranslationUserScrollIntentSequence = 0, lastProgrammaticScrollWriteTime = 0, receivedDisplayFlushTimer = null, receivedDisplayFlushQueues = /* @__PURE__ */ new Map(), autoTranslationBackoffUntil = 0, autoTranslationBackoffStep = 0, autoTranslationScrollWatcherAttached = !1, autoTranslationScrollWatcherElement = null, autoTranslationScrollActivityHandler = null, autoTranslationScrollIntentHandler = null, autoTranslationScrollIntentEndHandler = null, autoTranslationScrollEndHandler = null, autoTranslationScrollIntentPending = !1, autoTranslationScrollIntentTimer = null, autoTranslationScrollIdleTimer = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map(), translatedChannelTitles = {}, pendingChannelTitleTranslations = {}, failedChannelTitleTranslations = {}, channelTitleTranslationSequence = 0, pluginRuntimeActive = !0, lastAutoTranslationInputActivityTime = 0, autoTranslationInputActivityHandler = null, loadedAutoTranslationSeenMessages = {}, loadedAutoTranslationStatus = { active: !1, collecting: !1, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" }, loadedAutoTranslationStatusHideTimer = null, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {}, manualTranslationScrollAnchor = null, manualTranslationScrollLockTimer = null;
+        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, translationCache = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationCacheSaveTimer = null, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, lastAutoTranslationUserScrollTime = 0, autoTranslationUserScrollChannelId = null, autoTranslationUserScrollIntentSequence = 0, lastProgrammaticScrollWriteTime = 0, receivedDisplayFlushTimer = null, receivedDisplayFlushQueues = /* @__PURE__ */ new Map(), autoTranslationBackoffUntil = 0, autoTranslationBackoffStep = 0, autoTranslationScrollWatcherAttached = !1, autoTranslationScrollWatcherElement = null, autoTranslationScrollActivityHandler = null, autoTranslationScrollIntentHandler = null, autoTranslationScrollIntentEndHandler = null, autoTranslationScrollEndHandler = null, autoTranslationScrollIntentPending = !1, autoTranslationScrollIntentTimer = null, autoTranslationScrollIdleTimer = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map();
+        let channelTitleStore = createChannelTitleStore();
+        var pluginRuntimeActive = !0, lastAutoTranslationInputActivityTime = 0, autoTranslationInputActivityHandler = null, loadedAutoTranslationSeenMessages = {}, loadedAutoTranslationStatus = { active: !1, collecting: !1, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" }, loadedAutoTranslationStatusHideTimer = null, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {}, manualTranslationScrollAnchor = null, manualTranslationScrollLockTimer = null;
         let MAX_TRANSLATION_CACHE_ENTRIES = 500, AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, LIVE_AI_BATCH_ITEM_LIMIT = 10, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900, AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300, AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE = 150, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD = 80, MANUAL_TRANSLATION_SCROLL_LOCK_MS = 4500, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
@@ -3969,7 +4044,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             let maskedString = newString.join(place == messageTypes.RECEIVED ? "" : " "), hasTranslatableContent = maskedString.replace(/(?:⟦\s*(?:DTA\s*)?\d+\s*⟧|【\s*\d+\s*】|\[\s*\d+\s*\]|<<<\s*\d+\s*>>>|\{\{\d+\}\})/g, "").trim().length > 0;
             return [maskedString, protectedSegments, hasTranslatableContent];
           }
-        }, { createDisplayRuntime } = require_display_runtime(), { createTranslatorStyles } = require_styles(), { getLabelsForUiLanguage } = require_labels(), { getCustomTextValue } = require_text(), receivedTranslationRuntime = {
+        }, receivedTranslationRuntime = {
           resetLoadedMessageTracking(channelId = null) {
             if (!channelId) {
               loadedAutoTranslationSeenMessages = {};
@@ -5170,7 +5245,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "after") }), this.forceUpdateAll();
           }
           onStop() {
-            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleTranslationSequence++, this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), manualTranslationScrollLockTimer && clearTimeout(manualTranslationScrollLockTimer), manualTranslationScrollLockTimer = null, manualTranslationScrollAnchor = null, deferredSettingsRerenderTimer = null, this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
+            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), manualTranslationScrollLockTimer && clearTimeout(manualTranslationScrollLockTimer), manualTranslationScrollLockTimer = null, manualTranslationScrollAnchor = null, deferredSettingsRerenderTimer = null, this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
             let settingsPanel;
@@ -6654,7 +6729,7 @@ __________________ __________________ __________________
             let sourceData = originalContentData || this.extractOriginalContentData(message), signature = this.createReceivedTranslationSignature(message, channelId, sourceData);
             if (!this.matchesCachedTranslationSignature(translationCache[message.id], signature)) return null;
             let skipped = translationCache[message.id].skipped;
-            return !skipped || !skipped.reason ? null : skipped.policyVersion !== 2 ? (delete translationCache[message.id], this.scheduleTranslationCacheSave(), null) : Object.assign({ signature, channelId }, skipped);
+            return !skipped || !skipped.reason ? null : skipped.policyVersion !== RECEIVED_SKIP_CACHE_POLICY_VERSION ? (delete translationCache[message.id], this.scheduleTranslationCacheSave(), null) : Object.assign({ signature, channelId }, skipped);
           }
           scheduleTranslationCacheSave() {
             translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationCacheSaveTimer = setTimeout((_2) => {
@@ -6714,7 +6789,7 @@ __________________ __________________ __________________
               signature: this.hashReceivedTranslationSignature(signature),
               cachedAt: Date.now(),
               skipped: {
-                policyVersion: 2,
+                policyVersion: RECEIVED_SKIP_CACHE_POLICY_VERSION,
                 reason,
                 preview: this.getLoadedAutoTranslationPreviewText(preview)
               }
@@ -8500,35 +8575,32 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
             }));
           }
           getActiveChannelTitleTranslation(channel) {
-            if (!this.isTranslatableChannelTitle(channel) || !this.isTranslationEnabled(channel.id)) return null;
-            let entry = translatedChannelTitles[channel.id], signature = this.getChannelTitleTranslationSignature(channel);
-            return !entry || entry.signature != signature ? (entry && delete translatedChannelTitles[channel.id], null) : entry.text;
+            return !this.isTranslatableChannelTitle(channel) || !this.isTranslationEnabled(channel.id) ? null : channelTitleStore.getTranslatedTitle(channel.id, this.getChannelTitleTranslationSignature(channel));
           }
           cancelPendingChannelTitleTranslation(channelId = null) {
-            if (!channelId) {
-              pendingChannelTitleTranslations = {}, failedChannelTitleTranslations = {};
-              return;
-            }
-            delete pendingChannelTitleTranslations[channelId], delete failedChannelTitleTranslations[channelId];
+            channelTitleStore.cancelPending(channelId);
           }
           clearChannelTitleTranslations(channelId = null) {
-            let hadTranslatedTitle = channelId ? !!translatedChannelTitles[channelId] : !!Object.keys(translatedChannelTitles).length;
-            this.cancelPendingChannelTitleTranslation(channelId), channelId ? delete translatedChannelTitles[channelId] : translatedChannelTitles = {}, hadTranslatedTitle && this.forceUpdateChannelTitleComponents();
+            channelTitleStore.clear(channelId) && this.forceUpdateChannelTitleComponents();
           }
           queueChannelTitleTranslation(channel) {
             if (!pluginRuntimeActive || !this.isTranslatableChannelTitle(channel) || !this.isTranslationEnabled(channel.id)) return !1;
             let channelId = channel.id, signature = this.getChannelTitleTranslationSignature(channel);
-            if (!signature || translatedChannelTitles[channelId] && translatedChannelTitles[channelId].signature == signature || pendingChannelTitleTranslations[channelId] && pendingChannelTitleTranslations[channelId].signature == signature || failedChannelTitleTranslations[channelId] && failedChannelTitleTranslations[channelId].signature == signature && failedChannelTitleTranslations[channelId].retryAfter > Date.now()) return !1;
-            let request = { id: ++channelTitleTranslationSequence, channelId, signature };
-            return pendingChannelTitleTranslations[channelId] = request, this.translateText(channel.name, messageTypes.RECEIVED, (translation, _input, _output, meta = {}) => {
-              if (pendingChannelTitleTranslations[channelId] === request && (delete pendingChannelTitleTranslations[channelId], !(!pluginRuntimeActive || !this.isTranslationEnabled(channelId) || this.getChannelTitleTranslationSignature(channel) != signature))) {
-                if (!translation && !(meta && meta.skipped)) {
-                  failedChannelTitleTranslations[channelId] = { signature, retryAfter: Date.now() + 3e4 };
+            if (!signature) return !1;
+            let request = channelTitleStore.beginRequest(channelId, signature);
+            return request ? (this.translateText(channel.name, messageTypes.RECEIVED, (translation, _input, _output, meta = {}) => {
+              if (channelTitleStore.isRequestCurrent(request)) {
+                if (!pluginRuntimeActive || !this.isTranslationEnabled(channelId) || this.getChannelTitleTranslationSignature(channel) != signature) {
+                  channelTitleStore.abandonRequest(request);
                   return;
                 }
-                translatedChannelTitles[channelId] = { signature, text: translation || channel.name }, delete failedChannelTitleTranslations[channelId], this.forceUpdateChannelTitleComponents();
+                if (!translation && !(meta && meta.skipped)) {
+                  channelTitleStore.failRequest(request);
+                  return;
+                }
+                channelTitleStore.completeRequest(request, translation || channel.name) && this.forceUpdateChannelTitleComponents();
               }
-            }, null, { auto: !0, showToast: !1, showFailureToast: !1, trackBusy: !1, channelId }), !0;
+            }, null, { auto: !0, showToast: !1, showFailureToast: !1, trackBusy: !1, channelId }), !0) : !1;
           }
           replaceChannelTitleInRenderTree(node, originalTitle, translatedTitle) {
             if (typeof node == "string") return node == originalTitle ? translatedTitle : node;
