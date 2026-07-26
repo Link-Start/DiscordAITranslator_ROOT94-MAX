@@ -1816,7 +1816,7 @@ git commit -m "fix: address display milestone review"
 
 **Verification evidence (2026-07-26):** `5a1fe17`; Standards and Spec reviews ran against `92406ca..HEAD`. One P1 and two P2 findings were each resolved with an observed failing test first: (P1) a disabled channel's repaint recaptured cancelled records with the bumped generation, replacing them mid-transaction so the restore could never confirm and always fell back to the full-list rerender — capture now skips disabled channels; (P2) store-owned translations froze the Display composition (inline original and related settings) at commit time — the compatibility appliers now compose the painted content at render time from the stored translation facts; (P2) a result for a never-captured message (for example queued from a pins or search surface) poisoned the whole historical batch through the all-or-nothing commit — `commitBatch` now rejects unrecorded results individually while keeping atomicity over recorded ones, and the controller surfaces partial `rejectedIds`. Accepted P3 remainders: the live queue's rAF pause while the window is hidden (documented in Task 7 evidence), and the pre-existing dead duplicate `icon` key was removed, making the deterministic build warning-free. Final gate after fixes: `npm run verify` `292/292`; `git diff --check` clean.
 
-- [ ] **Step 4: Back up and deploy the generated plugin**
+- [x] **Step 4: Back up and deploy the generated plugin** — deployed 2026-07-26 17:56 with DiscordPTB running (hot reload triggered); installed SHA-256 `4D0D1C0F0E3938865C5179B9FE878820AFFE1D1EFBFA5EBE2A1CAF997D280821` matches the repository artifact; previous version backed up to `plugin-backups\DiscordAITranslator\DiscordAITranslator-20260726-175610.plugin.js` (SHA-256 `E3A5C624F6118442E14C42A98F4FC0C0DE7886717238C1206F38B839956BE246`).
 
 Run from the repository root:
 
@@ -1839,7 +1839,7 @@ if ($installedBeforeHash -ne $backupHash) { throw "Backup hash does not match th
 [pscustomobject]@{Repository=$repositoryHash; Installed=$installedHash; Backup=$backupHash; BackupPath=$backupPlugin}
 ```
 
-- [ ] **Step 5: Inspect the renderer log after hot reload**
+- [ ] **Step 5: Inspect the renderer log after hot reload** — this BetterDiscord install writes no renderer log file to disk; inspect the DevTools console (Ctrl+Shift+I) in the running client as part of the manual pass.
 
 Confirm the plugin stop event is followed by its start event after the file copy. No new `SyntaxError`, `TypeError`, `ReferenceError`, unhandled rejection, or `DiscordAITranslator` error may appear.
 
@@ -1874,8 +1874,8 @@ git commit -m "docs: record display milestone verification"
 - Automated verification: `npm run verify` `292/292` at `5a1fe17`; `git diff --check` clean; deterministic build warning-free
 - Generated artifact bytes: `711035` (700 KB guard enforced by `tests/build-contract.test.js`)
 - Repository artifact SHA-256: `4d0d1c0f0e3938865c5179b9fe878820affe1d1efbfa5ebe2a1caf997d280821`
-- Deployed SHA-256: not deployed — Step 4 deployment and the Steps 5-8 renderer-log and DiscordPTB smoke checks require the operator at the machine and remain open
-- DiscordPTB smoke gate: not run for this milestone
+- Deployed SHA-256: `4D0D1C0F0E3938865C5179B9FE878820AFFE1D1EFBFA5EBE2A1CAF997D280821` (2026-07-26, backup `DiscordAITranslator-20260726-175610.plugin.js` retained)
+- DiscordPTB smoke gate: not run — Steps 5-8 (DevTools console inspection plus the eight observation checks) require the operator in the client and remain open
 
 ## Later Milestones
 
