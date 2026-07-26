@@ -58,6 +58,14 @@ module.exports = (_ => {
 			return template.content.firstElementChild;
 		}
 	} : (([Plugin, BDFDB]) => {
+		// Extracted modules. Declared before any state so module-backed stores can be
+		// constructed in the state block below.
+		const {createDisplayRuntime} = require("../display/display-runtime");
+		const {createTranslatorStyles} = require("../ui/styles");
+		const {createChannelTitleStore} = require("../channel-title/channel-title-store");
+		const {getLabelsForUiLanguage} = require("../i18n/labels");
+		const {getCustomTextValue} = require("../i18n/text");
+
 		var _this;
 		const translationProtectionSignatureVersion = "2026-06-16-auto-protect-v11";
 		const RECEIVED_SKIP_CACHE_POLICY_VERSION = 2;
@@ -627,10 +635,7 @@ module.exports = (_ => {
 		var historicalTranslationJobSequence = 0;
 		var historicalTranslationRuntimeGeneration = 0;
 		var failedHistoricalTranslationSnapshots = new Map();
-		var translatedChannelTitles = {};
-		var pendingChannelTitleTranslations = {};
-		var failedChannelTitleTranslations = {};
-		var channelTitleTranslationSequence = 0;
+		const channelTitleStore = createChannelTitleStore();
 		var pluginRuntimeActive = true;
 		var lastAutoTranslationInputActivityTime = 0;
 		var autoTranslationInputActivityHandler = null;
@@ -1207,11 +1212,6 @@ module.exports = (_ => {
 				return [maskedString, protectedSegments, hasTranslatableContent];
 			}
 		};
-
-		const {createDisplayRuntime} = require("../display/display-runtime");
-		const {createTranslatorStyles} = require("../ui/styles");
-		const {getLabelsForUiLanguage} = require("../i18n/labels");
-		const {getCustomTextValue} = require("../i18n/text");
 
 		const receivedTranslationRuntime = {
 			resetLoadedMessageTracking(channelId = null) {
@@ -2884,7 +2884,7 @@ module.exports = (_ => {
 				this.invalidateSentAutomaticTranslationRequests();
 				pendingSentOriginalMessages = [];
 				historicalTranslationRuntimeGeneration++;
-				channelTitleTranslationSequence++;
+				channelTitleStore.invalidateInFlight();
 				this.cancelHistoricalTranslationJobs(null, "plugin-stopped");
 				this.clearChannelTitleTranslations();
 				this.detachAutoTranslationInputActivityWatcher();
@@ -7512,54 +7512,37 @@ module.exports = (_ => {
 
 			getActiveChannelTitleTranslation (channel) {
 				if (!this.isTranslatableChannelTitle(channel) || !this.isTranslationEnabled(channel.id)) return null;
-				const entry = translatedChannelTitles[channel.id];
-				const signature = this.getChannelTitleTranslationSignature(channel);
-				if (!entry || entry.signature != signature) {
-					if (entry) delete translatedChannelTitles[channel.id];
-					return null;
-				}
-				return entry.text;
+				return channelTitleStore.getTranslatedTitle(channel.id, this.getChannelTitleTranslationSignature(channel));
 			}
 
 			cancelPendingChannelTitleTranslation (channelId = null) {
-				if (!channelId) {
-					pendingChannelTitleTranslations = {};
-					failedChannelTitleTranslations = {};
-					return;
-				}
-				delete pendingChannelTitleTranslations[channelId];
-				delete failedChannelTitleTranslations[channelId];
+				channelTitleStore.cancelPending(channelId);
 			}
 
 			clearChannelTitleTranslations (channelId = null) {
-				const hadTranslatedTitle = channelId ? !!translatedChannelTitles[channelId] : !!Object.keys(translatedChannelTitles).length;
-				this.cancelPendingChannelTitleTranslation(channelId);
-				if (!channelId) translatedChannelTitles = {};
-				else delete translatedChannelTitles[channelId];
-				if (hadTranslatedTitle) this.forceUpdateChannelTitleComponents();
+				if (channelTitleStore.clear(channelId)) this.forceUpdateChannelTitleComponents();
 			}
 
 			queueChannelTitleTranslation (channel) {
 				if (!pluginRuntimeActive || !this.isTranslatableChannelTitle(channel) || !this.isTranslationEnabled(channel.id)) return false;
 				const channelId = channel.id;
 				const signature = this.getChannelTitleTranslationSignature(channel);
-				if (!signature || translatedChannelTitles[channelId] && translatedChannelTitles[channelId].signature == signature) return false;
-				if (pendingChannelTitleTranslations[channelId] && pendingChannelTitleTranslations[channelId].signature == signature) return false;
-				if (failedChannelTitleTranslations[channelId] && failedChannelTitleTranslations[channelId].signature == signature && failedChannelTitleTranslations[channelId].retryAfter > Date.now()) return false;
-
-				const request = {id: ++channelTitleTranslationSequence, channelId, signature};
-				pendingChannelTitleTranslations[channelId] = request;
+				if (!signature) return false;
+				const request = channelTitleStore.beginRequest(channelId, signature);
+				if (!request) return false;
 				this.translateText(channel.name, messageTypes.RECEIVED, (translation, _input, _output, meta = {}) => {
-					if (pendingChannelTitleTranslations[channelId] !== request) return;
-					delete pendingChannelTitleTranslations[channelId];
-					if (!pluginRuntimeActive || !this.isTranslationEnabled(channelId) || this.getChannelTitleTranslationSignature(channel) != signature) return;
-					if (!translation && !(meta && meta.skipped)) {
-						failedChannelTitleTranslations[channelId] = {signature, retryAfter: Date.now() + 30000};
+					if (!channelTitleStore.isRequestCurrent(request)) return;
+					// The plugin may have stopped, the channel may have been disabled, or the title
+					// may have changed while the provider was working; none of those may commit.
+					if (!pluginRuntimeActive || !this.isTranslationEnabled(channelId) || this.getChannelTitleTranslationSignature(channel) != signature) {
+						channelTitleStore.abandonRequest(request);
 						return;
 					}
-					translatedChannelTitles[channelId] = {signature, text: translation || channel.name};
-					delete failedChannelTitleTranslations[channelId];
-					this.forceUpdateChannelTitleComponents();
+					if (!translation && !(meta && meta.skipped)) {
+						channelTitleStore.failRequest(request);
+						return;
+					}
+					if (channelTitleStore.completeRequest(request, translation || channel.name)) this.forceUpdateChannelTitleComponents();
 				}, null, {auto: true, showToast: false, showFailureToast: false, trackBusy: false, channelId});
 				return true;
 			}
