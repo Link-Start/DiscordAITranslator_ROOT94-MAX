@@ -1237,7 +1237,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             primaryLabelEn: "Open Baidu Translate Open Platform"
           }
         };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, translationCache = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationCacheSaveTimer = null, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, lastAutoTranslationUserScrollTime = 0, autoTranslationUserScrollChannelId = null, autoTranslationUserScrollIntentSequence = 0, lastProgrammaticScrollWriteTime = 0, receivedDisplayFlushTimer = null, receivedDisplayFlushQueues = /* @__PURE__ */ new Map(), autoTranslationBackoffUntil = 0, autoTranslationScrollWatcherAttached = !1, autoTranslationScrollWatcherElement = null, autoTranslationScrollActivityHandler = null, autoTranslationScrollIntentHandler = null, autoTranslationScrollIntentEndHandler = null, autoTranslationScrollEndHandler = null, autoTranslationScrollIntentPending = !1, autoTranslationScrollIntentTimer = null, autoTranslationScrollIdleTimer = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map(), translatedChannelTitles = {}, pendingChannelTitleTranslations = {}, failedChannelTitleTranslations = {}, channelTitleTranslationSequence = 0, pluginRuntimeActive = !0, lastAutoTranslationInputActivityTime = 0, autoTranslationInputActivityHandler = null, loadedAutoTranslationSeenMessages = {}, loadedAutoTranslationStatus = { active: !1, collecting: !1, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" }, loadedAutoTranslationStatusHideTimer = null, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {}, manualTranslationScrollAnchor = null, manualTranslationScrollLockTimer = null;
+        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, isTranslating, translatedMessages = {}, oldMessages = {}, translationCache = {}, autoTranslationQueue = [], queuedAutoTranslations = {}, liveTranslationRequests = {}, liveTranslationRequestSequence = 0, liveTranslationRuntimeGeneration = 0, sentAutomaticTranslationRequests = {}, sentAutomaticTranslationRequestSequence = 0, sentAutomaticTranslationRuntimeGeneration = 0, pendingSentOriginalMessages = [], sentOriginalMessages = {}, suppressedAutoTranslations = {}, isLiveAutoTranslating = !1, translationCacheSaveTimer = null, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, autoTranslationQueueRetryTimer = null, autoTranslationChannelStates = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, lastAutoTranslationChannelId = null, lastAutoTranslationUserScrollTime = 0, autoTranslationUserScrollChannelId = null, autoTranslationUserScrollIntentSequence = 0, lastProgrammaticScrollWriteTime = 0, receivedDisplayFlushTimer = null, receivedDisplayFlushQueues = /* @__PURE__ */ new Map(), autoTranslationBackoffUntil = 0, autoTranslationBackoffStep = 0, autoTranslationScrollWatcherAttached = !1, autoTranslationScrollWatcherElement = null, autoTranslationScrollActivityHandler = null, autoTranslationScrollIntentHandler = null, autoTranslationScrollIntentEndHandler = null, autoTranslationScrollEndHandler = null, autoTranslationScrollIntentPending = !1, autoTranslationScrollIntentTimer = null, autoTranslationScrollIdleTimer = null, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map(), translatedChannelTitles = {}, pendingChannelTitleTranslations = {}, failedChannelTitleTranslations = {}, channelTitleTranslationSequence = 0, pluginRuntimeActive = !0, lastAutoTranslationInputActivityTime = 0, autoTranslationInputActivityHandler = null, loadedAutoTranslationSeenMessages = {}, loadedAutoTranslationStatus = { active: !1, collecting: !1, channelId: null, total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "" }, loadedAutoTranslationStatusHideTimer = null, deferredSettingsRerenderTimer = null, manualMessageTranslationRequests = {}, manualTranslationScrollAnchor = null, manualTranslationScrollLockTimer = null;
         let MAX_TRANSLATION_CACHE_ENTRIES = 500, AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, SENT_ORIGINAL_MATCH_TTL = 120 * 1e3, MAX_SENT_ORIGINAL_ENTRIES = 200, AUTO_TRANSLATION_SCROLL_IDLE_DELAY = 900, AUTO_TRANSLATION_SCROLL_INTENT_WINDOW = 300, AUTO_TRANSLATION_PROGRAMMATIC_SCROLL_GRACE = 150, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, AUTO_TRANSLATION_BOTTOM_LOCK_THRESHOLD = 80, MANUAL_TRANSLATION_SCROLL_LOCK_MS = 4500, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
@@ -1598,7 +1598,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           prepareAutoTranslationChannelSession(plugin, channelId) {
             if (!channelId || lastAutoTranslationChannelId == channelId) return;
             let previousChannelId = lastAutoTranslationChannelId;
-            previousChannelId && plugin.clearAutoTranslationQueue(previousChannelId), lastAutoTranslationChannelId = channelId;
+            previousChannelId && (plugin.clearAutoTranslationQueue(previousChannelId), receivedTranslationRuntime.resetLoadedMessageTracking(previousChannelId)), lastAutoTranslationChannelId = channelId;
             let channelState = receivedTranslationRuntime.getAutoTranslationChannelState(plugin, channelId);
             channelState.initialized = !1, channelState.boundaryMessageId = null, receivedTranslationRuntime.resetLoadedMessageTracking(channelId), plugin.clearAutoTranslationEligibleReplyPreviewMessages(channelId), plugin.getReceivedAutoTranslateScope() == "new_only" && plugin.clearDisplayedAutoTranslations(channelId);
           },
@@ -1669,7 +1669,15 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, AUTO_TRANSLATION_QUEUE_RETRY_DELAY));
           },
           scheduleAutoTranslationBackoff(plugin, ms) {
-            ms && (autoTranslationBackoffUntil = Math.max(autoTranslationBackoffUntil || 0, Date.now() + ms), receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin));
+            if (!ms) return;
+            let now = Date.now();
+            autoTranslationBackoffUntil > now ? autoTranslationBackoffStep = Math.min(autoTranslationBackoffStep + 1, 4) : autoTranslationBackoffStep = 0;
+            let scaledMs = Math.min(ms * Math.pow(2, autoTranslationBackoffStep), 6e4);
+            autoTranslationBackoffUntil = Math.max(autoTranslationBackoffUntil || 0, now + scaledMs), receivedTranslationRuntime.scheduleAutoTranslationQueueRetry(plugin);
+          },
+          awaitProviderBackoff(_plugin) {
+            let waitMs = (autoTranslationBackoffUntil || 0) - Date.now();
+            return waitMs <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, waitMs));
           },
           createQueueItem(plugin, message, channel, originalContentData = null, queueOptions = {}) {
             let normalizedOriginalContentData = originalContentData || plugin.extractOriginalContentData(message);
@@ -1761,9 +1769,8 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           },
           shouldCollectHistoricalStreamMessage(plugin, message, context) {
             if (!message || !message.id || !context.channelId) return !1;
-            loadedAutoTranslationSeenMessages[context.channelId] || (loadedAutoTranslationSeenMessages[context.channelId] = {});
-            let seenMessages = loadedAutoTranslationSeenMessages[context.channelId], wasSeen = !!seenMessages[message.id];
-            return seenMessages[message.id] = !0, plugin.getReceivedAutoTranslateScope() != "loaded_messages" ? !1 : context.historicalLoadedPass ? !0 : !wasSeen && !plugin.isMessageIdNewer(message.id, context.autoTranslateBoundaryId);
+            let wasSeen = plugin.markLoadedAutoTranslationMessageSeen(context.channelId, message.id);
+            return plugin.getReceivedAutoTranslateScope() != "loaded_messages" ? !1 : context.historicalLoadedPass ? !0 : !wasSeen && !plugin.isMessageIdNewer(message.id, context.autoTranslateBoundaryId);
           },
           processChannelStreamEntry(plugin, entry, context) {
             let message = entry && entry.content;
@@ -5479,7 +5486,23 @@ __________________ __________________ __________________
             cacheKeys.length > MAX_TRANSLATION_CACHE_ENTRIES && cacheKeys.sort((keyA, keyB) => (translationCache[keyA].cachedAt || 0) - (translationCache[keyB].cachedAt || 0)).slice(0, cacheKeys.length - MAX_TRANSLATION_CACHE_ENTRIES).forEach((key) => delete translationCache[key]), this.scheduleTranslationCacheSave();
           }
           shouldPersistReceivedSkipDecision(reason) {
-            return ["symbol_only", "link_only", "same_language", "too_similar", "ai_skip_signal", "source_filter"].includes(reason);
+            return ["same_language", "too_similar", "ai_skip_signal", "source_filter"].includes(reason);
+          }
+          hasCachedTranslationEntry(messageId) {
+            return !!(messageId && translationCache[messageId]);
+          }
+          getLoadedAutoTranslationSeenCount(channelId) {
+            let seenMessages = channelId && loadedAutoTranslationSeenMessages[channelId];
+            return seenMessages ? Object.keys(seenMessages).length : 0;
+          }
+          markLoadedAutoTranslationMessageSeen(channelId, messageId) {
+            if (!channelId || !messageId) return !1;
+            loadedAutoTranslationSeenMessages[channelId] || (loadedAutoTranslationSeenMessages[channelId] = {});
+            let wasSeen = !!loadedAutoTranslationSeenMessages[channelId][messageId];
+            return loadedAutoTranslationSeenMessages[channelId][messageId] = !0, wasSeen;
+          }
+          hasStoredOriginalMessageClone(messageId) {
+            return !!(messageId && oldMessages[messageId]);
           }
           persistReceivedSkipDecision(messageId, signature, reason, preview = "") {
             if (!messageId || !signature || !reason || !this.shouldPersistReceivedSkipDecision(reason)) return;
@@ -6283,6 +6306,9 @@ __________________ __________________ __________________
           scheduleAutoTranslationBackoff(ms) {
             return receivedTranslationRuntime.scheduleAutoTranslationBackoff(this, ms);
           }
+          awaitProviderBackoff() {
+            return receivedTranslationRuntime.awaitProviderBackoff(this);
+          }
           requestWithTimeout(url, options, callback, timeoutMs = 3e4) {
             let done = !1, timer = null, finish = /* @__PURE__ */ __name((error, response, body) => {
               if (done) return;
@@ -6718,7 +6744,7 @@ __________________ __________________ __________________
           repairHistoricalTranslationJobBatch(preparedItems, job) {
             if (!preparedItems.length || !this.isHistoricalTranslationJobCurrent(job)) return Promise.resolve(null);
             let engineKey = this.getHistoricalAiBatchEngineKey(job.channelId);
-            return engineKey ? this.requestAiBatchTranslation(engineKey, preparedItems) : Promise.resolve(null);
+            return engineKey ? this.awaitProviderBackoff().then((_2) => this.isHistoricalTranslationJobCurrent(job) ? this.requestAiBatchTranslation(engineKey, preparedItems) : null) : Promise.resolve(null);
           }
           validateHistoricalTranslationJobResult(prepared, rawTranslation, job) {
             if (!prepared || rawTranslation == null || String(rawTranslation).trim() === "" || this.isSkipTranslationSignal(rawTranslation)) return { ok: !1 };
@@ -6733,13 +6759,16 @@ __________________ __________________ __________________
             return new Promise((resolve) => {
               if (!prepared || !prepared.message || !this.isHistoricalTranslationJobCurrent(job)) return resolve({ status: "failed", reason: "stale_job" });
               let requestText = this.buildTranslationRequestText(prepared.originalContentData);
-              this.translateText(requestText, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
+              this.awaitProviderBackoff().then((_2) => {
                 if (!this.isHistoricalTranslationJobCurrent(job)) return resolve({ status: "failed", reason: "stale_job" });
-                if (!translation) return resolve({ status: meta.skipped ? "skipped" : "failed", reason: meta.skipped ? "same_language" : "provider_failed" });
-                let storedTranslation = this.createStoredReceivedTranslationData(prepared.message, job.channelId, prepared.originalContentData, prepared.signature, translation, input, output, !0), rejectReason = storedTranslation && this.getAutoTranslatedResultRejectReason(storedTranslation, job.channelId);
-                if (!storedTranslation || rejectReason || this.isTranslationResultTooSimilar(storedTranslation)) return resolve({ status: "skipped", reason: rejectReason || "too_similar" });
-                resolve({ status: "translated", translation: storedTranslation });
-              }, null, { showToast: !1, showFailureToast: !1, trackBusy: !1, auto: !0, forcePlainTranslation: !0, channelId: job.channelId });
+                this.translateText(requestText, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
+                  if (!this.isHistoricalTranslationJobCurrent(job)) return resolve({ status: "failed", reason: "stale_job" });
+                  if (!translation) return resolve({ status: meta.skipped ? "skipped" : "failed", reason: meta.skipped ? "same_language" : "provider_failed" });
+                  let storedTranslation = this.createStoredReceivedTranslationData(prepared.message, job.channelId, prepared.originalContentData, prepared.signature, translation, input, output, !0), rejectReason = storedTranslation && this.getAutoTranslatedResultRejectReason(storedTranslation, job.channelId);
+                  if (!storedTranslation || rejectReason || this.isTranslationResultTooSimilar(storedTranslation)) return resolve({ status: "skipped", reason: rejectReason || "too_similar" });
+                  resolve({ status: "translated", translation: storedTranslation });
+                }, null, { showToast: !1, showFailureToast: !1, trackBusy: !1, auto: !0, forcePlainTranslation: !0, channelId: job.channelId });
+              });
             });
           }
           waitForHistoricalTranslationCommit(job) {
@@ -7915,7 +7944,7 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
                     position: "center",
                     onClose: /* @__PURE__ */ __name((_2) => BDFDB.TimeUtils.clear(toastInterval), "onClose")
                   }));
-                  let timeoutTicks = Math.max(40, Math.min(120, Math.ceil((newText || "").length / 25)));
+                  let timeoutTicks = Math.max(64, Math.min(120, Math.ceil((newText || "").length / 25)));
                   toastInterval = BDFDB.TimeUtils.interval((_2, count) => {
                     count < timeoutTicks || (finishTranslation(""), showFailureToast && BDFDB.NotificationUtils.toast(`${this.labels.toast_translating_failed} (${translationEngines[engine].name}) - ${this.labels.toast_translating_tryanother}`, {
                       type: "danger",
