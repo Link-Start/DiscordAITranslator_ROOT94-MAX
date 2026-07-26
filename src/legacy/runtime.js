@@ -2460,7 +2460,7 @@ module.exports = (_ => {
 				if (!channel || !channel.id || !message || !message.id) return false;
 				if (!plugin.isTranslationEnabled(channel.id) || plugin.isOwnMessage(message)) return false;
 				if (suppressedAutoTranslations[message.id]) return false;
-				if (translatedMessages[message.id] || !ignoreQueued && queuedAutoTranslations[message.id]) return false;
+				if (plugin.isMessageDisplayTranslated(message, channel.id) || !ignoreQueued && queuedAutoTranslations[message.id]) return false;
 				const sourceData = originalContentData || plugin.extractOriginalContentData(message);
 				if (plugin.getCachedReceivedSkipDecision(message, channel.id, sourceData)) return false;
 				if (receivedMessageFilterRuntime.isLinkOnlyReceivedContent(plugin, sourceData)) return false;
