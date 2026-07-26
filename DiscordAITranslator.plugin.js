@@ -66,8 +66,18 @@ var require_message_state_store = __commonJS({
       return value != null && !(typeof value == "number" && Number.isNaN(value));
     }
     __name(hasGeneration, "hasGeneration");
-    function createMessageStateStore() {
+    var TRANSITIONS_BY_STATUS = Object.freeze({
+      [MESSAGE_STATUSES.TRANSLATED]: "state-committed",
+      [MESSAGE_STATUSES.SKIPPED]: "skipped",
+      [MESSAGE_STATUSES.FAILED]: "failed",
+      [MESSAGE_STATUSES.CANCELLED]: "cancelled"
+    });
+    function createMessageStateStore({ journal = null } = {}) {
       let records = /* @__PURE__ */ new Map(), channelMessageIds = /* @__PURE__ */ new Map(), channelGenerations = /* @__PURE__ */ new Map(), revision = 0;
+      function recordTransition(record, transition) {
+        return !journal || !record || journal.append({ channelId: record.channelId, messageId: record.messageId, revision: record.revision, transition }), record;
+      }
+      __name(recordTransition, "recordTransition");
       function indexRecord(record) {
         channelMessageIds.has(record.channelId) || channelMessageIds.set(record.channelId, /* @__PURE__ */ new Set()), channelMessageIds.get(record.channelId).add(record.messageId);
       }
@@ -100,7 +110,7 @@ var require_message_state_store = __commonJS({
       __name(validatesTerminalResult, "validatesTerminalResult");
       function applyResult(result) {
         let status = getTerminalStatus(result), translated = status === MESSAGE_STATUSES.TRANSLATED;
-        return update(result.messageId, {
+        return recordTransition(update(result.messageId, {
           status,
           translation: translated ? freezeValue(result.translation) : null,
           reason: translated ? null : String(result.reason || status),
@@ -108,18 +118,18 @@ var require_message_state_store = __commonJS({
           requestIdentity: null,
           renderStatus: RENDER_STATUSES.PENDING,
           renderReason: null
-        });
+        }), TRANSITIONS_BY_STATUS[status]);
       }
       __name(applyResult, "applyResult");
       function restoreRecords(recordsToRestore, reason) {
-        return recordsToRestore.filter((record) => record && record.origin === "automatic" && record.status !== MESSAGE_STATUSES.CANCELLED).map((record) => update(record.messageId, {
+        return recordsToRestore.filter((record) => record && record.origin === "automatic" && record.status !== MESSAGE_STATUSES.CANCELLED).map((record) => recordTransition(update(record.messageId, {
           status: MESSAGE_STATUSES.CANCELLED,
           translation: null,
           reason,
           requestIdentity: null,
           renderStatus: RENDER_STATUSES.PENDING,
           renderReason: null
-        }));
+        }), "restored"));
       }
       __name(restoreRecords, "restoreRecords");
       function listChannel(channelId) {
@@ -149,7 +159,7 @@ var require_message_state_store = __commonJS({
             renderReason: null,
             revision: ++revision
           });
-          return records.set(messageId, record), indexRecord(record), channelGenerations.has(channelId) || channelGenerations.set(channelId, snapshot.generation), record;
+          return records.set(messageId, record), indexRecord(record), channelGenerations.has(channelId) || channelGenerations.set(channelId, snapshot.generation), recordTransition(record, "captured");
         },
         setChannelGeneration(channelId, generation) {
           let normalizedChannelId = normalizeIdentity(channelId);
@@ -165,7 +175,7 @@ var require_message_state_store = __commonJS({
         markPending(request) {
           if (!getCurrentRecord(request) || request.status && request.status !== MESSAGE_STATUSES.PENDING) return null;
           let requestIdentity = normalizeRequestIdentity(request.requestIdentity);
-          return requestIdentity === INVALID_REQUEST_IDENTITY ? null : update(request.messageId, {
+          return requestIdentity === INVALID_REQUEST_IDENTITY ? null : recordTransition(update(request.messageId, {
             status: MESSAGE_STATUSES.PENDING,
             translation: null,
             reason: null,
@@ -173,7 +183,7 @@ var require_message_state_store = __commonJS({
             requestIdentity,
             renderStatus: RENDER_STATUSES.PENDING,
             renderReason: null
-          });
+          }), "pending");
         },
         markTranslating(request) {
           let current = getCurrentRecord(request);
@@ -181,14 +191,14 @@ var require_message_state_store = __commonJS({
           let nextRequestIdentity = Object.prototype.hasOwnProperty.call(request, "requestIdentity") ? normalizeRequestIdentity(request.requestIdentity) : null;
           if (nextRequestIdentity === INVALID_REQUEST_IDENTITY) return null;
           let requestIdentity = nextRequestIdentity === null ? current.requestIdentity : nextRequestIdentity;
-          return update(request.messageId, {
+          return recordTransition(update(request.messageId, {
             status: MESSAGE_STATUSES.TRANSLATING,
             reason: null,
             origin: request.origin || current.origin || "automatic",
             requestIdentity,
             renderStatus: RENDER_STATUSES.PENDING,
             renderReason: null
-          });
+          }), "translating");
         },
         commitResult(result) {
           return validatesTerminalResult(result) ? applyResult(result) : null;
@@ -202,12 +212,12 @@ var require_message_state_store = __commonJS({
           let record = records.get(normalizeIdentity(request.messageId));
           if (!record || request.channelId !== void 0 && normalizeIdentity(request.channelId) !== record.channelId || record.status !== MESSAGE_STATUSES.PENDING && record.status !== MESSAGE_STATUSES.TRANSLATING) return null;
           let requestIdentity = normalizeRequestIdentity(request.requestIdentity);
-          return requestIdentity === INVALID_REQUEST_IDENTITY || requestIdentity === null || record.requestIdentity !== requestIdentity ? null : update(record.messageId, {
+          return requestIdentity === INVALID_REQUEST_IDENTITY || requestIdentity === null || record.requestIdentity !== requestIdentity ? null : recordTransition(update(record.messageId, {
             status: MESSAGE_STATUSES.IDLE,
             translation: null,
             reason: null,
             requestIdentity: null
-          });
+          }), "released");
         },
         restoreMessage(messageId, reason = "manual-untranslate") {
           let record = records.get(normalizeIdentity(messageId));
@@ -268,14 +278,20 @@ var require_translation_display_controller = __commonJS({
       };
     }
     __name(createEmptyOutcome, "createEmptyOutcome");
-    function createTranslationDisplayController({ store, renderAdapter }) {
+    function createTranslationDisplayController({ store, renderAdapter, journal = null }) {
       let transactionSequence = 0;
+      function recordRenderTransition(view, transition) {
+        !journal || !view || journal.append({ channelId: view.channelId, messageId: view.messageId, revision: view.revision, transition });
+      }
+      __name(recordRenderTransition, "recordRenderTransition");
       async function refreshRecords(records) {
         if (!records.length) return createEmptyOutcome();
         let views = records.map((record) => createDisplayView(store.getDisplayState(record.messageId)));
         if (views.some((view) => !view)) throw new Error("A display transaction requires one view per record");
         if (new Set(views.map((view) => view.channelId)).size !== 1) throw new Error("A display transaction cannot span channels");
-        let requestedViews = new Map(views.map((view) => [String(view.messageId), view])), rawOutcome = await renderAdapter.refreshMessages({
+        let requestedViews = new Map(views.map((view) => [String(view.messageId), view]));
+        for (let view of views) recordRenderTransition(view, "render-requested");
+        let rawOutcome = await renderAdapter.refreshMessages({
           transactionId: ++transactionSequence,
           channelId: views[0].channelId,
           messageIds: views.map((view) => view.messageId),
@@ -291,6 +307,8 @@ var require_translation_display_controller = __commonJS({
         }
         __name(filterCurrentIds, "filterCurrentIds");
         let confirmedIds = filterCurrentIds(rawOutcome.confirmedIds), missingIds = filterCurrentIds(rawOutcome.missingIds);
+        for (let messageId of confirmedIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-confirmed");
+        for (let messageId of missingIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-unconfirmed");
         store.markRenderOutcome({ confirmedIds, missingIds });
         let filteredOutcome = {
           ...rawOutcome,
@@ -451,8 +469,9 @@ var require_display_runtime = __commonJS({
   "src/display/display-runtime.js"(exports2, module2) {
     var { createMessageStateStore } = require_message_state_store(), { createTranslationDisplayController } = require_translation_display_controller(), { createDiscordRenderAdapter } = require_discord_render_adapter();
     function createDisplayRuntime(dependencies) {
-      let store = createMessageStateStore(), renderAdapter = createDiscordRenderAdapter(dependencies), controller = createTranslationDisplayController({ store, renderAdapter });
+      let store = createMessageStateStore({ journal: null }), renderAdapter = createDiscordRenderAdapter(dependencies), controller = createTranslationDisplayController({ store, renderAdapter, journal: null });
       return Object.freeze({
+        getTransitionJournal: /* @__PURE__ */ __name(() => null, "getTransitionJournal"),
         captureSource: /* @__PURE__ */ __name((snapshot) => store.captureSource(snapshot), "captureSource"),
         setChannelGeneration: /* @__PURE__ */ __name((channelId, generation) => store.setChannelGeneration(channelId, generation), "setChannelGeneration"),
         getChannelGeneration: /* @__PURE__ */ __name((channelId) => store.getChannelGeneration(channelId), "getChannelGeneration"),

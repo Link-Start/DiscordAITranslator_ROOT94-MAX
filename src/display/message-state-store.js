@@ -48,11 +48,24 @@ function hasGeneration(value) {
 	return value !== undefined && value !== null && !(typeof value === "number" && Number.isNaN(value));
 }
 
-function createMessageStateStore() {
+const TRANSITIONS_BY_STATUS = Object.freeze({
+	[MESSAGE_STATUSES.TRANSLATED]: "state-committed",
+	[MESSAGE_STATUSES.SKIPPED]: "skipped",
+	[MESSAGE_STATUSES.FAILED]: "failed",
+	[MESSAGE_STATUSES.CANCELLED]: "cancelled"
+});
+
+function createMessageStateStore({journal = null} = {}) {
 	const records = new Map();
 	const channelMessageIds = new Map();
 	const channelGenerations = new Map();
 	let revision = 0;
+
+	function recordTransition(record, transition) {
+		if (!journal || !record) return record;
+		journal.append({channelId: record.channelId, messageId: record.messageId, revision: record.revision, transition});
+		return record;
+	}
 
 	function indexRecord(record) {
 		if (!channelMessageIds.has(record.channelId)) channelMessageIds.set(record.channelId, new Set());
@@ -96,7 +109,7 @@ function createMessageStateStore() {
 	function applyResult(result) {
 		const status = getTerminalStatus(result);
 		const translated = status === MESSAGE_STATUSES.TRANSLATED;
-		return update(result.messageId, {
+		return recordTransition(update(result.messageId, {
 			status,
 			translation: translated ? freezeValue(result.translation) : null,
 			reason: translated ? null : String(result.reason || status),
@@ -104,20 +117,20 @@ function createMessageStateStore() {
 			requestIdentity: null,
 			renderStatus: RENDER_STATUSES.PENDING,
 			renderReason: null
-		});
+		}), TRANSITIONS_BY_STATUS[status]);
 	}
 
 	function restoreRecords(recordsToRestore, reason) {
 		return recordsToRestore
 			.filter(record => record && record.origin === "automatic" && record.status !== MESSAGE_STATUSES.CANCELLED)
-			.map(record => update(record.messageId, {
+			.map(record => recordTransition(update(record.messageId, {
 				status: MESSAGE_STATUSES.CANCELLED,
 				translation: null,
 				reason,
 				requestIdentity: null,
 				renderStatus: RENDER_STATUSES.PENDING,
 				renderReason: null
-			}));
+			}), "restored"));
 	}
 
 	function listChannel(channelId) {
@@ -155,7 +168,7 @@ function createMessageStateStore() {
 			records.set(messageId, record);
 			indexRecord(record);
 			if (!channelGenerations.has(channelId)) channelGenerations.set(channelId, snapshot.generation);
-			return record;
+			return recordTransition(record, "captured");
 		},
 		setChannelGeneration(channelId, generation) {
 			const normalizedChannelId = normalizeIdentity(channelId);
@@ -174,7 +187,7 @@ function createMessageStateStore() {
 			if (!getCurrentRecord(request) || request.status && request.status !== MESSAGE_STATUSES.PENDING) return null;
 			const requestIdentity = normalizeRequestIdentity(request.requestIdentity);
 			if (requestIdentity === INVALID_REQUEST_IDENTITY) return null;
-			return update(request.messageId, {
+			return recordTransition(update(request.messageId, {
 				status: MESSAGE_STATUSES.PENDING,
 				translation: null,
 				reason: null,
@@ -182,7 +195,7 @@ function createMessageStateStore() {
 				requestIdentity,
 				renderStatus: RENDER_STATUSES.PENDING,
 				renderReason: null
-			});
+			}), "pending");
 		},
 		markTranslating(request) {
 			const current = getCurrentRecord(request);
@@ -190,14 +203,14 @@ function createMessageStateStore() {
 			const nextRequestIdentity = Object.prototype.hasOwnProperty.call(request, "requestIdentity") ? normalizeRequestIdentity(request.requestIdentity) : null;
 			if (nextRequestIdentity === INVALID_REQUEST_IDENTITY) return null;
 			const requestIdentity = nextRequestIdentity === null ? current.requestIdentity : nextRequestIdentity;
-			return update(request.messageId, {
+			return recordTransition(update(request.messageId, {
 				status: MESSAGE_STATUSES.TRANSLATING,
 				reason: null,
 				origin: request.origin || current.origin || "automatic",
 				requestIdentity,
 				renderStatus: RENDER_STATUSES.PENDING,
 				renderReason: null
-			});
+			}), "translating");
 		},
 		commitResult(result) {
 			return validatesTerminalResult(result) ? applyResult(result) : null;
@@ -217,12 +230,12 @@ function createMessageStateStore() {
 			const requestIdentity = normalizeRequestIdentity(request.requestIdentity);
 			if (requestIdentity === INVALID_REQUEST_IDENTITY || requestIdentity === null) return null;
 			if (record.requestIdentity !== requestIdentity) return null;
-			return update(record.messageId, {
+			return recordTransition(update(record.messageId, {
 				status: MESSAGE_STATUSES.IDLE,
 				translation: null,
 				reason: null,
 				requestIdentity: null
-			});
+			}), "released");
 		},
 		restoreMessage(messageId, reason = "manual-untranslate") {
 			const record = records.get(normalizeIdentity(messageId));
