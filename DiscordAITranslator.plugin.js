@@ -511,6 +511,12 @@ var require_repaint_scheduler = __commonJS({
       canRepaintNow,
       isViewingHistory,
       lastRenderUsedFallback,
+      // The full-list repaint path needs the two predicates separately, because it may
+      // be told to ignore one of them.
+      isSettingsSurfaceOpen = /* @__PURE__ */ __name(() => !1, "isSettingsSurfaceOpen"),
+      isTextAreaFocused = /* @__PURE__ */ __name(() => !1, "isTextAreaFocused"),
+      repaintAll = /* @__PURE__ */ __name(() => {
+      }, "repaintAll"),
       setTimeout: scheduleTimer = setTimeout,
       clearTimeout: cancelTimer = clearTimeout
     }) {
@@ -539,7 +545,42 @@ var require_repaint_scheduler = __commonJS({
           });
         }
       }
-      return __name(flush, "flush"), Object.freeze({
+      __name(flush, "flush");
+      let fullRepaintTimer = null, settingsRetryTimer = null, textAreaRetryTimer = null, deferredFullRepaintPending = !1;
+      function scheduleFullRepaint(options = {}) {
+        let config = typeof options == "boolean" ? { batched: options } : Object.assign({ batched: !1, allowWhileSettings: !1, allowWhileTyping: !1 }, options);
+        if (!config.allowWhileSettings && isSettingsSurfaceOpen()) {
+          deferredFullRepaintPending = !0, settingsRetryTimer || (settingsRetryTimer = scheduleTimer(() => {
+            settingsRetryTimer = null, scheduleFullRepaint({ batched: !0 });
+          }, 1e3));
+          return;
+        }
+        if (!config.allowWhileTyping && isTextAreaFocused()) {
+          textAreaRetryTimer && cancelTimer(textAreaRetryTimer), textAreaRetryTimer = scheduleTimer(() => {
+            textAreaRetryTimer = null, scheduleFullRepaint(Object.assign({}, config, { batched: !0 }));
+          }, 450);
+          return;
+        }
+        if (textAreaRetryTimer && (cancelTimer(textAreaRetryTimer), textAreaRetryTimer = null), deferredFullRepaintPending = !1, !config.batched) {
+          fullRepaintTimer && cancelTimer(fullRepaintTimer), fullRepaintTimer = null, repaintAll();
+          return;
+        }
+        if (fullRepaintTimer) return;
+        let delay = isViewingHistory() ? 1500 : 120;
+        fullRepaintTimer = scheduleTimer(() => {
+          fullRepaintTimer = null, repaintAll();
+        }, delay);
+      }
+      return __name(scheduleFullRepaint, "scheduleFullRepaint"), Object.freeze({
+        scheduleFullRepaint,
+        hasDeferredFullRepaint: /* @__PURE__ */ __name(() => deferredFullRepaintPending, "hasDeferredFullRepaint"),
+        flushDeferredFullRepaint() {
+          deferredFullRepaintPending && (deferredFullRepaintPending = !1, scheduleFullRepaint({ batched: !0 }));
+        },
+        cancelFullRepaintTimers() {
+          for (let timer2 of [fullRepaintTimer, settingsRetryTimer, textAreaRetryTimer]) timer2 && cancelTimer(timer2);
+          fullRepaintTimer = null, settingsRetryTimer = null, textAreaRetryTimer = null, deferredFullRepaintPending = !1;
+        },
         schedule(channelId, messageId, delay = null) {
           if (!channelId || messageId == null) return;
           let key = String(channelId);
@@ -554,6 +595,7 @@ var require_repaint_scheduler = __commonJS({
     }
     __name(createDisplayRepaintScheduler, "createDisplayRepaintScheduler");
     module2.exports = {
+      SETTINGS_RETRY_DELAY_MS: 1e3,
       LIVE_REPAINT_DELAY_MS: 120,
       CALM_REPAINT_DELAY_MS: 1500,
       BUSY_RETRY_DELAY_MS: 450,
@@ -5920,9 +5962,9 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           "−−−−−": "0",
           _: "··−−·−"
         };
-        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, translatedMessages = {}, oldMessages = {}, suppressedAutoTranslations = {}, translationRerenderTimer = null, deferredTextAreaRerenderTimer = null, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map();
+        var languages = {}, favorites = [], authKeys = {}, channelLanguages = {}, guildLanguages = {}, channelPrimaryEngineOverrides = {}, translationEnabledStates = { globalDefault: !1, channelOverrides: {} }, translatedMessages = {}, oldMessages = {}, suppressedAutoTranslations = {}, replyPreviewTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, historicalTranslationJobQueues = /* @__PURE__ */ new Map(), historicalTranslationJobSequence = 0, historicalTranslationRuntimeGeneration = 0, failedHistoricalTranslationSnapshots = /* @__PURE__ */ new Map();
         let channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
-        var pluginRuntimeActive = !0, deferredSettingsRerenderTimer = null;
+        var pluginRuntimeActive = !0;
         let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, LOADED_AUTO_TRANSLATE_RANGE_MODES = { COUNT: "count", TIME: "time" }, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
@@ -7106,7 +7148,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "after") }), this.forceUpdateAll();
           }
           onStop() {
-            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), this.ensureSentTranslationStore().clearPendingOriginals(), historicalTranslationRuntimeGeneration++, channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), this.ensureLiveTranslationQueue().cancelQueueRetry(), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), this.ensureMessageViewportStore().clearManualScrollLock(), deferredSettingsRerenderTimer = null, this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), this.ensureSentTranslationStore().clearManualRequests(), suppressedAutoTranslations = {}, this.ensureLiveTranslationQueue().clearAllQueuedMessages(), queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, this.ensureLiveTranslationQueue().setBusyTranslating(!1), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
+            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), this.ensureSentTranslationStore().clearPendingOriginals(), historicalTranslationRuntimeGeneration++, channelTitleStore.invalidateInFlight(), this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), this.ensureTranslationCacheStore().cancelPendingSave(), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.ensureLiveTranslationQueue().cancelQueueRetry(), this.ensureMessageViewportStore().clearManualScrollLock(), this.clearReceivedDisplayFlushQueue(), this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), this.ensureSentTranslationStore().clearManualRequests(), suppressedAutoTranslations = {}, this.ensureLiveTranslationQueue().clearAllQueuedMessages(), queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, this.ensureLiveTranslationQueue().setBusyTranslating(!1), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
             let settingsPanel;
@@ -8064,7 +8106,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             });
           }
           onSettingsClosed() {
-            deferredTranslationRerenderPending && this.flushDeferredTranslationRerender(), this.SettingsUpdated && (delete this.SettingsUpdated, this.forceUpdateAll());
+            this.ensureReceivedDisplayRepaintScheduler().hasDeferredFullRepaint() && this.flushDeferredTranslationRerender(), this.SettingsUpdated && (delete this.SettingsUpdated, this.forceUpdateAll());
           }
           getCustomText(key) {
             return getCustomTextValue(key, this.isChineseUiLanguage(), this.isRussianUiLanguage());
@@ -8746,9 +8788,6 @@ __________________ __________________ __________________
           isAutoTranslationEligibleReplyPreviewMessage(channelId, messageId) {
             return !!(channelId && messageId && autoTranslationEligibleReplyPreviewMessages[channelId] && autoTranslationEligibleReplyPreviewMessages[channelId][messageId]);
           }
-          cleanupReplyPreviewRenderMarks() {
-            replyPreviewRenderMessageIds = {};
-          }
           markReplyPreviewRenderMessage(message) {
             if (message && typeof message == "object")
               try {
@@ -9035,31 +9074,10 @@ __________________ __________________ __________________
             element && element.remove(), this.detachLoadedAutoTranslationStatusPositionWatcher(), this.updateInlineLoadedAutoTranslationStatusElements();
           }
           scheduleTranslationRerender(options = {}) {
-            let config = typeof options == "boolean" ? { batched: options } : Object.assign({ batched: !1, allowWhileSettings: !1, allowWhileTyping: !1 }, options);
-            if (!config.allowWhileSettings && this.isTranslatorSettingsSurfaceOpen()) {
-              deferredTranslationRerenderPending = !0, deferredSettingsRerenderTimer || (deferredSettingsRerenderTimer = setTimeout((_2) => {
-                deferredSettingsRerenderTimer = null, this.scheduleTranslationRerender({ batched: !0 });
-              }, 1e3));
-              return;
-            }
-            if (!config.allowWhileTyping && this.isChannelTextAreaFocused()) {
-              deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), deferredTextAreaRerenderTimer = setTimeout((_2) => {
-                deferredTextAreaRerenderTimer = null, this.scheduleTranslationRerender(Object.assign({}, config, { batched: !0 }));
-              }, 450);
-              return;
-            }
-            if (deferredTextAreaRerenderTimer && (clearTimeout(deferredTextAreaRerenderTimer), deferredTextAreaRerenderTimer = null), deferredTranslationRerenderPending = !1, !config.batched) {
-              translationRerenderTimer && clearTimeout(translationRerenderTimer), translationRerenderTimer = null, this.rerenderMessagesWithScrollPreserved();
-              return;
-            }
-            if (translationRerenderTimer) return;
-            let rerenderDelay = this.isViewingMessageHistory() ? AUTO_TRANSLATION_HISTORY_RERENDER_DELAY : AUTO_TRANSLATION_RERENDER_DELAY;
-            translationRerenderTimer = setTimeout((_2) => {
-              translationRerenderTimer = null, this.rerenderMessagesWithScrollPreserved();
-            }, rerenderDelay);
+            this.ensureReceivedDisplayRepaintScheduler().scheduleFullRepaint(options);
           }
           flushDeferredTranslationRerender() {
-            deferredTranslationRerenderPending && (deferredTranslationRerenderPending = !1, this.scheduleTranslationRerender({ batched: !0 }));
+            this.ensureReceivedDisplayRepaintScheduler().flushDeferredFullRepaint();
           }
           getDisplayedTranslationChannelId(messageId) {
             if (!messageId) return null;
@@ -9089,7 +9107,7 @@ __________________ __________________ __________________
           }
           clearAutoTranslationQueue(channelId = null) {
             if (this.cancelHistoricalTranslationJobs(channelId, channelId ? "channel-queue-cleared" : "all-queues-cleared"), this.cancelPendingChannelTitleTranslation(channelId), this.invalidateSentAutomaticTranslationRequests(channelId), this.ensureLiveTranslationQueue().clearQueue(channelId), !channelId) {
-              queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, loadedTranslationStatusStore.resetSeen(null), this.clearLoadedAutoTranslationStatus();
+              queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, loadedTranslationStatusStore.resetSeen(null), this.clearLoadedAutoTranslationStatus();
               return;
             }
             for (let messageId of Object.keys(queuedReplyPreviewTranslations)) {
@@ -9837,7 +9855,7 @@ __________________ __________________ __________________
           forceUpdateAll() {
             favorites = BDFDB.DataUtils.load(this, "favorites"), favorites = BDFDB.ArrayUtils.is(favorites) ? favorites : [], authKeys = BDFDB.DataUtils.load(this, "authKeys"), channelLanguages = BDFDB.DataUtils.load(this, "channelLanguages"), guildLanguages = BDFDB.DataUtils.load(this, "guildLanguages"), channelPrimaryEngineOverrides = this.normalizeStoredChannelPrimaryEngineOverrides(BDFDB.DataUtils.load(this, "channelPrimaryEngineOverrides")), this.ensureTranslationCacheStore().loadPersisted();
             let storedTranslationEnabledStates = BDFDB.DataUtils.load(this, "translationEnabledStates"), storedReceivedAutoTranslationEnabledStates = BDFDB.DataUtils.load(this, "receivedAutoTranslationEnabledStates"), normalizedStoredTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedTranslationEnabledStates), normalizedStoredReceivedAutoTranslationEnabledStates = this.normalizeStoredChannelEnablementState(storedReceivedAutoTranslationEnabledStates);
-            translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates), (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) && this.saveChannelEnablementState(translationEnabledStates), suppressedAutoTranslations = {}, this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), replyPreviewTranslations = {}, translationRerenderTimer && clearTimeout(translationRerenderTimer), translationRerenderTimer = null, deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), deferredSettingsRerenderTimer = null, this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
+            translationEnabledStates = this.loadChannelEnablementState(storedTranslationEnabledStates, storedReceivedAutoTranslationEnabledStates), (!normalizedStoredTranslationEnabledStates || !normalizedStoredReceivedAutoTranslationEnabledStates || !this.channelEnablementStatesEqual(normalizedStoredTranslationEnabledStates, translationEnabledStates) || !this.channelEnablementStatesEqual(normalizedStoredReceivedAutoTranslationEnabledStates, translationEnabledStates)) && this.saveChannelEnablementState(translationEnabledStates), suppressedAutoTranslations = {}, this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), replyPreviewTranslations = {}, this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
           }
           onMessageContextMenu(e) {
             if (e.instance.props.message && e.instance.props.channel) {
@@ -10195,7 +10213,10 @@ __________________ __________________ __________________
               renderMessages: /* @__PURE__ */ __name((messageIds) => this.ensureReceivedDisplayRuntime().renderMessages(messageIds), "renderMessages"),
               canRepaintNow: /* @__PURE__ */ __name(() => this.canRepaintReceivedDisplayNow(), "canRepaintNow"),
               isViewingHistory: /* @__PURE__ */ __name(() => this.isViewingMessageHistory(), "isViewingHistory"),
-              lastRenderUsedFallback: /* @__PURE__ */ __name(() => this.ensureReceivedDisplayRuntime().lastRenderUsedFallback(), "lastRenderUsedFallback")
+              lastRenderUsedFallback: /* @__PURE__ */ __name(() => this.ensureReceivedDisplayRuntime().lastRenderUsedFallback(), "lastRenderUsedFallback"),
+              isSettingsSurfaceOpen: /* @__PURE__ */ __name(() => this.isTranslatorSettingsSurfaceOpen(), "isSettingsSurfaceOpen"),
+              isTextAreaFocused: /* @__PURE__ */ __name(() => this.isChannelTextAreaFocused(), "isTextAreaFocused"),
+              repaintAll: /* @__PURE__ */ __name(() => this.rerenderMessagesWithScrollPreserved(), "repaintAll")
             })), this.receivedDisplayRepaintSchedulerInstance;
           }
           getReceivedDisplayFlushDelay() {
