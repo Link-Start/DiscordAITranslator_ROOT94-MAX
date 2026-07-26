@@ -3423,7 +3423,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             });
           }
           onStart() {
-            pluginRuntimeActive = !0, liveTranslationRuntimeGeneration++, liveTranslationRequests = {}, sentAutomaticTranslationRuntimeGeneration++, sentAutomaticTranslationRequests = {}, pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
+            pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), liveTranslationRuntimeGeneration++, liveTranslationRequests = {}, sentAutomaticTranslationRuntimeGeneration++, sentAutomaticTranslationRequests = {}, pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
               e.methodArguments[1] && oldMessages[e.methodArguments[1]] && oldMessages[e.methodArguments[1]].content ? e.methodArguments[2] = oldMessages[e.methodArguments[1]].content : e.methodArguments[1] && (e.methodArguments[2] = this.getEditableSentMessageText(e.methodArguments[1], e.methodArguments[2]));
             }, "before") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "editMessage", { instead: /* @__PURE__ */ __name((e) => this.handleEditedMessageSubmit(e.methodArguments, (...args) => e.originalMethod(...args)), "instead") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageToolbarUtils, "useMessageMenu", { after: /* @__PURE__ */ __name((e) => {
               if (e.instance.props.message && e.instance.props.channel) {
@@ -3440,7 +3440,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             }, "after") }), this.forceUpdateAll();
           }
           onStop() {
-            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleTranslationSequence++, this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), manualTranslationScrollLockTimer && clearTimeout(manualTranslationScrollLockTimer), manualTranslationScrollLockTimer = null, manualTranslationScrollAnchor = null, deferredSettingsRerenderTimer = null, this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), this.forceUpdateAll();
+            pluginRuntimeActive = !1, this.invalidateLiveTranslationRequests(), this.invalidateSentAutomaticTranslationRequests(), pendingSentOriginalMessages = [], historicalTranslationRuntimeGeneration++, channelTitleTranslationSequence++, this.cancelHistoricalTranslationJobs(null, "plugin-stopped"), this.clearChannelTitleTranslations(), this.detachAutoTranslationInputActivityWatcher(), this.detachAutoTranslationScrollWatcher(), translationCacheSaveTimer && clearTimeout(translationCacheSaveTimer), translationRerenderTimer && clearTimeout(translationRerenderTimer), deferredTextAreaRerenderTimer && clearTimeout(deferredTextAreaRerenderTimer), autoTranslationQueueRetryTimer && clearTimeout(autoTranslationQueueRetryTimer), deferredSettingsRerenderTimer && clearTimeout(deferredSettingsRerenderTimer), manualTranslationScrollLockTimer && clearTimeout(manualTranslationScrollLockTimer), manualTranslationScrollLockTimer = null, manualTranslationScrollAnchor = null, deferredSettingsRerenderTimer = null, this.restoreAllReceivedDisplay({ refresh: !1 }), this.clearDisplayedTranslations(), failedHistoricalTranslationSnapshots.clear(), manualMessageTranslationRequests = {}, suppressedAutoTranslations = {}, queuedAutoTranslations = {}, queuedReplyPreviewTranslations = {}, autoTranslationEligibleReplyPreviewMessages = {}, replyPreviewRenderMessageIds = {}, deferredTranslationRerenderPending = !1, isTranslating = !1, isLiveAutoTranslating = !1, this.clearLoadedAutoTranslationStatus(), BDFDB.MessageUtils.rerenderAll(!0);
           }
           getSettingsPanel(collapseStates = {}) {
             let settingsPanel;
@@ -7294,9 +7294,14 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
             };
             return channelId ? (enabled == nextState.globalDefault ? delete nextState.channelOverrides[channelId] : nextState.channelOverrides[channelId] = !!enabled, this.saveChannelEnablementState(nextState), nextState) : currentState;
           }
-          toggleTranslation(channelId) {
+          async toggleTranslation(channelId) {
             let wasEnabled = this.isTranslationEnabled(channelId);
-            this.setChannelEnablementStateValue(channelId, !wasEnabled), wasEnabled && (this.clearDisplayedAutoTranslations(channelId), this.clearAutoTranslationQueue(channelId)), this.resetAutoTranslationTracking(channelId), this.scheduleTranslationRerender(), this.processAutoTranslationQueue();
+            if (this.setChannelEnablementStateValue(channelId, !wasEnabled), wasEnabled) {
+              let displayGeneration = this.getReceivedDisplayGeneration(channelId);
+              displayGeneration !== void 0 && this.setReceivedDisplayGeneration(channelId, displayGeneration + 1), this.clearDisplayedAutoTranslations(channelId), this.clearAutoTranslationQueue(channelId), this.resetAutoTranslationTracking(channelId), await this.restoreReceivedDisplayChannel(channelId), this.scheduleTranslationRerender(), this.processAutoTranslationQueue();
+              return;
+            }
+            this.resetAutoTranslationTracking(channelId), this.scheduleTranslationRerender(), this.processAutoTranslationQueue();
           }
           isTranslationEnabled(channelId) {
             return this.getChannelEnablementStateValue(channelId, translationEnabledStates);
