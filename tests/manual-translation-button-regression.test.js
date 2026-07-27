@@ -65,3 +65,24 @@ test("manual message translation deduplicates repeated clicks for the same messa
 	callbacks[0]("hello friend", {id: "es"}, {id: "en"}, {});
 	assert.equal(await firstTranslation, true);
 });
+
+test("manual embed translation uses the shared parser and preserves partial fields", async () => {
+	const plugin = createPluginInstance();
+	const channel = {id: "channel-embed"};
+	const message = {
+		id: "message-embed",
+		channel_id: channel.id,
+		content: "",
+		embeds: [{id: "embed-1", rawTitle: "Original title", rawDescription: "Original description", footer: {text: "Original footer"}, fields: [{rawName: "Original name", rawValue: "Original value"}]}],
+		author: {id: "other-user"}
+	};
+	plugin.translateText = (_text, _place, callback) => callback("__________________ __________________ __________________\nTranslated title", {id: "es"}, {id: "en"}, {});
+
+	assert.equal(await plugin.translateMessage(message, channel, {manual: true, independentOfTextAreaSwitch: true}), true);
+	const translation = plugin.getActiveMessageTranslation(message, channel.id);
+
+	assert.equal(translation.embeds["embed-1"].title, "Translated title");
+	assert.equal(translation.embeds["embed-1"].description, "Original description");
+	assert.equal(translation.embeds["embed-1"].footerText, "Original footer");
+	assert.deepEqual(translation.embeds["embed-1"].fields, [{name: "Original name", value: "Original value"}]);
+});

@@ -75,6 +75,7 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 
 		const confirmedIds = filterCurrentIds(rawOutcome.confirmedIds);
 		const missingIds = filterCurrentIds(rawOutcome.missingIds);
+		const deferredIds = filterCurrentIds(rawOutcome.deferredIds);
 		for (const messageId of confirmedIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-confirmed");
 		for (const messageId of missingIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-unconfirmed");
 		store.markRenderOutcome({confirmedIds, missingIds});
@@ -84,6 +85,8 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			missingIds,
 			fallbackUsed: rawOutcome.fallbackUsed === true
 		};
+		if (deferredIds.length) filteredOutcome.deferredIds = deferredIds;
+		else delete filteredOutcome.deferredIds;
 		if (staleIds.length) filteredOutcome.staleIds = staleIds;
 		return filteredOutcome;
 	}
@@ -111,6 +114,11 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			return refresh ? refreshRecords([record]) : createEmptyOutcome({deferredIds: [record.messageId]});
 		},
 		async commitHistoricalBatch(results) {
+			const channelIds = new Set(results.map(result => result && result.channelId != null ? String(result.channelId) : ""));
+			if (channelIds.size === 1) for (const result of results) {
+				const current = result && store.getDisplayState(result.messageId);
+				if (result && result.source && (!current || !current.sourceSignature)) store.captureSource({messageId: result.messageId, channelId: result.channelId, generation: result.generation, sourceSignature: result.sourceSignature, source: result.source});
+			}
 			const outcome = store.commitBatch(results);
 			if (!outcome.committed.length) {
 				if (!outcome.rejected.length) return createEmptyOutcome();

@@ -164,8 +164,8 @@ test("message lookup does not acknowledge a colliding snowflake", async () => {
 	const collidingId = `9${requestedId}`;
 	// The collider carries the WRONG revision on purpose: if the adapter matched it,
 	// the requested id would read as mounted-but-stale and the fallback would fire.
-	// Correctly refusing the collision leaves the requested id unmounted, which is a
-	// virtualised row - confirmed by the store, no fallback.
+	// Correctly refusing the collision leaves the requested id unmounted, so its
+	// acknowledgement stays deferred until that row mounts.
 	const {adapter, calls} = createHarness({
 		availableMessageIds: [collidingId],
 		directRevisions: [[collidingId, 99]],
@@ -178,7 +178,8 @@ test("message lookup does not acknowledge a colliding snowflake", async () => {
 		views: [{messageId: requestedId, revision: 31}]
 	});
 
-	assert.deepEqual(outcome.confirmedIds, [requestedId]);
+	assert.deepEqual(outcome.confirmedIds, []);
+	assert.deepEqual(outcome.deferredIds, [requestedId]);
 	assert.deepEqual(outcome.missingIds, []);
 	assert.equal(outcome.fallbackUsed, false);
 	assert.equal(calls.rerenderAll, 0);
@@ -283,10 +284,11 @@ test("missing DOM state returns stable unique IDs after one fallback", async () 
 	assert.equal(calls.findOwner, 0);
 	assert.equal(calls.forceUpdate, 0);
 	// m2 is mounted with no revision painted, so the fallback is genuinely owed; m1 is
-	// virtualised and rides along as confirmed instead of being reported missing.
+	// virtualised and remains deferred instead of being reported missing.
 	assert.equal(calls.rerenderAll, 1);
 	assert.equal(calls.restored, 0);
-	assert.deepEqual(outcome.confirmedIds, ["m2", "m1"]);
+	assert.deepEqual(outcome.confirmedIds, ["m2"]);
+	assert.deepEqual(outcome.deferredIds, ["m1"]);
 	assert.deepEqual(outcome.missingIds, []);
 	assert.equal(outcome.fallbackUsed, true);
 });
@@ -305,10 +307,10 @@ test("virtualised rows do not trigger the full-list fallback", async () => {
 
 	assert.equal(calls.rerenderAll, 0, "an off-screen row must never cost a full remount");
 	assert.equal(outcome.fallbackUsed, false);
-	// The mounted row is confirmed by its revision; the virtualised one counts as
-	// confirmed because its paint happens on mount, and reporting it missing would
-	// push callers toward exactly the repaint this rule forbids.
-	assert.deepEqual(outcome.confirmedIds.sort(), ["m1", "m2"]);
+	// The mounted row is confirmed by its revision; the virtualised one stays pending
+	// until its eventual mount can prove the exact revision.
+	assert.deepEqual(outcome.confirmedIds, ["m1"]);
+	assert.deepEqual(outcome.deferredIds, ["m2"]);
 	assert.deepEqual(outcome.missingIds, []);
 });
 
@@ -324,6 +326,7 @@ test("a mounted row with a stale revision still gets the fallback", async () => 
 
 	assert.equal(calls.rerenderAll, 1);
 	assert.equal(outcome.fallbackUsed, true);
-	assert.deepEqual(outcome.confirmedIds.sort(), ["m1", "m2"]);
+	assert.deepEqual(outcome.confirmedIds, ["m1"]);
+	assert.deepEqual(outcome.deferredIds, ["m2"]);
 	assert.deepEqual(outcome.missingIds, []);
 });

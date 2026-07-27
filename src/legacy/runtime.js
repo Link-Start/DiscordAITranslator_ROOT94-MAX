@@ -76,6 +76,7 @@ module.exports = (_ => {
 		const {createHistoricalJobRegistry} = require("../orchestrator/historical-job-registry");
 		const {HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX} = require("../orchestrator/historical-translation-job");
 		const {createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION} = require("../protection/protection-logic");
+		const {parseStoredEmbedTranslations} = require("../received/embed-translation-parser");
 		const {
 			foreignLanguageDecisionRuntime,
 			receivedMessageFilterRuntime,
@@ -2231,31 +2232,14 @@ module.exports = (_ => {
 			queueAutoTranslateMessage (message, channel, originalContentData = null, queueOptions = {}) {
 				return this.ensureLiveTranslationQueue().queueMessage(message, channel, originalContentData, queueOptions);
 			}
-
-
 			createStoredReceivedTranslationData (message, channelId, originalContentData, signature, translation, input, output, auto = false) {
 				if (!translation) return null;
 				let strings = String(translation).split(/\n{0,1}__________________ __________________ __________________\n{0,1}/);
 				let oldContent = (originalContentData && originalContentData.content || "").trim();
 				let translatedContent = (strings.shift() || "").trim();
-				if (!translatedContent) return null;
+				const embeds = parseStoredEmbedTranslations({messageEmbeds: message && message.embeds, originalEmbeds: originalContentData && originalContentData.embeds, segments: strings});
+				if (!translatedContent && !Object.keys(embeds).length) return null;
 				let content = this.buildReceivedDisplayContent(translatedContent, oldContent);
-				const embedIds = ((message && message.embeds) || []).map(embed => embed && embed.id).filter(Boolean);
-				let embeds = strings.reduce((dict, segment, index) => {
-					let embedId = embedIds[index];
-					if (!embedId) return dict;
-					let segmentLines = segment.split("\n");
-					let title = segmentLines.shift();
-					let description = segmentLines.shift();
-					let footerText = segmentLines.pop();
-					let fieldsSegment = segmentLines.join("\n").split("\n\n");
-					let fields = fieldsSegment.map(line => {
-						let [name, value] = line.split("__________________");
-						return {name, value};
-					});
-					dict[embedId] = {title, description, fields, footerText};
-					return dict;
-				}, {});
 				return {
 					signature,
 					channelId,
@@ -2608,8 +2592,7 @@ module.exports = (_ => {
 				summary.skipped = summary.skipped.filter(item => this.isHistoricalTranslationJobItemCurrent(item, job));
 				summary.failed = summary.failed.filter(item => this.isHistoricalTranslationJobItemCurrent(item, job));
 				const generation = this.getReceivedDisplayCommitGeneration(job.channelId);
-				// The batch result must echo each record's active request identity: the store
-				// commit supersedes a concurrent live request instead of rejecting the batch.
+				// Echo each active request identity so the batch can supersede concurrent live work.
 				const getRecordRequestIdentity = messageId => {
 					const recordView = this.getReceivedDisplayRuntimeView(messageId);
 					return recordView && recordView.requestIdentity != null ? recordView.requestIdentity : null;
@@ -2626,6 +2609,7 @@ module.exports = (_ => {
 						requestIdentity: getRecordRequestIdentity(item.message.id),
 						origin: "automatic",
 						status: "translated",
+						source: {content: item.originalContentData && item.originalContentData.content || "", embeds: item.originalContentData && item.originalContentData.embeds || []},
 						translation: storedTranslation
 					});
 					this.persistTranslationCacheEntry(item.message.id, storedTranslation.signature, storedTranslation);
@@ -2635,12 +2619,12 @@ module.exports = (_ => {
 					if (!item || !item.message) continue;
 					const signature = this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData);
 					this.persistReceivedSkipDecision(item.message.id, signature, item.reason || "local_guard", this.buildTranslationRequestText(item.originalContentData || {}));
-					results.push({messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: signature, requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "skipped", reason: item.reason || "local_guard"});
+					results.push({messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: signature, source: {content: item.originalContentData && item.originalContentData.content || "", embeds: item.originalContentData && item.originalContentData.embeds || []}, requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "skipped", reason: item.reason || "local_guard"});
 					this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id);
 				}
 				for (const item of summary.failed) {
 					if (!item || !item.message) continue;
-					results.push({messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData), requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "failed", reason: item.reason || "provider_failed"});
+					results.push({messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData), source: {content: item.originalContentData && item.originalContentData.content || "", embeds: item.originalContentData && item.originalContentData.embeds || []}, requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "failed", reason: item.reason || "provider_failed"});
 					this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id);
 				}
 				let batchOutcome = null;
@@ -3571,12 +3555,14 @@ module.exports = (_ => {
 					// restore transaction repaints originals with acknowledgement.
 					const displayGeneration = this.getReceivedDisplayGeneration(channelId);
 					if (displayGeneration !== undefined) this.setReceivedDisplayGeneration(channelId, displayGeneration + 1);
-					this.clearDisplayedAutoTranslations(channelId);
 					this.clearAutoTranslationQueue(channelId);
 					this.resetAutoTranslationTracking(channelId);
-					await this.restoreReceivedDisplayChannel(channelId);
-					this.scheduleTranslationRerender();
-					this.processAutoTranslationQueue();
+					try {await this.restoreReceivedDisplayChannel(channelId);}
+					finally {
+						this.clearDisplayedAutoTranslations(channelId);
+						this.scheduleTranslationRerender();
+						this.processAutoTranslationQueue();
+					}
 					return;
 				}
 				this.resetAutoTranslationTracking(channelId);
@@ -3947,7 +3933,6 @@ module.exports = (_ => {
 						}
 						const allTextsToTranslate = this.buildTranslationRequestText(originalContentData);
 						message.embeds.forEach(embed => embed.message_id = message.id);
-						let embedIds = message.embeds.map(embed => embed.id);
 						if (isManualTranslation) manualRequest = this.ensureSentTranslationStore().beginManualRequest(manualRequestKey);
 						try {
 							this.translateText(allTextsToTranslate, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
@@ -3959,21 +3944,7 @@ module.exports = (_ => {
 								let oldContent = (originalContentData.content || "").trim();
 								let translatedContent = (strings.shift() || "").trim();
 								let content = this.buildReceivedDisplayContent(translatedContent, oldContent);
-								let embeds = strings.reduce((dict, segment, index) => {
-									let embedId = embedIds[index];
-									let segmentLines = segment.split("\n");
-									let title = segmentLines.shift();
-									let description = segmentLines.shift();
-									let footerText = segmentLines.pop();
-									let fieldsSegment = segmentLines.join("\n").split("\n\n");
-									let fields = fieldsSegment.map(line => {
-										let [name, value] = line.split("__________________");
-										return {name, value};
-									});
-
-									dict[embedId] = {title, description, fields, footerText};
-									return dict;
-								}, {});
+								const embeds = parseStoredEmbedTranslations({messageEmbeds: message.embeds, originalEmbeds: originalContentData.embeds, segments: strings});
 								const storedTranslation = {
 									signature,
 									channelId,

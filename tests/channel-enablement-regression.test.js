@@ -330,7 +330,7 @@ test("structured global state migrates to off while preserving explicit channel 
 	});
 });
 
-test("turning off an explicitly enabled channel clears only that channel runtime state", () => {
+test("turning off an explicitly enabled channel clears only that channel runtime state", async () => {
 	const persisted = {
 		translationEnabledStates: {
 			globalDefault: true,
@@ -382,7 +382,7 @@ test("turning off an explicitly enabled channel clears only that channel runtime
 	clearedDisplayChannels.length = 0;
 	clearedQueueChannels.length = 0;
 	resetTrackingChannels.length = 0;
-	plugin.toggleTranslation("channel-1");
+	await plugin.toggleTranslation("channel-1");
 
 	assert.deepEqual(clearedDisplayChannels, ["channel-1"]);
 	assert.deepEqual(clearedQueueChannels, ["channel-1"]);

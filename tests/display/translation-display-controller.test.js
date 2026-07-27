@@ -214,6 +214,23 @@ test("missing acknowledgement remains inspectable without changing the display r
 	assert.equal(view.translated, true);
 });
 
+test("a deferred DOM acknowledgement keeps the exact display revision pending", async () => {
+	const {store, controller} = createHarness(request => ({
+		confirmedIds: [],
+		missingIds: [],
+		deferredIds: request.messageIds,
+		fallbackUsed: false
+	}));
+	capture(store, "m1");
+
+	const outcome = await controller.commitMessageResult(result("m1"));
+	const view = controller.getDisplayView("m1");
+
+	assert.deepEqual(outcome, {confirmedIds: [], missingIds: [], deferredIds: ["m1"], fallbackUsed: false});
+	assert.equal(view.renderStatus, "pending");
+	assert.equal(view.renderReason, null);
+});
+
 test("markPending refreshes a loading source view", async () => {
 	const {store, refreshes, controller} = createHarness();
 	capture(store, "m1");
@@ -453,6 +470,21 @@ test("a late missing acknowledgement cannot mark a newer display revision unconf
 	assert.equal(newerState.renderReason, null);
 });
 
+test("a late deferred acknowledgement cannot claim a newer display revision", async () => {
+	const deferred = createDeferred();
+	const {store, controller} = createHarness(() => deferred.promise);
+	capture(store, "m1");
+	const rendering = controller.commitMessageResult(result("m1"));
+
+	const newerState = store.markPending(Object.assign(pendingRequest("m1", "c1", "request-new"), {supersede: true}));
+	deferred.resolve({confirmedIds: [], missingIds: [], deferredIds: ["m1"], fallbackUsed: false});
+
+	const outcome = await rendering;
+	assert.deepEqual(outcome, {confirmedIds: [], missingIds: [], fallbackUsed: false, staleIds: ["m1"]});
+	assert.equal(store.getDisplayState("m1"), newerState);
+	assert.equal(newerState.renderStatus, "pending");
+});
+
 test("restoreMessage cancels one automatic record through an acknowledged refresh", async () => {
 	const {store, refreshes, controller} = createHarness();
 	capture(store, "m1");
@@ -484,4 +516,55 @@ test("commitHistoricalBatch commits recorded results and surfaces unrecorded rej
 	assert.equal(refreshes.length, 1);
 	assert.deepEqual(refreshes[0].messageIds, ["m1"]);
 	assert.equal(store.getDisplayState("m1").status, "translated");
+});
+
+test("commitHistoricalBatch captures a recordless result when it carries its immutable source", async () => {
+	const {store, refreshes, controller} = createHarness();
+	const outcome = await controller.commitHistoricalBatch([{
+		...result("m1"),
+		source: {content: "m1 source", embeds: []}
+	}]);
+
+	assert.deepEqual(outcome.confirmedIds, ["m1"]);
+	assert.equal(outcome.rejectedIds, undefined);
+	assert.equal(refreshes.length, 1);
+	assert.equal(store.getDisplayState("m1").source.content, "m1 source");
+	assert.equal(store.getDisplayState("m1").translation.content, "m1 translated");
+});
+
+test("commitHistoricalBatch completes a preview-only record with the historical source", async () => {
+	const {store, controller} = createHarness();
+	store.capturePreviewSource({messageId: "m1", channelId: "c1", generation: 1});
+	const outcome = await controller.commitHistoricalBatch([{...result("m1"), source: {content: "m1 source", embeds: []}}]);
+
+	assert.deepEqual(outcome.confirmedIds, ["m1"]);
+	assert.equal(store.getDisplayState("m1").source.content, "m1 source");
+	assert.equal(store.getDisplayState("m1").status, "translated");
+});
+
+test("commitHistoricalBatch cannot replace an edited source with a stale historical snapshot", async () => {
+	const {store, controller} = createHarness();
+	store.captureSource({messageId: "m1", channelId: "c1", generation: 1, sourceSignature: "new-signature", source: {content: "edited source", embeds: []}});
+	const stale = {...result("m1"), sourceSignature: "old-signature", source: {content: "old source", embeds: []}};
+
+	const outcome = await controller.commitHistoricalBatch([stale]);
+
+	assert.deepEqual(outcome.rejectedIds, ["m1"]);
+	assert.equal(store.getDisplayState("m1").sourceSignature, "new-signature");
+	assert.equal(store.getDisplayState("m1").source.content, "edited source");
+	assert.equal(store.getDisplayState("m1").status, "idle");
+});
+
+test("commitHistoricalBatch does not capture recordless sources from a mixed-channel batch", async () => {
+	const {store, controller} = createHarness();
+	const results = [
+		{...result("m1", "c1"), source: {content: "one", embeds: []}},
+		{...result("m2", "c2"), source: {content: "two", embeds: []}}
+	];
+
+	const outcome = await controller.commitHistoricalBatch(results);
+
+	assert.deepEqual(outcome.rejectedIds, ["m1", "m2"]);
+	assert.equal(store.getDisplayState("m1"), null);
+	assert.equal(store.getDisplayState("m2"), null);
 });

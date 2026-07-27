@@ -220,7 +220,7 @@ refreshMessages({channelId, messageIds, views, transactionId})
 refreshThreadTitles(channelId)
 ```
 
-No translation policy or provider logic is allowed in this adapter. It returns `confirmedIds`, `missingIds`, and `fallbackUsed` so state commit and render commit can be measured separately. Revision acknowledgement applies to translated, loading, skipped, failed, cancelled, and restored-original views.
+No translation policy or provider logic is allowed in this adapter. It returns `confirmedIds`, `missingIds`, `deferredIds`, and `fallbackUsed` so state commit and render commit can be measured separately. A deferred ID is outside Discord's mounted virtual list: it remains pending until a later mount can prove the exact revision, and it never triggers the full-list fallback. Revision acknowledgement applies to translated, loading, skipped, failed, cancelled, and restored-original views.
 
 ### TranslationOrchestrator
 
