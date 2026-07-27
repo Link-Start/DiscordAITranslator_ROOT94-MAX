@@ -24,6 +24,76 @@ test("messages that already contain translation plus quoted original extract the
 	assert.equal(plugin.buildTranslationRequestText(originalContentData), "hello friend");
 });
 
+test("embed-only received translations are retained when the message body is empty", () => {
+	const plugin = createPluginInstance();
+	const separator = "__________________ __________________ __________________";
+	const stored = plugin.createStoredReceivedTranslationData(
+		{id: "embed-message", embeds: [{id: "embed-1"}]},
+		"channel-1",
+		{content: "", embeds: []},
+		"signature-1",
+		`\n${separator}\nTranslated title\nTranslated description\nTranslated footer`,
+		{id: "auto"},
+		{id: "en"},
+		true
+	);
+
+	assert.ok(stored, "an embed translation is useful even without translated body text");
+	assert.equal(stored.translatedContent, "");
+	assert.equal(stored.embeds["embed-1"].title, "Translated title");
+	assert.equal(stored.embeds["embed-1"].description, "Translated description");
+	assert.equal(plugin.shouldKeepAutoTranslatedResult(stored, "channel-1"), true);
+});
+
+test("a partial embed response preserves untranslated source fields", () => {
+	const plugin = createPluginInstance();
+	const separator = "__________________ __________________ __________________";
+	const message = {id: "partial-embed", embeds: [{id: "embed-1"}]};
+	const original = {content: "", embeds: [{title: "Original title", description: "Original description", footerText: "Original footer", fields: [{name: "Original name", value: "Original value"}]}]};
+
+	const stored = plugin.createStoredReceivedTranslationData(message, "channel-1", original, "signature-1", `\n${separator}\nTranslated title`, {id: "auto"}, {id: "en"}, true);
+
+	assert.equal(stored.embeds["embed-1"].title, "Translated title");
+	assert.equal(stored.embeds["embed-1"].description, "Original description");
+	assert.equal(stored.embeds["embed-1"].footerText, "Original footer");
+	assert.deepEqual(stored.embeds["embed-1"].fields, [{name: "Original name", value: "Original value"}]);
+});
+
+test("a missing embed footer cannot consume the last translated field", () => {
+	const plugin = createPluginInstance();
+	const separator = "__________________ __________________ __________________";
+	const original = {content: "", embeds: [{title: "Title", description: "Description", footerText: "Original footer", fields: [{name: "Name", value: "Value"}]}]};
+	const response = `\n${separator}\nTranslated title\nTranslated description\n\nTranslated name__________________Translated value`;
+
+	const stored = plugin.createStoredReceivedTranslationData({id: "footer-missing", embeds: [{id: "embed-1"}]}, "channel-1", original, "signature-1", response, {id: "auto"}, {id: "en"}, true);
+
+	assert.equal(stored.embeds["embed-1"].footerText, "Original footer");
+	assert.deepEqual(stored.embeds["embed-1"].fields, [{name: "Translated name", value: "Translated value"}]);
+});
+
+test("an incomplete translated field list preserves every source field instead of shifting indexes", () => {
+	const plugin = createPluginInstance();
+	const separator = "__________________ __________________ __________________";
+	const originalFields = [{name: "First", value: "One"}, {name: "Second", value: "Two"}];
+	const original = {content: "", embeds: [{title: "Title", description: "Description", footerText: "", fields: originalFields}]};
+	const response = `\n${separator}\nTranslated title\nTranslated description\n\nSecond translated__________________Two translated`;
+
+	const stored = plugin.createStoredReceivedTranslationData({id: "field-missing", embeds: [{id: "embed-1"}]}, "channel-1", original, "signature-1", response, {id: "auto"}, {id: "en"}, true);
+
+	assert.deepEqual(stored.embeds["embed-1"].fields, originalFields);
+});
+
+test("an empty embed response is not accepted merely because source fallback is populated", () => {
+	const plugin = createPluginInstance();
+	const separator = "__________________ __________________ __________________";
+	const original = {content: "", embeds: [{title: "Original title", description: "Original description", footerText: "", fields: []}]};
+
+	const stored = plugin.createStoredReceivedTranslationData({id: "empty-embed", embeds: [{id: "embed-1"}]}, "channel-1", original, "signature-1", separator, {id: "auto"}, {id: "en"}, true);
+
+	assert.ok(stored, "source fallback remains available for safe rendering");
+	assert.equal(plugin.shouldKeepAutoTranslatedResult(stored, "channel-1"), false);
+});
+
 test("short CJK terms can still pass the auto-translate length gate", () => {
 	const plugin = createPluginInstance();
 	plugin.isReceivedAutoTranslationEnabled = () => true;

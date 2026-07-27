@@ -14,7 +14,7 @@ function result(messageId, channelId, content = `${messageId} translated`, gener
 		origin,
 		sourceSignature: `${channelId}:${messageId}:${messageId} original`,
 		status: "translated",
-		translation: {content}
+		translation: {content, auto: origin === "automatic"}
 	};
 }
 
@@ -166,6 +166,26 @@ test("a disabled channel repaint render keeps restored records confirmable", asy
 		assert.equal(viewAfterRender.status, "cancelled");
 		assert.equal(viewAfterRender.reason, "channel-disabled");
 		assert.equal(viewAfterRender.revision, restoredView.revision);
+	}
+	finally {harness.restore();}
+});
+
+test("channel disable clears compatibility state even when the restore repaint fails", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		delete plugin.isTranslationEnabled;
+		plugin.setChannelEnablementStateValue("channel-a", true);
+		const cleared = [];
+		plugin.restoreReceivedDisplayChannel = async () => {throw new Error("render failed");};
+		plugin.clearDisplayedAutoTranslations = channelId => {cleared.push(["display", channelId]);};
+		plugin.scheduleTranslationRerender = () => {cleared.push(["rerender"]);};
+		plugin.processAutoTranslationQueue = () => {cleared.push(["queue"]);};
+
+		await assert.rejects(plugin.toggleTranslation("channel-a"), /render failed/);
+
+		assert.deepEqual(cleared, [["display", "channel-a"], ["rerender"], ["queue"]]);
+		assert.equal(plugin.isTranslationEnabled("channel-a"), false);
 	}
 	finally {harness.restore();}
 });

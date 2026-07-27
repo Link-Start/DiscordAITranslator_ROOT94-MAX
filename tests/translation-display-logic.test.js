@@ -667,6 +667,47 @@ test("processEmbed falls back to the store view when no display record is active
 	assert.equal(e.instance.props.embed.rawDescription, "D");
 });
 
+test("processEmbed ignores an embed that is absent from a partial translation map", () => {
+	const logic = createLogic();
+	const plugin = createFakePlugin({getDisplayedTranslationChannelId: () => "c1"});
+	plugin.display.displayStates.set("m1", {
+		status: "translated",
+		translation: {
+			translatedContent: "Hello",
+			channelId: "c1",
+			embeds: {e1: {title: "Translated", description: "Body", footerText: "", fields: []}}
+		}
+	});
+	const original = {id: "e2", message_id: "m1", rawTitle: "Original", rawDescription: "Body", fields: []};
+	const e = {returnvalue: null, instance: {props: {embed: original}}};
+
+	assert.doesNotThrow(() => logic.processEmbed(plugin, e));
+	assert.equal(e.instance.props.embed, original);
+});
+
+test("processEmbed preserves source fields missing from a partial embed translation", () => {
+	const logic = createLogic();
+	const plugin = createFakePlugin({getDisplayedTranslationChannelId: () => "c1"});
+	plugin.display.displayStates.set("m1", {
+		status: "translated",
+		translation: {translatedContent: "Hello", channelId: "c1", embeds: {e1: {title: "Translated title"}}}
+	});
+	const e = {returnvalue: null, instance: {props: {embed: {
+		id: "e1",
+		message_id: "m1",
+		rawTitle: "Original title",
+		rawDescription: "Original description",
+		footer: {text: "Original footer"},
+		fields: [{rawName: "Original name", rawValue: "Original value"}]
+	}}}};
+
+	logic.processEmbed(plugin, e);
+	assert.equal(e.instance.props.embed.rawTitle, "Translated title");
+	assert.equal(e.instance.props.embed.rawDescription, "Original description");
+	assert.equal(e.instance.props.embed.footer.text, "Original footer");
+	assert.deepEqual(e.instance.props.embed.fields, [{rawName: "Original name", rawValue: "Original value"}]);
+});
+
 test("processEmbed puts the original embed back once the translation is gone", () => {
 	const logic = createLogic();
 	const plugin = createFakePlugin();
@@ -696,6 +737,29 @@ test("processEmbed puts the original embed back once the translation is gone", (
 	assert.equal("originalDescription" in embed, false);
 	assert.equal("originalFields" in embed, false);
 	assert.equal("originalFooter" in embed, false);
+});
+
+test("processEmbed restores a title-only embed whose original description was empty", () => {
+	const logic = createLogic();
+	const plugin = createFakePlugin();
+	const e = {
+		returnvalue: null,
+		instance: {props: {embed: {
+			id: "e1",
+			message_id: "m1",
+			rawTitle: "Translated title",
+			rawDescription: "",
+			fields: [],
+			originalTitle: "Original title",
+			originalDescription: "",
+			originalFields: [],
+			originalFooter: undefined
+		}}}
+	};
+
+	logic.processEmbed(plugin, e);
+	assert.equal(e.instance.props.embed.rawTitle, "Original title");
+	assert.equal("originalTitle" in e.instance.props.embed, false);
 });
 
 test("processEmbed appends the watermark to an already-rendered embed description", () => {

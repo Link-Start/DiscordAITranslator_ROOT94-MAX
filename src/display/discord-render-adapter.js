@@ -102,10 +102,11 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, set
 					confirmedIds = confirmViews(presentIds, viewsByMessageId);
 				}
 				const confirmedIdSet = new Set(confirmedIds.map(String));
-				const virtualisedIds = uniqueMessageIds.filter(messageId => !presentIds.includes(messageId));
+				const deferredIds = uniqueMessageIds.filter(messageId => !presentIds.includes(messageId));
 				outcome = {
-					confirmedIds: confirmedIds.concat(virtualisedIds),
+					confirmedIds,
 					missingIds: presentIds.filter(messageId => !confirmedIdSet.has(String(messageId))),
+					deferredIds,
 					fallbackUsed
 				};
 			}

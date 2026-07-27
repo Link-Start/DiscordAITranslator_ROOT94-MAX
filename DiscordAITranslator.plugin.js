@@ -606,7 +606,7 @@ var require_translation_display_controller = __commonJS({
           });
         }
         __name(filterCurrentIds, "filterCurrentIds");
-        let confirmedIds = filterCurrentIds(rawOutcome.confirmedIds), missingIds = filterCurrentIds(rawOutcome.missingIds);
+        let confirmedIds = filterCurrentIds(rawOutcome.confirmedIds), missingIds = filterCurrentIds(rawOutcome.missingIds), deferredIds = filterCurrentIds(rawOutcome.deferredIds);
         for (let messageId of confirmedIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-confirmed");
         for (let messageId of missingIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-unconfirmed");
         store.markRenderOutcome({ confirmedIds, missingIds });
@@ -616,7 +616,7 @@ var require_translation_display_controller = __commonJS({
           missingIds,
           fallbackUsed: rawOutcome.fallbackUsed === !0
         };
-        return staleIds.length && (filteredOutcome.staleIds = staleIds), filteredOutcome;
+        return deferredIds.length ? filteredOutcome.deferredIds = deferredIds : delete filteredOutcome.deferredIds, staleIds.length && (filteredOutcome.staleIds = staleIds), filteredOutcome;
       }
       return __name(refreshRecords, "refreshRecords"), Object.freeze({
         getDisplayView(messageId) {
@@ -639,6 +639,10 @@ var require_translation_display_controller = __commonJS({
           return record ? refresh ? refreshRecords([record]) : createEmptyOutcome({ deferredIds: [record.messageId] }) : createEmptyOutcome({ rejectedIds: [String(result.messageId)] });
         },
         async commitHistoricalBatch(results) {
+          if (new Set(results.map((result) => result && result.channelId != null ? String(result.channelId) : "")).size === 1) for (let result of results) {
+            let current = result && store.getDisplayState(result.messageId);
+            result && result.source && (!current || !current.sourceSignature) && store.captureSource({ messageId: result.messageId, channelId: result.channelId, generation: result.generation, sourceSignature: result.sourceSignature, source: result.source });
+          }
           let outcome = store.commitBatch(results);
           if (!outcome.committed.length)
             return outcome.rejected.length ? createEmptyOutcome({ rejectedIds: outcome.rejected.map((result) => String(result.messageId)) }) : createEmptyOutcome();
@@ -746,10 +750,11 @@ var require_discord_render_adapter = __commonJS({
             owner && BDFDB.ReactUtils.forceUpdate(owner), await waitForPaint();
             let presentIds = uniqueMessageIds.filter((messageId) => findMessageElement(messageId)), confirmedIds = confirmViews(presentIds, viewsByMessageId), fallbackUsed = !1;
             confirmedIds.length !== presentIds.length && (fallbackUsed = !0, BDFDB.MessageUtils.rerenderAll(!0), await waitForFallbackPaint(), confirmedIds = confirmViews(presentIds, viewsByMessageId));
-            let confirmedIdSet = new Set(confirmedIds.map(String)), virtualisedIds = uniqueMessageIds.filter((messageId) => !presentIds.includes(messageId));
+            let confirmedIdSet = new Set(confirmedIds.map(String)), deferredIds = uniqueMessageIds.filter((messageId) => !presentIds.includes(messageId));
             outcome = {
-              confirmedIds: confirmedIds.concat(virtualisedIds),
+              confirmedIds,
               missingIds: presentIds.filter((messageId) => !confirmedIdSet.has(String(messageId))),
+              deferredIds,
               fallbackUsed
             };
           } catch (err) {
@@ -1021,23 +1026,28 @@ var require_translation_display_logic = __commonJS({
         },
         processEmbed(plugin, e) {
           if (!e.instance.props.embed || !e.instance.props.embed.message_id) return;
-          let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, { id: e.instance.props.embed.message_id }, plugin.getDisplayedTranslationChannelId(e.instance.props.embed.message_id));
+          let embed = e.instance.props.embed, hasOwn = /* @__PURE__ */ __name((key) => Object.prototype.hasOwnProperty.call(embed, key), "hasOwn"), translation = translationDisplayLogic.getActiveMessageTranslation(plugin, { id: embed.message_id }, plugin.getDisplayedTranslationChannelId(embed.message_id));
           if (!translation) {
-            let storeView = plugin.getReceivedDisplayRuntimeView(e.instance.props.embed.message_id);
+            let storeView = plugin.getReceivedDisplayRuntimeView(embed.message_id);
             storeView && storeView.translated && storeView.translation && storeView.translation.embeds && (translation = storeView.translation);
           }
-          if (translation && Object.keys(translation.embeds).length)
-            if (!e.returnvalue) e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
-              rawDescription: translation.embeds[e.instance.props.embed.id].description,
-              rawTitle: translation.embeds[e.instance.props.embed.id].title,
-              footer: Object.assign({}, e.instance.props.embed.footer || {}, {
-                text: translation.embeds[e.instance.props.embed.id].footerText || ""
+          let embedTranslation = translation && translation.embeds && translation.embeds[embed.id];
+          if (embedTranslation) {
+            let translatedOrOriginal = /* @__PURE__ */ __name((translated, original) => translated != null && String(translated).trim() ? translated : original, "translatedOrOriginal"), originalDescription = hasOwn("originalDescription") ? embed.originalDescription : embed.rawDescription, originalTitle = hasOwn("originalTitle") ? embed.originalTitle : embed.rawTitle, originalFields = hasOwn("originalFields") ? embed.originalFields : embed.fields, originalFooter = hasOwn("originalFooter") ? embed.originalFooter : Object.assign({}, embed.footer), translatedFields = Array.isArray(embedTranslation.fields) ? embedTranslation.fields : [], sourceFields = Array.isArray(originalFields) ? originalFields : [], fields = (sourceFields.length ? sourceFields : translatedFields).map((field, index) => ({
+              rawName: translatedOrOriginal(translatedFields[index] && translatedFields[index].name, field && (field.rawName || field.name)),
+              rawValue: translatedOrOriginal(translatedFields[index] && translatedFields[index].value, field && (field.rawValue || field.value))
+            }));
+            if (!e.returnvalue) e.instance.props.embed = Object.assign({}, embed, {
+              rawDescription: translatedOrOriginal(embedTranslation.description, originalDescription),
+              rawTitle: translatedOrOriginal(embedTranslation.title, originalTitle),
+              footer: Object.assign({}, embed.footer || {}, {
+                text: translatedOrOriginal(embedTranslation.footerText, originalFooter && originalFooter.text)
               }),
-              fields: translation.embeds[e.instance.props.embed.id].fields.map((n) => ({ rawName: n.name, rawValue: n.value })),
-              originalDescription: e.instance.props.embed.originalDescription || e.instance.props.embed.rawDescription,
-              originalTitle: e.instance.props.embed.originalTitle || e.instance.props.embed.rawTitle,
-              originalFields: e.instance.props.embed.originalFields || e.instance.props.embed.fields,
-              originalFooter: e.instance.props.embed.originalFooter || Object.assign({}, e.instance.props.embed.footer)
+              fields,
+              originalDescription,
+              originalTitle,
+              originalFields,
+              originalFooter
             });
             else {
               let [children, index] = BDFDB.ReactUtils.findParent(e.returnvalue, { props: [["className", BDFDB.disCN.embeddescription]] });
@@ -1047,7 +1057,7 @@ var require_translation_display_logic = __commonJS({
                 watermarkNode && children[index].props.children.push(watermarkNode);
               }
             }
-          else !e.returnvalue && e.instance.props.embed.originalDescription && (e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
+          } else !e.returnvalue && ["originalDescription", "originalTitle", "originalFields", "originalFooter"].some(hasOwn) && (e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
             rawDescription: e.instance.props.embed.originalDescription,
             rawTitle: e.instance.props.embed.originalTitle,
             fields: e.instance.props.embed.originalFields,
@@ -6185,6 +6195,44 @@ var require_protection_logic = __commonJS({
   }
 });
 
+// src/received/embed-translation-parser.js
+var require_embed_translation_parser = __commonJS({
+  "src/received/embed-translation-parser.js"(exports2, module2) {
+    function useTranslatedValue(translated, original) {
+      return translated != null && String(translated).trim() ? translated : original || "";
+    }
+    __name(useTranslatedValue, "useTranslatedValue");
+    function hasValue(value) {
+      return value != null && !!String(value).trim();
+    }
+    __name(hasValue, "hasValue");
+    function parseFields(lines, originalFields) {
+      let parsed = lines.join(`
+`).trim().split(/\n\s*\n/).filter(Boolean).map((group) => {
+        let delimiterIndex = group.indexOf("__________________");
+        return delimiterIndex < 0 ? { name: group, value: "" } : { name: group.slice(0, delimiterIndex), value: group.slice(delimiterIndex + 18) };
+      }), complete = !originalFields.length || parsed.length === originalFields.length && originalFields.every((field, index) => (!hasValue(field.name) || hasValue(parsed[index] && parsed[index].name)) && (!hasValue(field.value) || hasValue(parsed[index] && parsed[index].value)));
+      if (!complete) return { fields: originalFields.map((field) => ({ name: field.name || "", value: field.value || "" })), complete, hasTranslatedContent: !1 };
+      let fieldCount = originalFields.length || parsed.length;
+      return { fields: Array.from({ length: fieldCount }, (_, index) => ({
+        name: useTranslatedValue(parsed[index] && parsed[index].name, originalFields[index] && originalFields[index].name),
+        value: useTranslatedValue(parsed[index] && parsed[index].value, originalFields[index] && originalFields[index].value)
+      })), complete, hasTranslatedContent: parsed.some((field) => hasValue(field.name) || hasValue(field.value)) };
+    }
+    __name(parseFields, "parseFields");
+    function parseStoredEmbedTranslations({ messageEmbeds = [], originalEmbeds = [], segments = [] } = {}) {
+      return messageEmbeds.reduce((translations, messageEmbed, index) => {
+        if (!messageEmbed || !messageEmbed.id || index >= segments.length) return translations;
+        let original = originalEmbeds[index] || {}, originalFields = Array.isArray(original.fields) ? original.fields : [], lines = String(segments[index] || "").split(`
+`), translatedTitle = lines.shift(), translatedDescription = lines.shift(), title = useTranslatedValue(translatedTitle, original.title), description = useTranslatedValue(translatedDescription, original.description), lastLine = lines[lines.length - 1] || "", hasFieldLine = lines.some((line) => line.includes("__________________")), translatedFooter = original.footerText && (!originalFields.length || hasFieldLine && !lastLine.includes("__________________")) ? lines.pop() : "", footerText = original.footerText ? useTranslatedValue(translatedFooter, original.footerText) : "", parsedFields = parseFields(lines, originalFields), complete = (!hasValue(original.title) || hasValue(translatedTitle)) && (!hasValue(original.description) || hasValue(translatedDescription)) && (!hasValue(original.footerText) || hasValue(translatedFooter)) && parsedFields.complete, hasTranslatedContent = hasValue(translatedTitle) || hasValue(translatedDescription) || hasValue(translatedFooter) || parsedFields.hasTranslatedContent;
+        return translations[messageEmbed.id] = { title, description, fields: parsedFields.fields, footerText, complete, hasTranslatedContent }, translations;
+      }, {});
+    }
+    __name(parseStoredEmbedTranslations, "parseStoredEmbedTranslations");
+    module2.exports = { parseStoredEmbedTranslations };
+  }
+});
+
 // src/language/language-heuristics.js
 var require_language_heuristics = __commonJS({
   "src/language/language-heuristics.js"(exports2, module2) {
@@ -6533,7 +6581,12 @@ var require_received_translation_runtime = __commonJS({
         if (!text || !targetLanguageId || targetLanguageId == "auto") return callback(!1);
         plugin.detectLanguage(text, (detectedLanguageId) => callback(foreignLanguageDecisionRuntime.isDetectedLanguageForeign(plugin, detectedLanguageId, targetLanguageId)));
       }
-    }, receivedMessageFilterRuntime = {
+    };
+    function hasUsefulEmbedTranslation(translation) {
+      return Object.values(translation && translation.embeds || {}).some((embed) => embed && (Object.prototype.hasOwnProperty.call(embed, "hasTranslatedContent") ? embed.hasTranslatedContent && embed.complete !== !1 : [embed.title, embed.description, embed.footerText].some((value) => String(value || "").trim()) || Array.isArray(embed.fields) && embed.fields.some((field) => field && (String(field.name || "").trim() || String(field.value || "").trim()))));
+    }
+    __name(hasUsefulEmbedTranslation, "hasUsefulEmbedTranslation");
+    var receivedMessageFilterRuntime = {
       isTranslationResultTooSimilar(plugin, translation) {
         if (!translation) return !1;
         let normalizedTranslation = plugin.normalizeStoredTranslationData(translation), originalContent = (normalizedTranslation.originalContent || "").trim(), translatedContent = (normalizedTranslation.translatedContent || normalizedTranslation.content || "").trim();
@@ -6542,12 +6595,12 @@ var require_received_translation_runtime = __commonJS({
         return !normalizedOriginal || !normalizedTranslated ? !1 : normalizedOriginal == normalizedTranslated ? !0 : plugin.getTextSimilarityScore(originalContent, translatedContent) >= Math.max(0.92, plugin.getTranslationSimilarityThreshold());
       },
       getAutoTranslatedResultRejectReason(plugin, translation, channelId) {
-        if (!translation || !translation.translatedContent) return "local_guard";
+        if (!translation || !translation.translatedContent && !hasUsefulEmbedTranslation(translation)) return "local_guard";
         if (receivedMessageFilterRuntime.isTranslationResultTooSimilar(plugin, translation)) return "too_similar";
         let detectedLanguageId = translation.input && translation.input.id, targetLanguageId = translation.output && translation.output.id || plugin.getLanguageChoice(LANGUAGE_DIRECTIONS.OUTPUT, MESSAGE_DIRECTIONS.RECEIVED, channelId);
         if (plugin.shouldSkipSameLanguageReceivedMessages() && detectedLanguageId && plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId)) return "same_language";
         let sourceLanguages = plugin.getReceivedAutoTranslateSourceLanguages();
-        return sourceLanguages.length && detectedLanguageId && !plugin.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages) ? "source_filter" : plugin.shouldDropSimilarTranslations() && plugin.getTextSimilarityScore(translation.originalContent, translation.translatedContent) >= plugin.getTranslationSimilarityThreshold() ? "too_similar" : null;
+        return sourceLanguages.length && detectedLanguageId && !plugin.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages) ? "source_filter" : plugin.shouldDropSimilarTranslations() && translation.originalContent && translation.translatedContent && plugin.getTextSimilarityScore(translation.originalContent, translation.translatedContent) >= plugin.getTranslationSimilarityThreshold() ? "too_similar" : null;
       },
       shouldKeepAutoTranslatedResult(plugin, translation, channelId) {
         return !receivedMessageFilterRuntime.getAutoTranslatedResultRejectReason(plugin, translation, channelId);
@@ -8691,7 +8744,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a;
-        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), {
+        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), { parseStoredEmbedTranslations } = require_embed_translation_parser(), {
           foreignLanguageDecisionRuntime,
           receivedMessageFilterRuntime,
           createReceivedTranslationRuntime
@@ -10478,21 +10531,9 @@ __________________ __________________ __________________
           }
           createStoredReceivedTranslationData(message, channelId, originalContentData, signature, translation, input, output, auto = !1) {
             if (!translation) return null;
-            let strings = String(translation).split(/\n{0,1}__________________ __________________ __________________\n{0,1}/), oldContent = (originalContentData && originalContentData.content || "").trim(), translatedContent = (strings.shift() || "").trim();
-            if (!translatedContent) return null;
-            let content = this.buildReceivedDisplayContent(translatedContent, oldContent), embedIds = (message && message.embeds || []).map((embed) => embed && embed.id).filter(Boolean), embeds = strings.reduce((dict, segment, index) => {
-              let embedId = embedIds[index];
-              if (!embedId) return dict;
-              let segmentLines = segment.split(`
-`), title = segmentLines.shift(), description = segmentLines.shift(), footerText = segmentLines.pop(), fields = segmentLines.join(`
-`).split(`
-
-`).map((line) => {
-                let [name, value] = line.split("__________________");
-                return { name, value };
-              });
-              return dict[embedId] = { title, description, fields, footerText }, dict;
-            }, {});
+            let strings = String(translation).split(/\n{0,1}__________________ __________________ __________________\n{0,1}/), oldContent = (originalContentData && originalContentData.content || "").trim(), translatedContent = (strings.shift() || "").trim(), embeds = parseStoredEmbedTranslations({ messageEmbeds: message && message.embeds, originalEmbeds: originalContentData && originalContentData.embeds, segments: strings });
+            if (!translatedContent && !Object.keys(embeds).length) return null;
+            let content = this.buildReceivedDisplayContent(translatedContent, oldContent);
             return {
               signature,
               channelId,
@@ -10767,16 +10808,17 @@ __________________ __________________ __________________
                 requestIdentity: getRecordRequestIdentity(item.message.id),
                 origin: "automatic",
                 status: "translated",
+                source: { content: item.originalContentData && item.originalContentData.content || "", embeds: item.originalContentData && item.originalContentData.embeds || [] },
                 translation: storedTranslation
               }), this.persistTranslationCacheEntry(item.message.id, storedTranslation.signature, storedTranslation), this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id);
             }
             for (let item of summary.skipped) {
               if (!item || !item.message) continue;
               let signature = this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData);
-              this.persistReceivedSkipDecision(item.message.id, signature, item.reason || "local_guard", this.buildTranslationRequestText(item.originalContentData || {})), results.push({ messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: signature, requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "skipped", reason: item.reason || "local_guard" }), this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id);
+              this.persistReceivedSkipDecision(item.message.id, signature, item.reason || "local_guard", this.buildTranslationRequestText(item.originalContentData || {})), results.push({ messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: signature, source: { content: item.originalContentData && item.originalContentData.content || "", embeds: item.originalContentData && item.originalContentData.embeds || [] }, requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "skipped", reason: item.reason || "local_guard" }), this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id);
             }
             for (let item of summary.failed)
-              !item || !item.message || (results.push({ messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData), requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "failed", reason: item.reason || "provider_failed" }), this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id));
+              !item || !item.message || (results.push({ messageId: item.message.id, channelId: job.channelId, generation, sourceSignature: this.createReceivedTranslationSignature(item.message, job.channelId, item.originalContentData), source: { content: item.originalContentData && item.originalContentData.content || "", embeds: item.originalContentData && item.originalContentData.embeds || [] }, requestIdentity: getRecordRequestIdentity(item.message.id), origin: "automatic", status: "failed", reason: item.reason || "provider_failed" }), this.ensureLiveTranslationQueue().clearQueuedMessage(item.message.id));
             let batchOutcome = null;
             if (results.length)
               try {
@@ -11505,7 +11547,12 @@ __________________ __________________ __________________
             let wasEnabled = this.isTranslationEnabled(channelId);
             if (this.setChannelEnablementStateValue(channelId, !wasEnabled), wasEnabled) {
               let displayGeneration = this.getReceivedDisplayGeneration(channelId);
-              displayGeneration !== void 0 && this.setReceivedDisplayGeneration(channelId, displayGeneration + 1), this.clearDisplayedAutoTranslations(channelId), this.clearAutoTranslationQueue(channelId), this.resetAutoTranslationTracking(channelId), await this.restoreReceivedDisplayChannel(channelId), this.scheduleTranslationRerender(), this.processAutoTranslationQueue();
+              displayGeneration !== void 0 && this.setReceivedDisplayGeneration(channelId, displayGeneration + 1), this.clearAutoTranslationQueue(channelId), this.resetAutoTranslationTracking(channelId);
+              try {
+                await this.restoreReceivedDisplayChannel(channelId);
+              } finally {
+                this.clearDisplayedAutoTranslations(channelId), this.scheduleTranslationRerender(), this.processAutoTranslationQueue();
+              }
               return;
             }
             this.resetAutoTranslationTracking(channelId), this.scheduleTranslationRerender(), this.processAutoTranslationQueue();
@@ -11789,25 +11836,13 @@ __________________ __________________ __________________
                   return this.applyStoredTranslationToMessage(message, storedCachedTranslation, originalContentData), this.scheduleTranslationRerender(rerenderOptions), finish(!0);
                 }
                 let allTextsToTranslate = this.buildTranslationRequestText(originalContentData);
-                message.embeds.forEach((embed) => embed.message_id = message.id);
-                let embedIds = message.embeds.map((embed) => embed.id);
-                isManualTranslation && (manualRequest = this.ensureSentTranslationStore().beginManualRequest(manualRequestKey));
+                message.embeds.forEach((embed) => embed.message_id = message.id), isManualTranslation && (manualRequest = this.ensureSentTranslationStore().beginManualRequest(manualRequestKey));
                 try {
                   this.translateText(allTextsToTranslate, messageTypes.RECEIVED, (translation, input, output, meta = {}) => {
                     try {
                       if (options.auto && !this.isLiveTranslationRequestCurrent(liveRequest, message) || isManualTranslation && !this.ensureSentTranslationStore().isManualRequestCurrent(manualRequestKey, manualRequest)) return finish(!1);
                       if (translation) {
-                        let strings = translation.split(/\n{0,1}__________________ __________________ __________________\n{0,1}/), oldContent = (originalContentData.content || "").trim(), translatedContent = (strings.shift() || "").trim(), content = this.buildReceivedDisplayContent(translatedContent, oldContent), embeds = strings.reduce((dict, segment, index) => {
-                          let embedId = embedIds[index], segmentLines = segment.split(`
-`), title = segmentLines.shift(), description = segmentLines.shift(), footerText = segmentLines.pop(), fields = segmentLines.join(`
-`).split(`
-
-`).map((line) => {
-                            let [name, value] = line.split("__________________");
-                            return { name, value };
-                          });
-                          return dict[embedId] = { title, description, fields, footerText }, dict;
-                        }, {}), storedTranslation = {
+                        let strings = translation.split(/\n{0,1}__________________ __________________ __________________\n{0,1}/), oldContent = (originalContentData.content || "").trim(), translatedContent = (strings.shift() || "").trim(), content = this.buildReceivedDisplayContent(translatedContent, oldContent), embeds = parseStoredEmbedTranslations({ messageEmbeds: message.embeds, originalEmbeds: originalContentData.embeds, segments: strings }), storedTranslation = {
                           signature,
                           channelId,
                           auto: !!options.auto,

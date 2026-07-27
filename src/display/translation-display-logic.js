@@ -309,23 +309,37 @@ function createTranslationDisplayLogic({BDFDB} = {}) {
 		},
 		processEmbed(plugin, e) {
 			if (!e.instance.props.embed || !e.instance.props.embed.message_id) return;
-			let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, {id: e.instance.props.embed.message_id}, plugin.getDisplayedTranslationChannelId(e.instance.props.embed.message_id));
+			const embed = e.instance.props.embed;
+			const hasOwn = key => Object.prototype.hasOwnProperty.call(embed, key);
+			let translation = translationDisplayLogic.getActiveMessageTranslation(plugin, {id: embed.message_id}, plugin.getDisplayedTranslationChannelId(embed.message_id));
 			if (!translation) {
-				const storeView = plugin.getReceivedDisplayRuntimeView(e.instance.props.embed.message_id);
+				const storeView = plugin.getReceivedDisplayRuntimeView(embed.message_id);
 				if (storeView && storeView.translated && storeView.translation && storeView.translation.embeds) translation = storeView.translation;
 			}
-			if (translation && Object.keys(translation.embeds).length) {
-				if (!e.returnvalue) e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
-					rawDescription: translation.embeds[e.instance.props.embed.id].description,
-					rawTitle: translation.embeds[e.instance.props.embed.id].title,
-					footer: Object.assign({}, e.instance.props.embed.footer || {}, {
-						text: translation.embeds[e.instance.props.embed.id].footerText || ""
+			const embedTranslation = translation && translation.embeds && translation.embeds[embed.id];
+			if (embedTranslation) {
+				const translatedOrOriginal = (translated, original) => translated != null && String(translated).trim() ? translated : original;
+				const originalDescription = hasOwn("originalDescription") ? embed.originalDescription : embed.rawDescription;
+				const originalTitle = hasOwn("originalTitle") ? embed.originalTitle : embed.rawTitle;
+				const originalFields = hasOwn("originalFields") ? embed.originalFields : embed.fields;
+				const originalFooter = hasOwn("originalFooter") ? embed.originalFooter : Object.assign({}, embed.footer);
+				const translatedFields = Array.isArray(embedTranslation.fields) ? embedTranslation.fields : [];
+				const sourceFields = Array.isArray(originalFields) ? originalFields : [];
+				const fields = (sourceFields.length ? sourceFields : translatedFields).map((field, index) => ({
+					rawName: translatedOrOriginal(translatedFields[index] && translatedFields[index].name, field && (field.rawName || field.name)),
+					rawValue: translatedOrOriginal(translatedFields[index] && translatedFields[index].value, field && (field.rawValue || field.value))
+				}));
+				if (!e.returnvalue) e.instance.props.embed = Object.assign({}, embed, {
+					rawDescription: translatedOrOriginal(embedTranslation.description, originalDescription),
+					rawTitle: translatedOrOriginal(embedTranslation.title, originalTitle),
+					footer: Object.assign({}, embed.footer || {}, {
+						text: translatedOrOriginal(embedTranslation.footerText, originalFooter && originalFooter.text)
 					}),
-					fields: translation.embeds[e.instance.props.embed.id].fields.map(n => ({rawName: n.name, rawValue: n.value})),
-					originalDescription: e.instance.props.embed.originalDescription || e.instance.props.embed.rawDescription,
-					originalTitle: e.instance.props.embed.originalTitle || e.instance.props.embed.rawTitle,
-					originalFields: e.instance.props.embed.originalFields || e.instance.props.embed.fields,
-					originalFooter: e.instance.props.embed.originalFooter || Object.assign({}, e.instance.props.embed.footer)
+					fields,
+					originalDescription,
+					originalTitle,
+					originalFields,
+					originalFooter
 				});
 				else {
 					let [children, index] = BDFDB.ReactUtils.findParent(e.returnvalue, {props: [["className", BDFDB.disCN.embeddescription]]});
@@ -339,7 +353,7 @@ function createTranslationDisplayLogic({BDFDB} = {}) {
 					}
 				}
 			}
-			else if (!e.returnvalue && e.instance.props.embed.originalDescription) {
+			else if (!e.returnvalue && ["originalDescription", "originalTitle", "originalFields", "originalFooter"].some(hasOwn)) {
 				e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
 					rawDescription: e.instance.props.embed.originalDescription,
 					rawTitle: e.instance.props.embed.originalTitle,

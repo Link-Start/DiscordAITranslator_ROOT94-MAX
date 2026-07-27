@@ -55,6 +55,15 @@ const foreignLanguageDecisionRuntime = {
 	}
 };
 
+function hasUsefulEmbedTranslation(translation) {
+	return Object.values(translation && translation.embeds || {}).some(embed => embed && (
+		Object.prototype.hasOwnProperty.call(embed, "hasTranslatedContent")
+			? embed.hasTranslatedContent && embed.complete !== false
+			: [embed.title, embed.description, embed.footerText].some(value => String(value || "").trim())
+				|| (Array.isArray(embed.fields) && embed.fields.some(field => field && (String(field.name || "").trim() || String(field.value || "").trim())))
+	));
+}
+
 // The eligibility gate, both before a request and after one. Pure: every input is a
 // plugin method or one of the two direction constants above.
 const receivedMessageFilterRuntime = {
@@ -71,14 +80,14 @@ const receivedMessageFilterRuntime = {
 		return plugin.getTextSimilarityScore(originalContent, translatedContent) >= Math.max(0.92, plugin.getTranslationSimilarityThreshold());
 	},
 	getAutoTranslatedResultRejectReason(plugin, translation, channelId) {
-		if (!translation || !translation.translatedContent) return "local_guard";
+		if (!translation || !translation.translatedContent && !hasUsefulEmbedTranslation(translation)) return "local_guard";
 		if (receivedMessageFilterRuntime.isTranslationResultTooSimilar(plugin, translation)) return "too_similar";
 		const detectedLanguageId = translation.input && translation.input.id;
 		const targetLanguageId = translation.output && translation.output.id || plugin.getLanguageChoice(LANGUAGE_DIRECTIONS.OUTPUT, MESSAGE_DIRECTIONS.RECEIVED, channelId);
 		if (plugin.shouldSkipSameLanguageReceivedMessages() && detectedLanguageId && plugin.isSameLanguageOrVariant(detectedLanguageId, targetLanguageId)) return "same_language";
 		const sourceLanguages = plugin.getReceivedAutoTranslateSourceLanguages();
 		if (sourceLanguages.length && detectedLanguageId && !plugin.matchesConfiguredSourceLanguage(detectedLanguageId, sourceLanguages)) return "source_filter";
-		if (plugin.shouldDropSimilarTranslations() && plugin.getTextSimilarityScore(translation.originalContent, translation.translatedContent) >= plugin.getTranslationSimilarityThreshold()) return "too_similar";
+		if (plugin.shouldDropSimilarTranslations() && translation.originalContent && translation.translatedContent && plugin.getTextSimilarityScore(translation.originalContent, translation.translatedContent) >= plugin.getTranslationSimilarityThreshold()) return "too_similar";
 		return null;
 	},
 	shouldKeepAutoTranslatedResult(plugin, translation, channelId) {

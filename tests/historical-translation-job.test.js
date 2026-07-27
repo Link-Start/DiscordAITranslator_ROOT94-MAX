@@ -1348,6 +1348,45 @@ test("one historical job performs one acknowledged display commit", async () => 
 	assert.equal(commits[0].every(result => result.status === "translated" && result.generation === 1), true);
 });
 
+test("a historical translation creates display state when the message was never rendered first", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin();
+	plugin.isHistoricalTranslationJobItemCurrent = () => true;
+	plugin.commitHistoricalReceivedDisplayBatch = Object.getPrototypeOf(plugin).commitHistoricalReceivedDisplayBatch.bind(plugin);
+	const message = createMessage("recordless", "source text");
+	const summary = {
+		translated: [{message, originalContentData: {content: message.content, embeds: []}, translation: {channelId: message.channel_id, auto: true, content: "translated text", translatedContent: "translated text", signature: "sig-recordless"}}],
+		skipped: [],
+		failed: []
+	};
+	const job = {channelId: "channel-history-job", generation: 1, items: new Map([[message.id, {message}]])};
+
+	assert.equal(plugin.getReceivedDisplayView(message.id), null);
+	await plugin.commitHistoricalTranslationJob(summary, job);
+
+	assert.equal(plugin.getReceivedDisplayView(message.id).content, "translated text");
+});
+
+test("recordless historical skipped and failed results retain their terminal reasons", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin();
+	plugin.isHistoricalTranslationJobItemCurrent = () => true;
+	plugin.commitHistoricalReceivedDisplayBatch = Object.getPrototypeOf(plugin).commitHistoricalReceivedDisplayBatch.bind(plugin);
+	const skipped = createMessage("recordless-skipped", "already translated");
+	const failed = createMessage("recordless-failed", "provider failed");
+	const summary = {
+		translated: [],
+		skipped: [{message: skipped, originalContentData: {content: skipped.content, embeds: []}, reason: "same_language"}],
+		failed: [{message: failed, originalContentData: {content: failed.content, embeds: []}, reason: "provider_failed"}]
+	};
+	const job = {channelId: "channel-history-job", generation: 1, items: new Map([[skipped.id, {message: skipped}], [failed.id, {message: failed}]])};
+
+	await plugin.commitHistoricalTranslationJob(summary, job);
+
+	assert.equal(plugin.getReceivedDisplayView(skipped.id).status, "skipped");
+	assert.equal(plugin.getReceivedDisplayView(skipped.id).reason, "same_language");
+	assert.equal(plugin.getReceivedDisplayView(failed.id).status, "failed");
+	assert.equal(plugin.getReceivedDisplayView(failed.id).reason, "provider_failed");
+});
+
 test("the historical repair path honours the provider backoff instead of throwing", async () => {
 	// Both repair entry points opened with this.awaitProviderBackoff(). That delegated to
 	// receivedTranslationRuntime, which never defined it, so the batch repair threw
