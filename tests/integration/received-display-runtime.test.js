@@ -172,6 +172,42 @@ test("a store-translated message does not requeue in loaded scope", async () => 
 	finally {harness.restore();}
 });
 
+test("revisiting a pruned channel restores its translation from cache without a provider request", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		const messageId = "1532028320168939620";
+		plugin.settings.filters.receivedAutoTranslateScope = "loaded_messages";
+		plugin.clearAutoTranslationQueue = () => {};
+		plugin.clearAutoTranslationEligibleReplyPreviewMessages = () => {};
+		plugin.captureReceivedMessageSource({messageId, channelId: "channel-1", generation: 1, sourceSignature: "signature-1", source: {content: "Original", embeds: []}});
+		await plugin.commitReceivedDisplayResult({messageId, channelId: "channel-1", generation: 1, sourceSignature: "signature-1", origin: "automatic", status: "translated", translation: {content: "译文"}});
+		let cacheReads = 0;
+		plugin.getCachedReceivedTranslation = (message, channelId, originalContentData) => {
+			cacheReads++;
+			return {content: "译文", translatedContent: "译文", originalContent: "Original", signature: plugin.createReceivedTranslationSignature(message, channelId, originalContentData)};
+		};
+		let providerRequests = 0;
+		plugin.translateText = () => {providerRequests++;};
+
+		plugin.prepareAutoTranslationChannelSession("channel-1");
+		plugin.prepareAutoTranslationChannelSession("channel-2");
+		assert.equal(plugin.getReceivedDisplayView(messageId), null, "leaving the channel releases the recoverable display record");
+
+		plugin.prepareAutoTranslationChannelSession("channel-1");
+		const message = {id: messageId, channel_id: "channel-1", content: "Original", embeds: [], attachments: [], author: {id: "other-user"}};
+		const stream = {content: message};
+		plugin.captureSentOriginalMessage = () => {};
+		plugin.checkMessage(stream, message, {id: "channel-1"}, {autoTranslateBoundaryId: "0"});
+
+		assert.equal(cacheReads, 1);
+		assert.equal(stream.content.content, "译文");
+		assert.equal(plugin.getReceivedDisplayView(messageId).translated, true);
+		assert.equal(providerRequests, 0);
+	}
+	finally {harness.restore();}
+});
+
 test("display settings changed after a store commit recompose the rendered content", async () => {
 	const harness = createHarness();
 	try {

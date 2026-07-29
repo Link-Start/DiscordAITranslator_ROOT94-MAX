@@ -1876,6 +1876,7 @@ git commit -m "docs: record display milestone verification"
 - Repository artifact SHA-256: `4d0d1c0f0e3938865c5179b9fe878820affe1d1efbfa5ebe2a1caf997d280821`
 - Deployed SHA-256: `422E76152EEE14FAA38F90B130A4C0CB4CCF6EFF02ECCC8EE04FD83F782F0BDC` (2026-07-26 18:27, `443a54a`; backups `-175610` and `-182726` retained)
 - DiscordPTB smoke gate: first operator pass FAILED and the defect is fixed — the loaded-history capsule stalled at `0/N` with N growing while the client janked, because per-commit scroll restores fired scroll events that kept extending the user-scroll idle window, starving the snapshot seal; reproduced in `tests/integration/received-display-throughput.test.js`, fixed in `443a54a` (programmatic-scroll grace window plus coalesced live display flushes), redeployed. The eight observation checks now need a fresh operator pass.
+- Bounded display-state follow-up (2026-07-29): channel-session exit now prunes recoverable automatic, idle, and settled preview records while retaining in-flight work, manual translations, suppression, cancelled restore state, and source archives. Focused red/green coverage proves channel indexes and generations are released when empty and that revisiting a pruned channel restores from the bounded persistent cache without another provider request. The DiscordPTB smoke gate above remains required before marking the display milestone fully observed.
 
 ## Later Milestones — RETIRED, superseded by `docs/extraction-plan.md`
 

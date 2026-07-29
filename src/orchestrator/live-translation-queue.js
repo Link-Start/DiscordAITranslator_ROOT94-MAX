@@ -46,6 +46,7 @@ function createLiveTranslationQueue({
 	resetLoadedMessageTracking = () => {},
 	clearEligibleReplyPreviewMessages = () => {},
 	clearChannelTranslationQueue = () => {},
+	onChannelSessionLeft = () => {},
 	onChannelSessionStarted = () => {},
 	// Translation policy. Everything below decides what a translation IS; the queue only
 	// decides when it runs, in what order, and what happens to the item afterwards.
@@ -215,6 +216,7 @@ function createLiveTranslationQueue({
 			// The seen map only serves boundary dedup inside the active channel session;
 			// keeping it for left channels grows memory for the whole Discord session.
 			resetLoadedMessageTracking(previousChannelId);
+			onChannelSessionLeft(previousChannelId);
 		}
 		lastChannelId = channelId;
 		const channelState = getChannelState(channelId);

@@ -293,6 +293,8 @@ The global primary default, global backup provider, detection strategy, and ever
 
 Runtime queues, message display state, scroll state, and active generations remain in memory and are never stored in the settings document.
 
+When the user leaves a channel, `MessageStateStore` prunes records that can be reconstructed from the bounded translation cache. It retains active requests, manual translations, manual-untranslate suppression, cancelled restore records, and source archives until their owning workflow finishes. If no records remain, the channel index, display generation, and reply-preview eligibility are released too. Revisiting the channel captures the source again and commits a matching cached translation without another provider request.
+
 Every persistent document has an explicit schema version and one migration entry point. Compatibility reads are removed after the corresponding migration has shipped and been verified.
 
 ## Build And Verification
