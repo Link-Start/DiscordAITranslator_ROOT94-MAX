@@ -513,6 +513,32 @@ test("a translation arriving while the settings panel is open does not repaint t
 	}
 });
 
+test("a translation repaint waits until active scrolling becomes idle", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin, calls} = harness;
+		const channelId = "channel-active-scroll";
+		let scrolling = true;
+		plugin.isUserActivelyScrollingMessages = () => scrolling;
+		plugin.isViewingMessageHistory = () => true;
+		plugin.captureReceivedMessageSource({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", source: {content: "hello", embeds: []}});
+		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
+		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
+
+		await new Promise(resolve => setTimeout(resolve, 700));
+		assert.equal(calls.forceUpdate, 0, "an active scroll window must block every chat repaint");
+
+		scrolling = false;
+		const repaintDeadline = Date.now() + 2000;
+		while (!calls.forceUpdate && Date.now() < repaintDeadline) await new Promise(resolve => setTimeout(resolve, 25));
+		assert.equal(calls.forceUpdate, 1, "the coalesced repaint must resume after scrolling becomes idle");
+	}
+	finally {
+		harness.plugin.clearReceivedDisplayFlushQueue();
+		harness.restore();
+	}
+});
+
 
 test("a targeted repaint appears promptly even while reading back through history", async () => {
 	const harness = createHarness();

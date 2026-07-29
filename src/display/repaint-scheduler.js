@@ -55,12 +55,22 @@ function createDisplayRepaintScheduler({
 			arm(BUSY_RETRY_DELAY_MS);
 			return;
 		}
-		const pending = [...queues.values()];
+		const pending = [...queues.entries()];
 		queues.clear();
-		for (const messageIds of pending) {
+		for (const [channelId, messageIds] of pending) {
 			const rendering = renderMessages([...messageIds]);
-			if (rendering && rendering.catch) rendering.catch(() => {});
+			if (rendering && rendering.then) rendering.then(outcome => {
+				for (const messageId of outcome && outcome.retryIds || []) schedule(channelId, messageId, BUSY_RETRY_DELAY_MS);
+			}).catch(() => {});
 		}
+	}
+
+	function schedule(channelId, messageId, delay = null) {
+		if (!channelId || messageId == null) return;
+		const key = String(channelId);
+		if (!queues.has(key)) queues.set(key, new Set());
+		queues.get(key).add(String(messageId));
+		arm(delay == null ? nextDelay() : delay);
 	}
 
 	// The legacy full-list repaint, kept for the paths that still own their display
@@ -124,13 +134,7 @@ function createDisplayRepaintScheduler({
 			textAreaRetryTimer = null;
 			deferredFullRepaintPending = false;
 		},
-		schedule(channelId, messageId, delay = null) {
-			if (!channelId || messageId == null) return;
-			const key = String(channelId);
-			if (!queues.has(key)) queues.set(key, new Set());
-			queues.get(key).add(String(messageId));
-			arm(delay == null ? nextDelay() : delay);
-		},
+		schedule,
 		flush,
 		clear() {
 			if (timer) cancelTimer(timer);

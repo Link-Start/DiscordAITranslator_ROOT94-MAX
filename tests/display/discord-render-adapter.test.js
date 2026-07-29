@@ -26,7 +26,8 @@ function createHarness({
 	forceUpdateScrollTop = null,
 	forceUpdateError = null,
 	fallbackScrollTop = null,
-	fallbackError = null
+	fallbackError = null,
+	stopDuringUpdate = false
 } = {}) {
 	const visibleRevisions = new Map();
 	const scroller = {scrollTop: 240};
@@ -47,6 +48,7 @@ function createHarness({
 		}
 	}));
 	let userIntentSequence = 7;
+	let runtimeActive = true;
 	const document = {
 		querySelector(selector) {
 			if (selector === ".messages-scroller") return scrollerAvailable ? scroller : null;
@@ -70,6 +72,7 @@ function createHarness({
 				calls.forceUpdate++;
 				assert.equal(target, owner);
 				if (userScrollDuringUpdate) userIntentSequence++;
+				if (stopDuringUpdate) runtimeActive = false;
 				if (forceUpdateScrollTop != null) scroller.scrollTop = forceUpdateScrollTop;
 				if (confirmDirectly) for (const [messageId, revision] of directRevisions) visibleRevisions.set(messageId, revision);
 				if (forceUpdateError) throw forceUpdateError;
@@ -103,6 +106,7 @@ function createHarness({
 			callback();
 		},
 		getUserScrollIntentSequence: () => userIntentSequence,
+		isRuntimeActive: () => runtimeActive,
 		captureScrollState: () => {
 			calls.capture++;
 			return {scrollTop: scroller.scrollTop};
@@ -149,14 +153,29 @@ test("a missing direct confirmation uses one full-list fallback", async () => {
 	assert.deepEqual(outcome.missingIds, []);
 });
 
-test("a user scroll after capture prevents anchor correction", async () => {
-	const {adapter, calls, scroller} = createHarness({userScrollDuringUpdate: true});
+test("a user scroll after capture prevents fallback remount and anchor correction", async () => {
+	const {adapter, calls, scroller} = createHarness({confirmDirectly: false, userScrollDuringUpdate: true});
 	scroller.scrollTop = 700;
-	await adapter.refreshMessages(request);
+	const outcome = await adapter.refreshMessages(request);
 
 	assert.equal(calls.capture, 1);
 	assert.equal(calls.restored, 0);
+	assert.equal(calls.rerenderAll, 0, "a repaint must not remount the chat after the user starts scrolling");
+	assert.deepEqual(outcome.deferredIds, ["m1", "m2"], "stale rows remain store-owned for a later render");
+	assert.deepEqual(outcome.missingIds, []);
 	assert.equal(scroller.scrollTop, 700);
+});
+
+test("a stopped runtime cannot remount chat or restore stale scroll after an async paint", async () => {
+	const {adapter, calls, scroller} = createHarness({confirmDirectly: false, stopDuringUpdate: true});
+	scroller.scrollTop = 640;
+	const outcome = await adapter.refreshMessages(request);
+
+	assert.equal(calls.forceUpdate, 1);
+	assert.equal(calls.rerenderAll, 0);
+	assert.equal(calls.restored, 0);
+	assert.deepEqual(outcome.deferredIds, ["m1", "m2"]);
+	assert.deepEqual(outcome.retryIds, [], "a dead plugin instance must not schedule more repaint work");
 });
 
 test("message lookup does not acknowledge a colliding snowflake", async () => {

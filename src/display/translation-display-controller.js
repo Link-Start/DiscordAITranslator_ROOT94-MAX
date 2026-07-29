@@ -76,6 +76,7 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 		const confirmedIds = filterCurrentIds(rawOutcome.confirmedIds);
 		const missingIds = filterCurrentIds(rawOutcome.missingIds);
 		const deferredIds = filterCurrentIds(rawOutcome.deferredIds);
+		const retryIds = filterCurrentIds(rawOutcome.retryIds);
 		for (const messageId of confirmedIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-confirmed");
 		for (const messageId of missingIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-unconfirmed");
 		store.markRenderOutcome({confirmedIds, missingIds});
@@ -87,6 +88,8 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 		};
 		if (deferredIds.length) filteredOutcome.deferredIds = deferredIds;
 		else delete filteredOutcome.deferredIds;
+		if (retryIds.length) filteredOutcome.retryIds = retryIds;
+		else delete filteredOutcome.retryIds;
 		if (staleIds.length) filteredOutcome.staleIds = staleIds;
 		return filteredOutcome;
 	}

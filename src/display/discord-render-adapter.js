@@ -1,4 +1,4 @@
-function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, setTimeout, getUserScrollIntentSequence, captureScrollState, restoreScrollState}) {
+function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, setTimeout, getUserScrollIntentSequence, captureScrollState, restoreScrollState, isRuntimeActive = () => true}) {
 	function escapeAttributeValue(value) {
 		return String(value).replace(/(["\\])/g, "\\$1");
 	}
@@ -95,18 +95,27 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, set
 				const presentIds = uniqueMessageIds.filter(messageId => findMessageElement(messageId));
 				let confirmedIds = confirmViews(presentIds, viewsByMessageId);
 				let fallbackUsed = false;
+				let interactionDeferredIds = [];
 				if (confirmedIds.length !== presentIds.length) {
-					fallbackUsed = true;
-					BDFDB.MessageUtils.rerenderAll(true);
-					await waitForFallbackPaint();
-					confirmedIds = confirmViews(presentIds, viewsByMessageId);
+					const confirmedIdSet = new Set(confirmedIds.map(String));
+					if (!isRuntimeActive() || intentSequence !== getUserScrollIntentSequence()) {
+						interactionDeferredIds = presentIds.filter(messageId => !confirmedIdSet.has(String(messageId)));
+					}
+					else {
+						fallbackUsed = true;
+						BDFDB.MessageUtils.rerenderAll(true);
+						await waitForFallbackPaint();
+						confirmedIds = confirmViews(presentIds, viewsByMessageId);
+					}
 				}
 				const confirmedIdSet = new Set(confirmedIds.map(String));
-				const deferredIds = uniqueMessageIds.filter(messageId => !presentIds.includes(messageId));
+				const interactionDeferredIdSet = new Set(interactionDeferredIds.map(String));
+				const deferredIds = uniqueMessageIds.filter(messageId => !presentIds.includes(messageId) || interactionDeferredIdSet.has(String(messageId)));
 				outcome = {
 					confirmedIds,
-					missingIds: presentIds.filter(messageId => !confirmedIdSet.has(String(messageId))),
+					missingIds: presentIds.filter(messageId => !confirmedIdSet.has(String(messageId)) && !interactionDeferredIdSet.has(String(messageId))),
 					deferredIds,
+					retryIds: isRuntimeActive() ? interactionDeferredIds : [],
 					fallbackUsed
 				};
 			}
@@ -116,7 +125,7 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, set
 			}
 			finally {
 				try {
-					if (scrollState && intentSequence === getUserScrollIntentSequence()) restoreScrollState(scrollState);
+					if (isRuntimeActive() && scrollState && intentSequence === getUserScrollIntentSequence()) restoreScrollState(scrollState);
 				}
 				catch (err) {
 					if (!hasRenderError) {

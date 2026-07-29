@@ -3123,6 +3123,7 @@ module.exports = (_ => {
 					},
 					requestAnimationFrame: callback => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0),
 					setTimeout: (callback, delay) => setTimeout(callback, delay),
+					isRuntimeActive: () => pluginRuntimeActive,
 					getUserScrollIntentSequence: () => this.ensureMessageViewportStore().getUserScrollIntentSequence(),
 					// Scroll preservation is best-effort: a capture or restore failure must never
 					// break an acknowledged display transaction.
@@ -3137,7 +3138,6 @@ module.exports = (_ => {
 				});
 				return this.receivedDisplayRuntimeInstance;
 			}
-
 			resetReceivedDisplayRuntime () {
 				this.receivedDisplayRuntimeInstance = null;
 			}
@@ -3197,7 +3197,7 @@ module.exports = (_ => {
 			// Repaint cadence lives in the scheduler module; the plugin only supplies the
 			// predicates that depend on Discord state.
 			canRepaintReceivedDisplayNow () {
-				return !this.isTranslatorSettingsSurfaceOpen() && !this.isChannelTextAreaFocused();
+				return !this.isTranslatorSettingsSurfaceOpen() && !this.isChannelTextAreaFocused() && !this.isUserActivelyScrollingMessages();
 			}
 
 			ensureReceivedDisplayRepaintScheduler () {
