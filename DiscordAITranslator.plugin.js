@@ -616,7 +616,7 @@ var require_translation_display_controller = __commonJS({
           });
         }
         __name(filterCurrentIds, "filterCurrentIds");
-        let confirmedIds = filterCurrentIds(rawOutcome.confirmedIds), missingIds = filterCurrentIds(rawOutcome.missingIds), deferredIds = filterCurrentIds(rawOutcome.deferredIds);
+        let confirmedIds = filterCurrentIds(rawOutcome.confirmedIds), missingIds = filterCurrentIds(rawOutcome.missingIds), deferredIds = filterCurrentIds(rawOutcome.deferredIds), retryIds = filterCurrentIds(rawOutcome.retryIds);
         for (let messageId of confirmedIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-confirmed");
         for (let messageId of missingIds) recordRenderTransition(requestedViews.get(String(messageId)), "render-unconfirmed");
         store.markRenderOutcome({ confirmedIds, missingIds });
@@ -626,7 +626,7 @@ var require_translation_display_controller = __commonJS({
           missingIds,
           fallbackUsed: rawOutcome.fallbackUsed === !0
         };
-        return deferredIds.length ? filteredOutcome.deferredIds = deferredIds : delete filteredOutcome.deferredIds, staleIds.length && (filteredOutcome.staleIds = staleIds), filteredOutcome;
+        return deferredIds.length ? filteredOutcome.deferredIds = deferredIds : delete filteredOutcome.deferredIds, retryIds.length ? filteredOutcome.retryIds = retryIds : delete filteredOutcome.retryIds, staleIds.length && (filteredOutcome.staleIds = staleIds), filteredOutcome;
       }
       return __name(refreshRecords, "refreshRecords"), Object.freeze({
         getDisplayView(messageId) {
@@ -685,7 +685,7 @@ var require_translation_display_controller = __commonJS({
 // src/display/discord-render-adapter.js
 var require_discord_render_adapter = __commonJS({
   "src/display/discord-render-adapter.js"(exports2, module2) {
-    function createDiscordRenderAdapter({ BDFDB, document: document2, requestAnimationFrame: requestAnimationFrame2, setTimeout: setTimeout2, getUserScrollIntentSequence, captureScrollState, restoreScrollState }) {
+    function createDiscordRenderAdapter({ BDFDB, document: document2, requestAnimationFrame: requestAnimationFrame2, setTimeout: setTimeout2, getUserScrollIntentSequence, captureScrollState, restoreScrollState, isRuntimeActive = /* @__PURE__ */ __name(() => !0, "isRuntimeActive") }) {
       function escapeAttributeValue(value) {
         return String(value).replace(/(["\\])/g, "\\$1");
       }
@@ -758,20 +758,24 @@ var require_discord_render_adapter = __commonJS({
           try {
             let owner = scroller && findStreamOwner(scroller);
             owner && BDFDB.ReactUtils.forceUpdate(owner), await waitForPaint();
-            let presentIds = uniqueMessageIds.filter((messageId) => findMessageElement(messageId)), confirmedIds = confirmViews(presentIds, viewsByMessageId), fallbackUsed = !1;
-            confirmedIds.length !== presentIds.length && (fallbackUsed = !0, BDFDB.MessageUtils.rerenderAll(!0), await waitForFallbackPaint(), confirmedIds = confirmViews(presentIds, viewsByMessageId));
-            let confirmedIdSet = new Set(confirmedIds.map(String)), deferredIds = uniqueMessageIds.filter((messageId) => !presentIds.includes(messageId));
+            let presentIds = uniqueMessageIds.filter((messageId) => findMessageElement(messageId)), confirmedIds = confirmViews(presentIds, viewsByMessageId), fallbackUsed = !1, interactionDeferredIds = [];
+            if (confirmedIds.length !== presentIds.length) {
+              let confirmedIdSet2 = new Set(confirmedIds.map(String));
+              !isRuntimeActive() || intentSequence !== getUserScrollIntentSequence() ? interactionDeferredIds = presentIds.filter((messageId) => !confirmedIdSet2.has(String(messageId))) : (fallbackUsed = !0, BDFDB.MessageUtils.rerenderAll(!0), await waitForFallbackPaint(), confirmedIds = confirmViews(presentIds, viewsByMessageId));
+            }
+            let confirmedIdSet = new Set(confirmedIds.map(String)), interactionDeferredIdSet = new Set(interactionDeferredIds.map(String)), deferredIds = uniqueMessageIds.filter((messageId) => !presentIds.includes(messageId) || interactionDeferredIdSet.has(String(messageId)));
             outcome = {
               confirmedIds,
-              missingIds: presentIds.filter((messageId) => !confirmedIdSet.has(String(messageId))),
+              missingIds: presentIds.filter((messageId) => !confirmedIdSet.has(String(messageId)) && !interactionDeferredIdSet.has(String(messageId))),
               deferredIds,
+              retryIds: isRuntimeActive() ? interactionDeferredIds : [],
               fallbackUsed
             };
           } catch (err) {
             renderError = err, hasRenderError = !0;
           } finally {
             try {
-              scrollState && intentSequence === getUserScrollIntentSequence() && restoreScrollState(scrollState);
+              isRuntimeActive() && scrollState && intentSequence === getUserScrollIntentSequence() && restoreScrollState(scrollState);
             } catch (err) {
               hasRenderError || (renderError = err, hasRenderError = !0);
             }
@@ -1122,15 +1126,23 @@ var require_repaint_scheduler = __commonJS({
           arm(450);
           return;
         }
-        let pending = [...queues.values()];
+        let pending = [...queues.entries()];
         queues.clear();
-        for (let messageIds of pending) {
+        for (let [channelId, messageIds] of pending) {
           let rendering = renderMessages([...messageIds]);
-          rendering && rendering.catch && rendering.catch(() => {
+          rendering && rendering.then && rendering.then((outcome) => {
+            for (let messageId of outcome && outcome.retryIds || []) schedule(channelId, messageId, 450);
+          }).catch(() => {
           });
         }
       }
       __name(flush, "flush");
+      function schedule(channelId, messageId, delay = null) {
+        if (!channelId || messageId == null) return;
+        let key = String(channelId);
+        queues.has(key) || queues.set(key, /* @__PURE__ */ new Set()), queues.get(key).add(String(messageId)), arm(delay ?? nextDelay());
+      }
+      __name(schedule, "schedule");
       let fullRepaintTimer = null, settingsRetryTimer = null, textAreaRetryTimer = null, deferredFullRepaintPending = !1;
       function scheduleFullRepaint(options = {}) {
         let config = typeof options == "boolean" ? { batched: options } : Object.assign({ batched: !1, allowWhileSettings: !1, allowWhileTyping: !1 }, options);
@@ -1166,11 +1178,7 @@ var require_repaint_scheduler = __commonJS({
           for (let timer2 of [fullRepaintTimer, settingsRetryTimer, textAreaRetryTimer]) timer2 && cancelTimer(timer2);
           fullRepaintTimer = null, settingsRetryTimer = null, textAreaRetryTimer = null, deferredFullRepaintPending = !1;
         },
-        schedule(channelId, messageId, delay = null) {
-          if (!channelId || messageId == null) return;
-          let key = String(channelId);
-          queues.has(key) || queues.set(key, /* @__PURE__ */ new Set()), queues.get(key).add(String(messageId)), arm(delay ?? nextDelay());
-        },
+        schedule,
         flush,
         clear() {
           timer && cancelTimer(timer), timer = null, queues.clear();
@@ -11204,6 +11212,7 @@ __________________ __________________ __________________
               },
               requestAnimationFrame: /* @__PURE__ */ __name((callback) => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0), "requestAnimationFrame"),
               setTimeout: /* @__PURE__ */ __name((callback, delay) => setTimeout(callback, delay), "setTimeout"),
+              isRuntimeActive: /* @__PURE__ */ __name(() => pluginRuntimeActive, "isRuntimeActive"),
               getUserScrollIntentSequence: /* @__PURE__ */ __name(() => this.ensureMessageViewportStore().getUserScrollIntentSequence(), "getUserScrollIntentSequence"),
               // Scroll preservation is best-effort: a capture or restore failure must never
               // break an acknowledged display transaction.
@@ -11268,7 +11277,7 @@ __________________ __________________ __________________
           // Repaint cadence lives in the scheduler module; the plugin only supplies the
           // predicates that depend on Discord state.
           canRepaintReceivedDisplayNow() {
-            return !this.isTranslatorSettingsSurfaceOpen() && !this.isChannelTextAreaFocused();
+            return !this.isTranslatorSettingsSurfaceOpen() && !this.isChannelTextAreaFocused() && !this.isUserActivelyScrollingMessages();
           }
           ensureReceivedDisplayRepaintScheduler() {
             return this.receivedDisplayRepaintSchedulerInstance || (this.receivedDisplayRepaintSchedulerInstance = createDisplayRepaintScheduler({
