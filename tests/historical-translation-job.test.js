@@ -418,6 +418,55 @@ test("repeated message renders during one scroll gesture merge until scrollend",
 	}
 });
 
+test("a historical snapshot starts translating as soon as its configured limit is full", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const channelId = "channel-history-full-limit";
+	const requestedIds = [];
+	let resolveBatch;
+	plugin.getReceivedAutoTranslateLoadedLimit = () => 20;
+	plugin.isUserActivelyScrollingMessages = () => true;
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => String(item.message.id)));
+		return new Promise(resolve => {resolveBatch = resolve;});
+	};
+
+	for (let index = 0; index < 20; index++) {
+		const message = createMessage(String(1000 + index), `loaded message ${index}`);
+		plugin.queueAutoTranslateMessage(message, {id: channelId}, {content: message.content}, {historicalLoad: true, deferHistoricalSnapshotStart: true});
+	}
+	await new Promise(resolve => setImmediate(resolve));
+
+	assert.equal(requestedIds.length, 1, "a full snapshot must not remain stuck in collecting while the user scrolls");
+	assert.equal(requestedIds[0].length, 20);
+	assert.equal(plugin.historicalDisplayBatchCommits.length, 0, "display still waits for the existing idle commit gate");
+
+	resolveBatch(Object.fromEntries(requestedIds[0].map(id => [id, `translated ${id}`])));
+	await plugin.waitForHistoricalTranslationJobs(channelId);
+});
+
+test("a full historical snapshot still starts when queueMicrotask is unavailable", async () => {
+	const originalQueueMicrotask = global.queueMicrotask;
+	global.queueMicrotask = undefined;
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const channelId = "channel-history-no-microtask";
+	const requestedIds = [];
+	plugin.getReceivedAutoTranslateLoadedLimit = () => 2;
+	plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+		requestedIds.push(preparedItems.map(item => String(item.message.id)));
+		return Promise.resolve(Object.fromEntries(preparedItems.map(item => [String(item.message.id), `translated ${item.message.id}`])));
+	};
+
+	try {
+		for (const id of ["1", "2"]) {
+			const message = createMessage(id, `loaded message ${id}`);
+			plugin.queueAutoTranslateMessage(message, {id: channelId}, {content: message.content}, {historicalLoad: true, deferHistoricalSnapshotStart: true});
+		}
+		await plugin.waitForHistoricalTranslationJobs(channelId);
+		assert.deepEqual(requestedIds, [["1", "2"]]);
+	}
+	finally {global.queueMicrotask = originalQueueMicrotask;}
+});
+
 test("scroll gesture seals its pending snapshot after idle when scrollend is unavailable", async () => {
 	const realDocument = global.document;
 	const realSetTimeout = global.setTimeout;
