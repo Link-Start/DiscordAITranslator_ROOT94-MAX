@@ -2359,13 +2359,13 @@ module.exports = (_ => {
 				if (!queueItem || !queueItem.message || !queueItem.channel || !queueItem.channel.id) return false;
 				const channelId = queueItem.channel.id;
 				if (!this.isTranslationEnabled(channelId)) return false;
-				const entry = this.getHistoricalTranslationJobQueue(channelId);
+				const entry = this.getHistoricalTranslationJobQueue(channelId); if (entry.intakeBlocked) return false;
 				let job = entry.jobs[entry.jobs.length - 1];
 				if (job && job.state == "collecting" && !job.sealed && job.items.size >= this.getReceivedAutoTranslateLoadedLimit()) return false;
 				if (!job || job.state != "collecting" || job.sealed) job = this.createCollectedHistoricalTranslationJob(channelId);
 				if (!job.add(queueItem)) return false;
 				this.ensureLiveTranslationQueue().markMessageQueued(queueItem.message.id, {type: "historical", channelId, jobId: job.id});
-				if (!queueItem.deferHistoricalSnapshotStart) this.scheduleHistoricalTranslationJobStart(channelId);
+				if (job.items.size >= this.getReceivedAutoTranslateLoadedLimit()) { entry.intakeBlocked = true; this.finishHistoricalTranslationSnapshot(channelId); const reopen = () => { if (this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry)) entry.intakeBlocked = false; }; if (typeof queueMicrotask == "function") queueMicrotask(reopen); else Promise.resolve().then(reopen); } else if (!queueItem.deferHistoricalSnapshotStart) this.scheduleHistoricalTranslationJobStart(channelId);
 				return true;
 			}
 

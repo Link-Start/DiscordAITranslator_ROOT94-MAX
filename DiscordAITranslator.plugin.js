@@ -5780,7 +5780,7 @@ var require_historical_job_registry = __commonJS({
           let key = normalizeChannelId(channelId);
           if (!key) return null;
           let entry = queues.get(key);
-          return !entry && createWhenMissing && (entry = { channelId: key, generation: 0, jobs: [], runningPromise: null, startToken: null }, queues.set(key, entry)), entry || null;
+          return !entry && createWhenMissing && (entry = { channelId: key, generation: 0, jobs: [], runningPromise: null, startToken: null, intakeBlocked: !1 }, queues.set(key, entry)), entry || null;
         },
         hasQueue(channelId) {
           return queues.has(normalizeChannelId(channelId));
@@ -10658,8 +10658,18 @@ __________________ __________________ __________________
             if (!queueItem || !queueItem.message || !queueItem.channel || !queueItem.channel.id) return !1;
             let channelId = queueItem.channel.id;
             if (!this.isTranslationEnabled(channelId)) return !1;
-            let entry = this.getHistoricalTranslationJobQueue(channelId), job = entry.jobs[entry.jobs.length - 1];
-            return job && job.state == "collecting" && !job.sealed && job.items.size >= this.getReceivedAutoTranslateLoadedLimit() || ((!job || job.state != "collecting" || job.sealed) && (job = this.createCollectedHistoricalTranslationJob(channelId)), !job.add(queueItem)) ? !1 : (this.ensureLiveTranslationQueue().markMessageQueued(queueItem.message.id, { type: "historical", channelId, jobId: job.id }), queueItem.deferHistoricalSnapshotStart || this.scheduleHistoricalTranslationJobStart(channelId), !0);
+            let entry = this.getHistoricalTranslationJobQueue(channelId);
+            if (entry.intakeBlocked) return !1;
+            let job = entry.jobs[entry.jobs.length - 1];
+            if (job && job.state == "collecting" && !job.sealed && job.items.size >= this.getReceivedAutoTranslateLoadedLimit() || ((!job || job.state != "collecting" || job.sealed) && (job = this.createCollectedHistoricalTranslationJob(channelId)), !job.add(queueItem))) return !1;
+            if (this.ensureLiveTranslationQueue().markMessageQueued(queueItem.message.id, { type: "historical", channelId, jobId: job.id }), job.items.size >= this.getReceivedAutoTranslateLoadedLimit()) {
+              entry.intakeBlocked = !0, this.finishHistoricalTranslationSnapshot(channelId);
+              let reopen = /* @__PURE__ */ __name(() => {
+                this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry) && (entry.intakeBlocked = !1);
+              }, "reopen");
+              typeof queueMicrotask == "function" ? queueMicrotask(reopen) : Promise.resolve().then(reopen);
+            } else queueItem.deferHistoricalSnapshotStart || this.scheduleHistoricalTranslationJobStart(channelId);
+            return !0;
           }
           scheduleHistoricalTranslationJobStart(channelId) {
             let entry = this.getHistoricalTranslationJobQueue(channelId, !1);
