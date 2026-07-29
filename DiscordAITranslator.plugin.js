@@ -11006,7 +11006,7 @@ __________________ __________________ __________________
           processChannelTextAreaEditor(e) {
           }
           processChannelTextAreaButtons(e) {
-            if (e.instance.props.disabled || e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.NORMAL && e.instance.props.type != BDFDB.DiscordConstants.ChannelTextAreaTypes.SIDEBAR || !e.returnvalue || !e.returnvalue.props) return;
+            if (e.instance.props.disabled || ![BDFDB.DiscordConstants.ChannelTextAreaTypes.NORMAL, BDFDB.DiscordConstants.ChannelTextAreaTypes.SIDEBAR, "normal", "sidebar"].includes(typeof e.instance.props.type == "string" ? e.instance.props.type : e.instance.props.type && e.instance.props.type.analyticsName) || !e.returnvalue || !e.returnvalue.props) return;
             let children = [].concat(e.returnvalue.props.children || []).filter((child) => !child || child.key == `${this.name}-translate-textarea-button` ? !1 : !(child.props && typeof child.props.className == "string" ? child.props.className : "").includes("_translatortranslatebutton"));
             children.unshift(BDFDB.ReactUtils.createElement(TranslateButtonComponent, {
               key: `${this.name}-translate-textarea-button`,

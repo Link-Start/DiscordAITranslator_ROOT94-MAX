@@ -68,6 +68,38 @@ test("input-box translator button remains visible when obsolete stored setting i
 	assert.equal(event.returnvalue.props.children.length, 1);
 });
 
+test("input-box translator button supports Discord composer type descriptors", () => {
+	const plugin = createPluginInstance({
+		callSetLanguages: false,
+		bdfdb: {
+			DiscordConstants: {
+				ChannelTextAreaTypes: {NORMAL: "NORMAL", SIDEBAR: "SIDEBAR"}
+			},
+			ReactUtils: {
+				createElement: (type, props) => ({type, props})
+			},
+			disCN: new Proxy({}, {get: () => "x"}),
+			dotCN: new Proxy({}, {get: () => ""}),
+			dotCNS: new Proxy({}, {get: () => ""})
+		}
+	});
+	plugin.onLoad();
+	const event = {
+		instance: {
+			props: {
+				disabled: false,
+				type: {analyticsName: "normal"},
+				channel: {id: "channel-1", guild_id: "guild-1"}
+			}
+		},
+		returnvalue: {props: {children: []}}
+	};
+
+	plugin.processChannelTextAreaButtons(event);
+
+	assert.equal(event.returnvalue.props.children.length, 1);
+});
+
 test("message action translator button remains visible when obsolete stored setting is false", () => {
 	const actionChildren = [];
 	const plugin = createPluginInstance({
