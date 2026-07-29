@@ -271,6 +271,16 @@ function createMessageStateStore({journal = null} = {}) {
 		return updateProjection(messageId, {preview: null, previewSignature: null, previewPending: null});
 	}
 
+	function deleteRecord(record) {
+		if (!record || !records.delete(record.messageId)) return false;
+		const channelIds = channelMessageIds.get(record.channelId);
+		if (channelIds) {
+			channelIds.delete(record.messageId);
+			if (!channelIds.size) channelMessageIds.delete(record.channelId);
+		}
+		return true;
+	}
+
 	return Object.freeze({
 		captureSource(snapshot) {
 			if (!snapshot || typeof snapshot !== "object" || !hasGeneration(snapshot.generation)) return null;
@@ -361,6 +371,16 @@ function createMessageStateStore({journal = null} = {}) {
 		},
 		listPreviewed() {
 			return [...records.values()].filter(record => record.preview || record.previewPending);
+		},
+		pruneChannel(channelId) {
+			const normalizedChannelId = normalizeIdentity(channelId);
+			const inFlightStatuses = new Set([MESSAGE_STATUSES.PENDING, MESSAGE_STATUSES.TRANSLATING]);
+			const pruned = listChannel(normalizedChannelId).filter(record => record.origin !== MESSAGE_ORIGINS.MANUAL && !inFlightStatuses.has(record.status) && (record.status !== MESSAGE_STATUSES.CANCELLED || record.renderStatus === RENDER_STATUSES.CONFIRMED) && !record.archive && !record.suppressed && !record.previewPending).filter(deleteRecord);
+			previewEligibility.delete(normalizedChannelId);
+			if (!channelMessageIds.has(normalizedChannelId)) {
+				channelGenerations.delete(normalizedChannelId);
+			}
+			return pruned;
 		},
 		resolveChannelId,
 		markPending(request) {

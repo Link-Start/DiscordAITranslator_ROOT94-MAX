@@ -234,7 +234,13 @@ var require_message_state_store = __commonJS({
       function clearPreviewState(messageId) {
         return updateProjection(messageId, { preview: null, previewSignature: null, previewPending: null });
       }
-      return __name(clearPreviewState, "clearPreviewState"), Object.freeze({
+      __name(clearPreviewState, "clearPreviewState");
+      function deleteRecord(record) {
+        if (!record || !records.delete(record.messageId)) return !1;
+        let channelIds = channelMessageIds.get(record.channelId);
+        return channelIds && (channelIds.delete(record.messageId), channelIds.size || channelMessageIds.delete(record.channelId)), !0;
+      }
+      return __name(deleteRecord, "deleteRecord"), Object.freeze({
         captureSource(snapshot) {
           if (!snapshot || typeof snapshot != "object" || !hasGeneration(snapshot.generation)) return null;
           let messageId = normalizeIdentity(snapshot.messageId), channelId = normalizeIdentity(snapshot.channelId);
@@ -298,6 +304,10 @@ var require_message_state_store = __commonJS({
         },
         listPreviewed() {
           return [...records.values()].filter((record) => record.preview || record.previewPending);
+        },
+        pruneChannel(channelId) {
+          let normalizedChannelId = normalizeIdentity(channelId), inFlightStatuses = /* @__PURE__ */ new Set([MESSAGE_STATUSES.PENDING, MESSAGE_STATUSES.TRANSLATING]), pruned = listChannel(normalizedChannelId).filter((record) => record.origin !== MESSAGE_ORIGINS.MANUAL && !inFlightStatuses.has(record.status) && (record.status !== MESSAGE_STATUSES.CANCELLED || record.renderStatus === RENDER_STATUSES.CONFIRMED) && !record.archive && !record.suppressed && !record.previewPending).filter(deleteRecord);
+          return previewEligibility.delete(normalizedChannelId), channelMessageIds.has(normalizedChannelId) || channelGenerations.delete(normalizedChannelId), pruned;
         },
         resolveChannelId,
         markPending(request) {
@@ -816,6 +826,7 @@ var require_display_runtime = __commonJS({
         clearAllSuppression: /* @__PURE__ */ __name(() => store.clearAllSuppression(), "clearAllSuppression"),
         resolveChannelId: /* @__PURE__ */ __name((messageId, options) => store.resolveChannelId(messageId, options), "resolveChannelId"),
         listTranslated: /* @__PURE__ */ __name(() => store.listTranslated(), "listTranslated"),
+        pruneChannel: /* @__PURE__ */ __name((channelId) => store.pruneChannel(channelId), "pruneChannel"),
         capturePreviewSource: /* @__PURE__ */ __name((snapshot) => store.capturePreviewSource(snapshot), "capturePreviewSource"),
         commitPreviewResult: /* @__PURE__ */ __name((result) => store.commitPreviewResult(result), "commitPreviewResult"),
         markPreviewPending: /* @__PURE__ */ __name((request) => store.markPreviewPending(request), "markPreviewPending"),
@@ -5386,6 +5397,8 @@ var require_live_translation_queue = __commonJS({
       }, "clearEligibleReplyPreviewMessages"),
       clearChannelTranslationQueue = /* @__PURE__ */ __name(() => {
       }, "clearChannelTranslationQueue"),
+      onChannelSessionLeft = /* @__PURE__ */ __name(() => {
+      }, "onChannelSessionLeft"),
       onChannelSessionStarted = /* @__PURE__ */ __name(() => {
       }, "onChannelSessionStarted"),
       // Translation policy. Everything below decides what a translation IS; the queue only
@@ -5491,7 +5504,7 @@ var require_live_translation_queue = __commonJS({
       function prepareChannelSession(channelId) {
         if (!channelId || normalizeChannelId(lastChannelId) === normalizeChannelId(channelId)) return;
         let previousChannelId = lastChannelId;
-        previousChannelId && (clearChannelTranslationQueue(previousChannelId), resetLoadedMessageTracking(previousChannelId)), lastChannelId = channelId;
+        previousChannelId && (clearChannelTranslationQueue(previousChannelId), resetLoadedMessageTracking(previousChannelId), onChannelSessionLeft(previousChannelId)), lastChannelId = channelId;
         let channelState = getChannelState(channelId);
         channelState.initialized = !1, channelState.boundaryMessageId = null, resetLoadedMessageTracking(channelId), clearEligibleReplyPreviewMessages(channelId), onChannelSessionStarted(channelId);
       }
@@ -11038,11 +11051,9 @@ __________________ __________________ __________________
               resetLoadedMessageTracking: /* @__PURE__ */ __name((channelId = null) => loadedTranslationStatusStore.resetSeen(channelId), "resetLoadedMessageTracking"),
               clearEligibleReplyPreviewMessages: /* @__PURE__ */ __name((channelId) => this.clearAutoTranslationEligibleReplyPreviewMessages(channelId), "clearEligibleReplyPreviewMessages"),
               clearChannelTranslationQueue: /* @__PURE__ */ __name((channelId) => this.clearAutoTranslationQueue(channelId), "clearChannelTranslationQueue"),
-              // new_only hides what is already on screen, so a fresh session drops the
-              // automatic records the previous one painted.
-              onChannelSessionStarted: /* @__PURE__ */ __name((channelId) => {
-                this.getReceivedAutoTranslateScope() == "new_only" && this.clearDisplayedAutoTranslations(channelId);
-              }, "onChannelSessionStarted"),
+              onChannelSessionLeft: /* @__PURE__ */ __name((channelId) => this.ensureReceivedDisplayRuntime().pruneChannel(channelId), "onChannelSessionLeft"),
+              // new_only hides what is already on screen, so a fresh session drops the automatic records the previous one painted.
+              onChannelSessionStarted: /* @__PURE__ */ __name((channelId) => this.getReceivedAutoTranslateScope() == "new_only" && this.clearDisplayedAutoTranslations(channelId), "onChannelSessionStarted"),
               getBatchEngineKey: /* @__PURE__ */ __name((channelId) => this.getHistoricalAiBatchEngineKey(channelId), "getBatchEngineKey"),
               createBurstContext: /* @__PURE__ */ __name((channelId) => ({
                 engineKey: this.getHistoricalAiBatchEngineKey(channelId),

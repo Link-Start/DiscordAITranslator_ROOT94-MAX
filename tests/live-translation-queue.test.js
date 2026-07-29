@@ -40,7 +40,8 @@ function createHarness(overrides = {}) {
 		sessionStarts: [],
 		clearedChannels: [],
 		loadedResets: [],
-		eligibleClears: []
+		eligibleClears: [],
+		leftChannels: []
 	};
 	const state = {
 		runtimeActive: true,
@@ -93,6 +94,7 @@ function createHarness(overrides = {}) {
 			log.clearedChannels.push(channelId);
 			queue.clearQueue(channelId);
 		},
+		onChannelSessionLeft: channelId => log.leftChannels.push(channelId),
 		onChannelSessionStarted: channelId => log.sessionStarts.push(channelId),
 		getBatchEngineKey: () => state.batchEngine,
 		createBurstContext: channelId => {
@@ -764,9 +766,11 @@ test("switching channels clears the previous channel's queue and restarts its se
 	assert.equal(harness.queue.getLastChannelId(), "c2");
 	assert.deepEqual(harness.queue.getChannelState("c2"), {initialized: false, boundaryMessageId: null});
 	assert.deepEqual(harness.log.sessionStarts, ["c1", "c2"]);
+	assert.deepEqual(harness.log.leftChannels, ["c1"], "display state is pruned only after leaving a channel");
 
 	harness.queue.prepareChannelSession("c2");
 	assert.deepEqual(harness.log.sessionStarts, ["c1", "c2"], "re-entering the same channel is not a new session");
+	assert.deepEqual(harness.log.leftChannels, ["c1"], "the active channel is never pruned");
 });
 
 test("a plugin restart retires in-flight requests without touching display records", () => {

@@ -51,6 +51,7 @@ function createDisplayRuntime(dependencies) {
 		clearAllSuppression: () => store.clearAllSuppression(),
 		resolveChannelId: (messageId, options) => store.resolveChannelId(messageId, options),
 		listTranslated: () => store.listTranslated(),
+		pruneChannel: channelId => store.pruneChannel(channelId),
 		capturePreviewSource: snapshot => store.capturePreviewSource(snapshot),
 		commitPreviewResult: result => store.commitPreviewResult(result),
 		markPreviewPending: request => store.markPreviewPending(request),

@@ -1380,3 +1380,74 @@ test("a manual translation survives the source capture that follows it", () => {
 	assert.equal(store.commitResult(translated("m1", "c1", "Hello", "auto")).status, "translated");
 });
 
+test("pruning a left channel drops only recoverable automatic display records", () => {
+	const store = createMessageStateStore();
+	for (const messageId of ["idle", "translated", "skipped", "failed", "pending", "manual", "suppressed"]) {
+		store.captureSource(snapshot(messageId, "c1", `${messageId} source`));
+	}
+	store.capturePreviewSource(snapshot("preview-only", "c1", "preview source"));
+	store.commitPreviewResult({messageId: "preview-only", channelId: "c1", signature: "preview", translation: {content: "预览译文"}});
+	store.commitResult(translated("translated", "c1", "translated source", "译文"));
+	store.commitResult({...translated("skipped", "c1", "skipped source", ""), status: "skipped", reason: "same-language", translation: undefined});
+	store.commitResult({...translated("failed", "c1", "failed source", ""), status: "failed", reason: "provider-failed", translation: undefined});
+	store.markPending({messageId: "pending", channelId: "c1", generation: 1, origin: "automatic", requestIdentity: "pending-1"});
+	store.commitManualTranslation({messageId: "manual", channelId: "c1", translation: {content: "手动译文"}});
+	store.suppress("suppressed", {channelId: "c1"});
+	store.captureSource(snapshot("other-channel", "c2", "other source"));
+	store.commitResult(translated("other-channel", "c2", "other source", "其他译文"));
+
+	const pruned = store.pruneChannel("c1");
+
+	assert.deepEqual(pruned.map(record => record.messageId).sort(), ["failed", "idle", "preview-only", "skipped", "translated"]);
+	assert.equal(store.getDisplayState("idle"), null);
+	assert.equal(store.getDisplayState("translated"), null);
+	assert.equal(store.getDisplayState("skipped"), null);
+	assert.equal(store.getDisplayState("failed"), null);
+	assert.equal(store.getDisplayState("preview-only"), null);
+	assert.equal(store.getDisplayState("pending").status, MESSAGE_STATUSES.PENDING);
+	assert.equal(store.getDisplayState("manual").origin, MESSAGE_ORIGINS.MANUAL);
+	assert.equal(store.isSuppressed("suppressed"), true);
+	assert.equal(store.getDisplayState("other-channel").channelId, "c2");
+	assert.equal(store.getChannelGeneration("c1"), 1, "retained in-flight or user state keeps the channel generation");
+});
+
+test("pruning the last record releases the channel generation and index", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("only-message", "c1", "source"));
+
+	assert.deepEqual(store.pruneChannel("c1").map(record => record.messageId), ["only-message"]);
+	assert.equal(store.getChannelGeneration("c1"), undefined);
+	assert.deepEqual(store.listChannel("c1"), []);
+});
+
+test("channel pruning preserves automatic records that still own restore state", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("archived", "c1", "original"));
+	store.commitManualTranslation({
+		messageId: "archived",
+		channelId: "c1",
+		translation: {content: "manual"},
+		archive: {message: {id: "archived", channel_id: "c1", content: "original"}}
+	});
+	store.clearDisplayedTranslation("archived", {preserveArchive: true});
+
+	assert.deepEqual(store.pruneChannel("c1"), []);
+	assert.equal(store.hasSourceArchive("archived"), true);
+});
+
+test("channel pruning releases confirmed restores and all session-only preview eligibility", () => {
+	const store = createMessageStateStore();
+	for (const messageId of ["confirmed-restore", "unconfirmed-restore"]) {
+		store.captureSource(snapshot(messageId, "c1", `${messageId} source`));
+		store.commitResult(translated(messageId, "c1", `${messageId} source`, `${messageId} translated`));
+	}
+	store.restoreChannel("c1");
+	store.markRenderOutcome({confirmedIds: ["confirmed-restore"], missingIds: ["unconfirmed-restore"]});
+	store.commitManualTranslation({messageId: "manual", channelId: "c1", translation: {content: "manual"}});
+	store.markPreviewEligible("c1", "base-message");
+
+	assert.deepEqual(store.pruneChannel("c1").map(record => record.messageId), ["confirmed-restore"]);
+	assert.equal(store.getDisplayState("confirmed-restore"), null);
+	assert.equal(store.getDisplayState("unconfirmed-restore").status, MESSAGE_STATUSES.CANCELLED);
+	assert.equal(store.isPreviewEligible("c1", "base-message"), false);
+});

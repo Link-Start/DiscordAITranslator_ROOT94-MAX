@@ -2954,11 +2954,9 @@ module.exports = (_ => {
 					resetLoadedMessageTracking: (channelId = null) => loadedTranslationStatusStore.resetSeen(channelId),
 					clearEligibleReplyPreviewMessages: channelId => this.clearAutoTranslationEligibleReplyPreviewMessages(channelId),
 					clearChannelTranslationQueue: channelId => this.clearAutoTranslationQueue(channelId),
-					// new_only hides what is already on screen, so a fresh session drops the
-					// automatic records the previous one painted.
-					onChannelSessionStarted: channelId => {
-					if (this.getReceivedAutoTranslateScope() == "new_only") this.clearDisplayedAutoTranslations(channelId);
-					},
+					onChannelSessionLeft: channelId => this.ensureReceivedDisplayRuntime().pruneChannel(channelId),
+					// new_only hides what is already on screen, so a fresh session drops the automatic records the previous one painted.
+					onChannelSessionStarted: channelId => this.getReceivedAutoTranslateScope() == "new_only" && this.clearDisplayedAutoTranslations(channelId),
 					getBatchEngineKey: channelId => this.getHistoricalAiBatchEngineKey(channelId),
 					createBurstContext: channelId => ({
 					engineKey: this.getHistoricalAiBatchEngineKey(channelId),
