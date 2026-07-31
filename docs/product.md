@@ -56,9 +56,13 @@ The channel popout does not contain:
 - Live messages use an immediate queue and never wait for loaded-history work.
 - Loaded messages form one channel-scoped, ID-keyed job up to the configured limit.
 - A historical job may make several provider or repair requests, but valid terminal results become visible in one atomic rerender.
+- Completed translations become visible immediately even while the user is typing or scrolling.
+- One historical display transaction refreshes the mounted message rows in that configured batch together while preserving the viewport anchor once; if the user changes scroll intent during paint, the plugin does not pull the viewport back. Virtualized rows render their final stored state when they mount.
+- Automatic translation display never remounts the full chat list.
+- The loaded-message status counts confirmed and virtualized-ready translations only; missing, retrying, rejected, and stale rows are not reported as displayed.
 - Missing, duplicate, malformed, empty, wrong-language, and placeholder-damaged batch results enter repair instead of disappearing.
 - Each pending message uses a fixed-size CSS loading indicator without timer-driven React rerenders.
-- Historical display commit waits for recent typing and scrolling to become idle.
+- Disabling automatic translation restores messages, reply previews, embeds, and titles through one display transaction without a second broad repaint.
 
 ## Message Lifecycle
 

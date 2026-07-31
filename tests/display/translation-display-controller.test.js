@@ -196,6 +196,21 @@ test("restoreChannel refreshes original automatic content once and leaves manual
 	assert.equal(controller.getDisplayView("manual").translated, true);
 });
 
+test("restoreChannel refreshes reply-preview host rows in the same transaction", async () => {
+	const {store, refreshes, controller} = createHarness();
+	store.capturePreviewSource({messageId: "referenced", channelId: "c1", sourceSignature: "preview-source", source: {content: "source"}});
+	store.commitPreviewResult({messageId: "referenced", channelId: "c1", signature: "preview", translation: {translatedContent: "translated"}});
+	store.markPreviewHost("c1", "referenced", "reply-host");
+
+	await controller.restoreChannel("c1", {clearPreviews: true});
+
+	assert.equal(refreshes.length, 1);
+	assert.deepEqual(refreshes[0].messageIds, ["referenced"]);
+	assert.deepEqual(refreshes[0].ownerMessageIds, ["reply-host"]);
+	assert.deepEqual(refreshes[0].views.map(view => view.messageId), ["referenced"], "a host-only row does not need a display-store revision");
+	assert.deepEqual(store.getPreviewHostMessageIds("c1"), [], "clearing previews retires their host ownership");
+});
+
 test("missing acknowledgement remains inspectable without changing the display revision", async () => {
 	const {store, refreshes, controller} = createHarness(request => ({
 		confirmedIds: [],

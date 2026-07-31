@@ -65,6 +65,30 @@ test("disable restoration removes text and decoration under the same revision", 
 	finally {harness.restore();}
 });
 
+test("disabling clears a preview-only translation by refreshing its replying host row", async () => {
+	const harness = createHarness({mountedMessageIds: ["reply-message"]});
+	try {
+		const {plugin, calls} = harness;
+		delete plugin.isTranslationEnabled;
+		plugin.setChannelEnablementStateValue("channel-a", true);
+		const runtime = plugin.ensureReceivedDisplayRuntime();
+		runtime.capturePreviewSource({messageId: "referenced-message", channelId: "channel-a", sourceSignature: "preview-source", source: {content: "original preview", embeds: []}});
+		runtime.commitPreviewResult({messageId: "referenced-message", channelId: "channel-a", signature: "preview-signature", translation: {translatedContent: "translated preview", channelId: "channel-a", auto: true}});
+		plugin.processMessageReply({instance: {props: {
+			referencedMessage: {message: {id: "referenced-message", channel_id: "channel-a", content: "original preview"}},
+			baseMessage: {id: "reply-message", channel_id: "channel-a", content: "reply"}
+		}}});
+		const updatesBeforeDisable = calls.forceUpdate;
+
+		await plugin.toggleTranslation("channel-a");
+
+		assert.equal(runtime.getPreviewTranslation("referenced-message"), null);
+		assert.equal(calls.forceUpdate, updatesBeforeDisable + 1, "preview cleanup must join the one disable refresh");
+		assert.deepEqual(calls.forceUpdateBatches.at(-1), ["reply-message"], "the preview is painted by the replying row, not the referenced row");
+	}
+	finally {harness.restore();}
+});
+
 test("plugin stop restores automatic records before requesting the final rerender", async () => {
 	const harness = createHarness();
 	try {
@@ -179,12 +203,12 @@ test("channel disable clears compatibility state even when the restore repaint f
 		const cleared = [];
 		plugin.restoreReceivedDisplayChannel = async () => {throw new Error("render failed");};
 		plugin.clearDisplayedAutoTranslations = channelId => {cleared.push(["display", channelId]);};
-		plugin.scheduleTranslationRerender = () => {cleared.push(["rerender"]);};
+		plugin.scheduleTranslationRerender = () => {throw new Error("disable must not schedule a second broad repaint");};
 		plugin.processAutoTranslationQueue = () => {cleared.push(["queue"]);};
 
 		await assert.rejects(plugin.toggleTranslation("channel-a"), /render failed/);
 
-		assert.deepEqual(cleared, [["display", "channel-a"], ["rerender"], ["queue"]]);
+		assert.deepEqual(cleared, [["display", "channel-a"], ["queue"]]);
 		assert.equal(plugin.isTranslationEnabled("channel-a"), false);
 	}
 	finally {harness.restore();}

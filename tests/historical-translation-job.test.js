@@ -1397,6 +1397,79 @@ test("one historical job performs one acknowledged display commit", async () => 
 	assert.equal(commits[0].every(result => result.status === "translated" && result.generation === 1), true);
 });
 
+test("historical display commit does not wait for typing or scrolling to become idle", async () => {
+	const plugin = createPluginInstance({callSetLanguages: false});
+	const realDocument = global.document;
+	const realSetTimeout = global.setTimeout;
+	let viewportRead = false;
+	let scheduled = false;
+	global.document = {};
+	global.setTimeout = () => {scheduled = true; return 1;};
+	plugin.isHistoricalTranslationJobCurrent = () => true;
+	plugin.ensureMessageViewportStore = () => ({
+		getTimeSinceInputActivity: () => {viewportRead = true; return 0;},
+		isUserScrollingChannel: () => {viewportRead = true; return true;}
+	});
+	try {
+		const commitReady = plugin.waitForHistoricalTranslationCommit({channelId: "c1"});
+		await Promise.race([commitReady, new Promise((_, reject) => realSetTimeout(() => reject(new Error("commit stayed blocked")), 50))]);
+		assert.equal(viewportRead, false);
+		assert.equal(scheduled, false);
+	}
+	finally {
+		global.document = realDocument;
+		global.setTimeout = realSetTimeout;
+	}
+});
+
+test("historical status excludes unconfirmed rejected retrying and stale translations", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin();
+	const messages = ["confirmed", "deferred", "missing", "retry", "rejected", "stale"].map(id => createMessage(id, `${id} source`));
+	const statusUpdates = [];
+	plugin.isHistoricalTranslationJobItemCurrent = () => true;
+	plugin.updateLoadedAutoTranslationStatus = update => {statusUpdates.push(update);};
+	plugin.commitHistoricalReceivedDisplayBatch = async () => ({
+		confirmedIds: ["confirmed"],
+		deferredIds: ["deferred"],
+		missingIds: ["missing"],
+		retryIds: ["retry"],
+		rejectedIds: ["rejected"],
+		staleIds: ["stale"],
+		fallbackUsed: false
+	});
+	const summary = {
+		translated: messages.map(message => ({message, originalContentData: {content: message.content, embeds: []}, translation: {channelId: message.channel_id, auto: true, content: `${message.content} translated`, signature: `sig-${message.id}`}})),
+		skipped: [],
+		failed: []
+	};
+	const job = {channelId: "channel-history-job", generation: 1, items: new Map(messages.map(message => [message.id, {message}]))};
+
+	await plugin.commitHistoricalTranslationJob(summary, job);
+
+	assert.equal(statusUpdates.at(-1).displayed, 2, "confirmed and virtualized-ready rows count; unresolved rows do not");
+});
+
+test("historical progress never reports uncommitted rows or overwrites the final display count", () => {
+	const plugin = configureHistoricalCoordinatorPlugin();
+	const updates = [];
+	plugin.updateLoadedAutoTranslationStatus = update => {updates.push(update);};
+	const job = {
+		channelId: "channel-history-job",
+		state: "ready",
+		items: new Map([
+			["translated", {status: "translated"}],
+			["failed", {status: "failed"}]
+		])
+	};
+
+	plugin.updateHistoricalTranslationJobStatus(job);
+	assert.equal(updates.at(-1).displayed, 0, "atomic results are not displayed before their commit");
+	const updateCount = updates.length;
+	job.state = "committed";
+	plugin.updateHistoricalTranslationJobStatus(job);
+	assert.equal(updates.length, updateCount, "the exact commit outcome remains the final status");
+});
+
 test("a historical translation creates display state when the message was never rendered first", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
 	plugin.isHistoricalTranslationJobItemCurrent = () => true;

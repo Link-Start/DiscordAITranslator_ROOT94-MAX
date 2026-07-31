@@ -41,7 +41,7 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 		journal.append({channelId: view.channelId, messageId: view.messageId, revision: view.revision, transition});
 	}
 
-	async function refreshRecords(records) {
+	async function refreshRecords(records, {ownerMessageIds = []} = {}) {
 		if (!records.length) return createEmptyOutcome();
 		const views = records.map(record => createDisplayView(store.getDisplayState(record.messageId)));
 		if (views.some(view => !view)) throw new Error("A display transaction requires one view per record");
@@ -53,6 +53,7 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			transactionId: ++transactionSequence,
 			channelId: views[0].channelId,
 			messageIds: views.map(view => view.messageId),
+			ownerMessageIds,
 			views
 		});
 		const rawOutcome = outcome || createEmptyOutcome();
@@ -136,8 +137,12 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			if (!records.length) return createEmptyOutcome();
 			return refresh ? refreshRecords(records) : createEmptyOutcome({deferredIds: records.map(record => record.messageId)});
 		},
-		async restoreChannel(channelId) {
-			return refreshRecords(store.restoreChannel(channelId));
+		async restoreChannel(channelId, {clearPreviews = false} = {}) {
+			const previewHostMessageIds = clearPreviews ? store.getPreviewHostMessageIds(channelId) : [];
+			const changed = store.restoreChannel(channelId);
+			if (clearPreviews) changed.push(...store.clearPreviews(channelId));
+			const messageIds = [...new Set(changed.map(record => record.messageId))];
+			return refreshRecords(messageIds.map(messageId => store.getDisplayState(messageId)).filter(Boolean), {ownerMessageIds: previewHostMessageIds});
 		},
 		async restoreAll({refresh = true} = {}) {
 			const records = store.restoreAll();

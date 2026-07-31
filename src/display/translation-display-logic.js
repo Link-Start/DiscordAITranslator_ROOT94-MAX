@@ -199,12 +199,13 @@ function createTranslationDisplayLogic({BDFDB} = {}) {
 			const baseProjection = plugin.ensureReceivedDisplayRuntime().getReplyPreviewProjection(stableReferencedMessage.id, {channelId});
 			const storedMessageTranslation = baseProjection && baseProjection.translation;
 			const hasVisibleStoredTranslation = storedMessageTranslation && translationDisplayLogic.shouldDisplayStoredTranslation(plugin, storedMessageTranslation, channelId) || translationDisplayLogic.getActiveReplyPreviewTranslation(plugin, stableReferencedMessage, channelId);
-			if (!hasVisibleStoredTranslation && plugin.shouldAutoTranslateReplyPreview(baseMessage, stableReferencedMessage, channelId)) plugin.queueReplyPreviewTranslation(stableReferencedMessage, channelId, {baseMessage});
+			const shouldQueuePreview = !hasVisibleStoredTranslation && plugin.shouldAutoTranslateReplyPreview(baseMessage, stableReferencedMessage, channelId);
+			if (shouldQueuePreview) plugin.queueReplyPreviewTranslation(stableReferencedMessage, channelId, {baseMessage});
 			const fallbackContent = translationDisplayLogic.getReplyPreviewDisplayContentForMessage(plugin, stableReferencedMessage, channelId) || translationDisplayLogic.getReplyPreviewFallbackContent(plugin, stableReferencedMessage) || (stableReferencedMessage.content || "").trim();
 			e.instance.props.referencedMessage = Object.assign({}, e.instance.props.referencedMessage);
 			const previewMessage = new BDFDB.DiscordObjects.Message(stableReferencedMessage);
 			previewMessage.content = fallbackContent;
-			plugin.markReplyPreviewRenderMessage(previewMessage);
+			plugin.markReplyPreviewRenderMessage(previewMessage, {channelId, hostMessageId: (hasVisibleStoredTranslation || shouldQueuePreview) && baseMessage && baseMessage.id});
 			e.instance.props.referencedMessage.message = previewMessage;
 			if (e.returnvalue && e.returnvalue.props) {
 				e.returnvalue = plugin.wrapReplyPreviewJumpPause(plugin.stripTranslatorStylingFromReplyPreviewNode(e.returnvalue));

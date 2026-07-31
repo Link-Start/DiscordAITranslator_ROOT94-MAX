@@ -2,14 +2,9 @@
 // store immediately; only the repaint is scheduled here, so deferring never loses a
 // translation - it only delays the paint.
 //
-// Two rules, each learned from a real incident:
-//   * Never repaint while the user is typing or has a translator settings surface
-//     open. The legacy path guarded both and the first store-based implementation
-//     dropped the guards, which interrupted typing.
-//   * A targeted repaint (only the committed message ids) does not disturb someone
-//     reading back through history, so it paints at the live cadence. Only after a
-//     transaction had to fall back to a full-list remount does the next one wait out
-//     the calmer delay, because a remount genuinely does disturb reading.
+// Targeted automatic display always uses the live cadence. It updates exact message
+// owners and never remounts the chat, so typing and scrolling do not delay results.
+// The retained full-list compatibility path still guards disruptive legacy repaints.
 const LIVE_REPAINT_DELAY_MS = 120;
 const CALM_REPAINT_DELAY_MS = 1500;
 const BUSY_RETRY_DELAY_MS = 450;
@@ -19,7 +14,6 @@ function createDisplayRepaintScheduler({
 	renderMessages,
 	canRepaintNow,
 	isViewingHistory,
-	lastRenderUsedFallback,
 	// The full-list repaint path needs the two predicates separately, because it may
 	// be told to ignore one of them.
 	isSettingsSurfaceOpen = () => false,
@@ -37,7 +31,7 @@ function createDisplayRepaintScheduler({
 	let timer = null;
 
 	function nextDelay() {
-		return lastRenderUsedFallback() && isViewingHistory() ? CALM_REPAINT_DELAY_MS : LIVE_REPAINT_DELAY_MS;
+		return LIVE_REPAINT_DELAY_MS;
 	}
 
 	function arm(delay) {

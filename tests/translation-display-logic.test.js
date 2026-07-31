@@ -62,8 +62,8 @@ function createFakePlugin(overrides = {}) {
 		queueReplyPreviewTranslation(message, channelId) {
 			calls.push(["queueReplyPreviewTranslation", message.id, channelId]);
 		},
-		markReplyPreviewRenderMessage(message) {
-			calls.push(["markReplyPreviewRenderMessage", message.id]);
+		markReplyPreviewRenderMessage(message, options) {
+			calls.push(["markReplyPreviewRenderMessage", message.id, options]);
 		},
 		stripTranslatorStylingFromReplyPreviewNode: node => node,
 		wrapReplyPreviewJumpPause: node => node,
@@ -529,6 +529,7 @@ test("processMessageReply projects the stored translation into the reply preview
 	assert.equal(e.instance.props.referencedMessage.message.content, "Hello");
 	assert.equal(referencedMessage.content, "Hallo", "the referenced message itself is untouched");
 	assert.ok(plugin.calls.some(call => call[0] == "markReplyPreviewRenderMessage" && call[1] == "m1"));
+	assert.deepEqual(plugin.calls.find(call => call[0] == "markReplyPreviewRenderMessage")[2], {channelId: "c1", hostMessageId: "m2"});
 	assert.equal(plugin.calls.some(call => call[0] == "queueReplyPreviewTranslation"), false, "an existing translation is not requeued");
 });
 

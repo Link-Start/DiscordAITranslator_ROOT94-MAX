@@ -1,4 +1,4 @@
-function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, setTimeout, getUserScrollIntentSequence, captureScrollState, restoreScrollState, isRuntimeActive = () => true}) {
+function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, getUserScrollIntentSequence, captureScrollState, restoreScrollState, isRuntimeActive = () => true}) {
 	function escapeAttributeValue(value) {
 		return String(value).replace(/(["\\])/g, "\\$1");
 	}
@@ -13,23 +13,19 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, set
 		}
 	}
 
-	function findStreamOwner(scroller) {
-		return BDFDB.ReactUtils.findOwner(scroller, {
+	function findMessageOwner(element, messageId) {
+		return BDFDB.ReactUtils.findOwner(element, {
 			up: true,
 			unlimited: true,
 			filter: instance => {
 				const props = instance && (instance.stateNode && instance.stateNode.props || instance.props || instance.memoizedProps);
-				return !!(props && Array.isArray(props.channelStream));
+				return !!(props && props.message && String(props.message.id) === String(messageId));
 			}
 		});
 	}
 
 	function waitForPaint() {
 		return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-	}
-
-	function waitForFallbackPaint() {
-		return new Promise(resolve => setTimeout(() => waitForPaint().then(resolve), 0));
 	}
 
 	function getUniqueMessageIds(messageIds) {
@@ -71,9 +67,24 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, set
 		});
 	}
 
+	function updateMessageOwners(messageIds, elementsByMessageId) {
+		const owners = [];
+		const seen = new Set();
+		for (const messageId of messageIds) {
+			const element = elementsByMessageId.get(String(messageId));
+			const owner = element && findMessageOwner(element, messageId);
+			if (!owner || seen.has(owner)) continue;
+			seen.add(owner);
+			owners.push(owner);
+		}
+		if (owners.length) BDFDB.ReactUtils.forceUpdate(...owners);
+		return owners.length;
+	}
+
 	return {
-		async refreshMessages({messageIds = [], views = []}) {
+		async refreshMessages({messageIds = [], ownerMessageIds = [], views = []}) {
 			const uniqueMessageIds = getUniqueMessageIds(messageIds);
+			const targetMessageIds = getUniqueMessageIds(uniqueMessageIds.concat(ownerMessageIds));
 			const viewsByMessageId = getViewsByMessageId(views);
 			const scroller = document.querySelector(BDFDB.dotCN.messagesscroller);
 			const intentSequence = getUserScrollIntentSequence();
@@ -82,41 +93,35 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, set
 			let renderError;
 			let hasRenderError = false;
 			try {
-				const owner = scroller && findStreamOwner(scroller);
-				if (owner) BDFDB.ReactUtils.forceUpdate(owner);
-				await waitForPaint();
-				// Discord virtualises the list, so most of a historical batch has no DOM node
-				// at all. A row that is not mounted has nothing to confirm and nothing to fix:
-				// the store is its source of truth and it paints on mount. Only a row that IS
-				// mounted and still shows a stale revision justifies the fallback - which
-				// unmounts and rebuilds the entire chat layer, the most disruptive repaint
-				// BDFDB has. Counting virtualised rows as failures fired that fallback on
-				// essentially every batch commit, freezing the UI for seconds each time.
-				const presentIds = uniqueMessageIds.filter(messageId => findMessageElement(messageId));
-				let confirmedIds = confirmViews(presentIds, viewsByMessageId);
-				let fallbackUsed = false;
-				let interactionDeferredIds = [];
-				if (confirmedIds.length !== presentIds.length) {
-					const confirmedIdSet = new Set(confirmedIds.map(String));
-					if (!isRuntimeActive() || intentSequence !== getUserScrollIntentSequence()) {
-						interactionDeferredIds = presentIds.filter(messageId => !confirmedIdSet.has(String(messageId)));
-					}
-					else {
-						fallbackUsed = true;
-						BDFDB.MessageUtils.rerenderAll(true);
-						await waitForFallbackPaint();
-						confirmedIds = confirmViews(presentIds, viewsByMessageId);
-					}
+				const elementsByMessageId = new Map();
+				for (const messageId of targetMessageIds) {
+					const element = findMessageElement(messageId);
+					if (element) elementsByMessageId.set(String(messageId), element);
 				}
-				const confirmedIdSet = new Set(confirmedIds.map(String));
-				const interactionDeferredIdSet = new Set(interactionDeferredIds.map(String));
-				const deferredIds = uniqueMessageIds.filter(messageId => !presentIds.includes(messageId) || interactionDeferredIdSet.has(String(messageId)));
+				const presentTargetIds = targetMessageIds.filter(messageId => elementsByMessageId.has(String(messageId)));
+				const presentIds = uniqueMessageIds.filter(messageId => elementsByMessageId.has(String(messageId)));
+				if (isRuntimeActive()) updateMessageOwners(presentTargetIds, elementsByMessageId);
+				await waitForPaint();
+				let confirmedIds = confirmViews(presentIds, viewsByMessageId);
+				let unconfirmedIds = presentIds.filter(messageId => !confirmedIds.map(String).includes(String(messageId)));
+				if (unconfirmedIds.length && isRuntimeActive()) {
+					updateMessageOwners(unconfirmedIds, elementsByMessageId);
+					await waitForPaint();
+					confirmedIds = confirmViews(presentIds, viewsByMessageId);
+					unconfirmedIds = presentIds.filter(messageId => !confirmedIds.map(String).includes(String(messageId)));
+				}
+				const deferredIds = uniqueMessageIds.filter(messageId => !elementsByMessageId.has(String(messageId)));
+				if (!isRuntimeActive()) {
+					const confirmedIdSet = new Set(confirmedIds.map(String));
+					deferredIds.push(...presentIds.filter(messageId => !confirmedIdSet.has(String(messageId))));
+					unconfirmedIds = [];
+				}
 				outcome = {
 					confirmedIds,
-					missingIds: presentIds.filter(messageId => !confirmedIdSet.has(String(messageId)) && !interactionDeferredIdSet.has(String(messageId))),
+					missingIds: unconfirmedIds,
 					deferredIds,
-					retryIds: isRuntimeActive() ? interactionDeferredIds : [],
-					fallbackUsed
+					retryIds: [],
+					fallbackUsed: false
 				};
 			}
 			catch (err) {

@@ -12,7 +12,6 @@ test("a render interrupted by user interaction is retried as one scheduled repai
 		},
 		canRepaintNow: () => true,
 		isViewingHistory: () => false,
-		lastRenderUsedFallback: () => false,
 		setTimeout: (callback, delay) => {
 			timers.push({callback, delay});
 			return timers.length;

@@ -216,11 +216,11 @@ Contains all knowledge of Discord and BDFDB rendering internals.
 ```text
 captureVisibleMessages(channelId)
 applyDisplayTransaction(transaction)
-refreshMessages({channelId, messageIds, views, transactionId})
+refreshMessages({channelId, messageIds, ownerMessageIds, views, transactionId})
 refreshThreadTitles(channelId)
 ```
 
-No translation policy or provider logic is allowed in this adapter. It returns `confirmedIds`, `missingIds`, `deferredIds`, and `fallbackUsed` so state commit and render commit can be measured separately. A deferred ID is outside Discord's mounted virtual list: it remains pending until a later mount can prove the exact revision, and it never triggers the full-list fallback. Revision acknowledgement applies to translated, loading, skipped, failed, cancelled, and restored-original views.
+No translation policy or provider logic is allowed in this adapter. It returns `confirmedIds`, `missingIds`, and `deferredIds` so state commit and render commit can be measured separately. Mounted message owners are refreshed together, with at most one targeted retry for an unconfirmed owner. A deferred ID is outside Discord's mounted virtual list: it renders from store state when it later mounts. The automatic path never invokes a full-list rerender. Revision acknowledgement applies to translated, loading, skipped, failed, cancelled, and restored-original views.
 
 ### TranslationOrchestrator
 
