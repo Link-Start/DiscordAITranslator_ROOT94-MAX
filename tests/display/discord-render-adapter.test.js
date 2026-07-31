@@ -31,8 +31,7 @@ function createHarness({
 } = {}) {
 	const visibleRevisions = new Map();
 	const scroller = {scrollTop: 240};
-	const owner = {props: {channelStream: []}};
-	const calls = {animationFrames: 0, capture: 0, findOwner: 0, forceUpdate: 0, rerenderAll: 0, restored: 0, timeouts: 0};
+	const calls = {animationFrames: 0, capture: 0, findOwner: 0, forceUpdate: 0, forceUpdateBatches: [], rerenderAll: 0, restored: 0, timeouts: 0};
 	const nodeDefinitions = messageNodeDefinitions || availableMessageIds.map(messageId => ({
 		key: messageId,
 		id: `chat-messages-${messageId}`,
@@ -47,6 +46,7 @@ function createHarness({
 			return match && visibleRevisions.get(key) === Number(match[1]) ? {} : null;
 		}
 	}));
+	const messageOwners = new Map(nodeDefinitions.map(({key}) => [key, {props: {message: {id: key}}}]));
 	let userIntentSequence = 7;
 	let runtimeActive = true;
 	const document = {
@@ -61,20 +61,23 @@ function createHarness({
 		ReactUtils: {
 			findOwner(node, config) {
 				calls.findOwner++;
-				assert.equal(node, scroller);
 				assert.equal(config.up, true);
 				assert.equal(config.unlimited, true);
 				assert.equal(config.filter({props: {}}), false);
+				const index = messageNodes.indexOf(node);
+				if (index < 0 || !ownerAvailable) return null;
+				const owner = messageOwners.get(nodeDefinitions[index].key);
 				assert.equal(config.filter(owner), true);
-				return ownerAvailable ? owner : null;
+				return owner;
 			},
-			forceUpdate(target) {
+			forceUpdate(...targets) {
 				calls.forceUpdate++;
-				assert.equal(target, owner);
+				calls.forceUpdateBatches.push(targets);
 				if (userScrollDuringUpdate) userIntentSequence++;
 				if (stopDuringUpdate) runtimeActive = false;
 				if (forceUpdateScrollTop != null) scroller.scrollTop = forceUpdateScrollTop;
-				if (confirmDirectly) for (const [messageId, revision] of directRevisions) visibleRevisions.set(messageId, revision);
+				const revisions = confirmDirectly ? directRevisions : calls.forceUpdate >= 2 ? fallbackRevisions : [];
+				for (const [messageId, revision] of revisions) if (targets.includes(messageOwners.get(messageId))) visibleRevisions.set(messageId, revision);
 				if (forceUpdateError) throw forceUpdateError;
 			}
 		},
@@ -126,11 +129,11 @@ const request = {
 	views: [{messageId: "m1", revision: 11}, {messageId: "m2", revision: 12}]
 };
 
-test("refreshMessages forces the channel stream owner and confirms exact revisions", async () => {
+test("refreshMessages forces exact message owners and confirms exact revisions", async () => {
 	const {adapter, calls} = createHarness();
 	const outcome = await adapter.refreshMessages(request);
 
-	assert.equal(calls.findOwner, 1);
+	assert.equal(calls.findOwner, 2);
 	assert.equal(calls.forceUpdate, 1);
 	assert.equal(calls.rerenderAll, 0);
 	assert.equal(calls.animationFrames, 2);
@@ -140,28 +143,45 @@ test("refreshMessages forces the channel stream owner and confirms exact revisio
 	assert.equal(outcome.fallbackUsed, false);
 });
 
-test("a missing direct confirmation uses one full-list fallback", async () => {
+test("a host-only reply row joins the same owner update without revision confirmation", async () => {
+	const {adapter, calls} = createHarness({availableMessageIds: ["m2"], directRevisions: []});
+	const outcome = await adapter.refreshMessages({
+		transactionId: 1,
+		channelId: "c1",
+		messageIds: ["m1"],
+		ownerMessageIds: ["m2"],
+		views: [{messageId: "m1", revision: 11}]
+	});
+
+	assert.equal(calls.forceUpdate, 1);
+	assert.deepEqual(calls.forceUpdateBatches[0].map(owner => owner.props.message.id), ["m2"]);
+	assert.deepEqual(outcome.confirmedIds, []);
+	assert.deepEqual(outcome.missingIds, []);
+	assert.deepEqual(outcome.deferredIds, ["m1"]);
+});
+
+test("a missing direct confirmation gets one targeted retry", async () => {
 	const {adapter, calls} = createHarness({confirmDirectly: false});
 	const outcome = await adapter.refreshMessages(request);
 
-	assert.equal(calls.forceUpdate, 1);
-	assert.equal(calls.rerenderAll, 1);
+	assert.equal(calls.forceUpdate, 2);
+	assert.equal(calls.rerenderAll, 0);
 	assert.equal(calls.animationFrames, 4);
-	assert.equal(calls.timeouts, 1);
-	assert.equal(outcome.fallbackUsed, true);
+	assert.equal(calls.timeouts, 0);
+	assert.equal(outcome.fallbackUsed, false);
 	assert.deepEqual(outcome.confirmedIds, ["m1", "m2"]);
 	assert.deepEqual(outcome.missingIds, []);
 });
 
-test("a user scroll after capture prevents fallback remount and anchor correction", async () => {
+test("a user scroll after capture keeps targeted display but skips anchor correction", async () => {
 	const {adapter, calls, scroller} = createHarness({confirmDirectly: false, userScrollDuringUpdate: true});
 	scroller.scrollTop = 700;
 	const outcome = await adapter.refreshMessages(request);
 
 	assert.equal(calls.capture, 1);
 	assert.equal(calls.restored, 0);
-	assert.equal(calls.rerenderAll, 0, "a repaint must not remount the chat after the user starts scrolling");
-	assert.deepEqual(outcome.deferredIds, ["m1", "m2"], "stale rows remain store-owned for a later render");
+	assert.equal(calls.rerenderAll, 0);
+	assert.deepEqual(outcome.confirmedIds, ["m1", "m2"]);
 	assert.deepEqual(outcome.missingIds, []);
 	assert.equal(scroller.scrollTop, 700);
 });
@@ -212,7 +232,7 @@ test("message lookup ignores a same-ID node outside supported Discord roots", as
 			id: `reply-preview-${messageId}`,
 			dataListItemId: `reply-preview-${messageId}`
 		}, {
-			key: "message-root",
+			key: messageId,
 			id: `chat-messages-${messageId}`,
 			dataListItemId: `chat-messages___chat-messages-${messageId}`
 		}],
@@ -228,8 +248,8 @@ test("message lookup ignores a same-ID node outside supported Discord roots", as
 
 	assert.deepEqual(outcome.confirmedIds, []);
 	assert.deepEqual(outcome.missingIds, [messageId]);
-	assert.equal(outcome.fallbackUsed, true);
-	assert.equal(calls.rerenderAll, 1);
+	assert.equal(outcome.fallbackUsed, false);
+	assert.equal(calls.rerenderAll, 0);
 });
 
 test("conflicting duplicate views remain ambiguous and unconfirmed", async () => {
@@ -243,24 +263,24 @@ test("conflicting duplicate views remain ambiguous and unconfirmed", async () =>
 
 	assert.deepEqual(outcome.confirmedIds, []);
 	assert.deepEqual(outcome.missingIds, ["m1"]);
-	assert.equal(outcome.fallbackUsed, true);
-	assert.equal(calls.rerenderAll, 1);
+	assert.equal(outcome.fallbackUsed, false);
+	assert.equal(calls.rerenderAll, 0);
 });
 
-test("a missing channel stream owner falls back once and restores unchanged scroll", async () => {
+test("a missing message owner reports the mounted rows and restores unchanged scroll", async () => {
 	const {adapter, calls, scroller} = createHarness({ownerAvailable: false, fallbackScrollTop: 900});
 	scroller.scrollTop = 480;
 	const outcome = await adapter.refreshMessages(request);
 
 	assert.equal(calls.capture, 1);
-	assert.equal(calls.findOwner, 1);
+	assert.equal(calls.findOwner, 4);
 	assert.equal(calls.forceUpdate, 0);
-	assert.equal(calls.rerenderAll, 1);
+	assert.equal(calls.rerenderAll, 0);
 	assert.equal(calls.restored, 1);
 	assert.equal(scroller.scrollTop, 480);
-	assert.deepEqual(outcome.confirmedIds, ["m1", "m2"]);
-	assert.deepEqual(outcome.missingIds, []);
-	assert.equal(outcome.fallbackUsed, true);
+	assert.deepEqual(outcome.confirmedIds, []);
+	assert.deepEqual(outcome.missingIds, ["m1", "m2"]);
+	assert.equal(outcome.fallbackUsed, false);
 });
 
 test("a forceUpdate error restores unchanged scroll and preserves the render error", async () => {
@@ -275,23 +295,7 @@ test("a forceUpdate error restores unchanged scroll and preserves the render err
 	assert.equal(scroller.scrollTop, 510);
 });
 
-test("a fallback error restores unchanged scroll and preserves the render error", async () => {
-	const renderError = new Error("fallback failed");
-	const {adapter, calls, scroller} = createHarness({
-		confirmDirectly: false,
-		fallbackScrollTop: 920,
-		fallbackError: renderError
-	});
-	scroller.scrollTop = 520;
-
-	await assert.rejects(adapter.refreshMessages(request), error => error === renderError);
-	assert.equal(calls.forceUpdate, 1);
-	assert.equal(calls.rerenderAll, 1);
-	assert.equal(calls.restored, 1);
-	assert.equal(scroller.scrollTop, 520);
-});
-
-test("missing DOM state returns stable unique IDs after one fallback", async () => {
+test("missing DOM state returns stable unique IDs after a targeted update", async () => {
 	const {adapter, calls} = createHarness({scrollerAvailable: false, availableMessageIds: ["m2"]});
 	const outcome = await adapter.refreshMessages({
 		...request,
@@ -300,16 +304,14 @@ test("missing DOM state returns stable unique IDs after one fallback", async () 
 	});
 
 	assert.equal(calls.capture, 0);
-	assert.equal(calls.findOwner, 0);
-	assert.equal(calls.forceUpdate, 0);
-	// m2 is mounted with no revision painted, so the fallback is genuinely owed; m1 is
-	// virtualised and remains deferred instead of being reported missing.
-	assert.equal(calls.rerenderAll, 1);
+	assert.equal(calls.findOwner, 1);
+	assert.equal(calls.forceUpdate, 1);
+	assert.equal(calls.rerenderAll, 0);
 	assert.equal(calls.restored, 0);
 	assert.deepEqual(outcome.confirmedIds, ["m2"]);
 	assert.deepEqual(outcome.deferredIds, ["m1"]);
 	assert.deepEqual(outcome.missingIds, []);
-	assert.equal(outcome.fallbackUsed, true);
+	assert.equal(outcome.fallbackUsed, false);
 });
 
 test("virtualised rows do not trigger the full-list fallback", async () => {
@@ -333,9 +335,7 @@ test("virtualised rows do not trigger the full-list fallback", async () => {
 	assert.deepEqual(outcome.missingIds, []);
 });
 
-test("a mounted row with a stale revision still gets the fallback", async () => {
-	// The narrowing must not swallow real failures: this row IS on screen and shows
-	// the wrong revision, so the paint genuinely did not land.
+test("a mounted row with a stale revision gets one exact-owner retry", async () => {
 	const {adapter, calls} = createHarness({
 		availableMessageIds: ["m1"],
 		confirmDirectly: false,
@@ -343,9 +343,80 @@ test("a mounted row with a stale revision still gets the fallback", async () => 
 	});
 	const outcome = await adapter.refreshMessages(request);
 
-	assert.equal(calls.rerenderAll, 1);
-	assert.equal(outcome.fallbackUsed, true);
+	assert.equal(calls.forceUpdate, 2);
+	assert.equal(calls.rerenderAll, 0);
+	assert.equal(outcome.fallbackUsed, false);
 	assert.deepEqual(outcome.confirmedIds, ["m1"]);
 	assert.deepEqual(outcome.deferredIds, ["m2"]);
 	assert.deepEqual(outcome.missingIds, []);
+});
+
+function createTargetedOwnerHarness({confirm = true} = {}) {
+	const scroller = {scrollTop: 100};
+	const revisions = new Map();
+	const messageNodes = new Map(["m1", "m2"].map(messageId => [messageId, {
+		id: `chat-messages-${messageId}`,
+		"data-list-item-id": `chat-messages___chat-messages-${messageId}`,
+		querySelector: selector => selector === `[data-translator-revision="${messageId === "m1" ? 11 : 12}"]` && revisions.has(messageId) ? {} : null
+	}]));
+	const messageOwners = new Map(["m1", "m2"].map(messageId => [messageId, {props: {message: {id: messageId}}}]));
+	const streamOwner = {props: {channelStream: []}};
+	const calls = {findOwnerNodes: [], forceUpdateBatches: [], rerenderAll: 0};
+	const document = {
+		querySelector(selector) {
+			if (selector === ".messages-scroller") return scroller;
+			const selectors = selector.split(",").map(part => part.trim());
+			return [...messageNodes.values()].find(node => selectors.some(part => matchesMessageSelector(node, part))) || null;
+		}
+	};
+	const BDFDB = {
+		dotCN: {messagesscroller: ".messages-scroller"},
+		ReactUtils: {
+			findOwner(node, config) {
+				calls.findOwnerNodes.push(node);
+				if (node === scroller) return streamOwner;
+				const entry = [...messageNodes.entries()].find(([, messageNode]) => messageNode === node);
+				const owner = entry && messageOwners.get(entry[0]);
+				assert.equal(config.filter(owner), true);
+				return owner;
+			},
+			forceUpdate(...owners) {
+				calls.forceUpdateBatches.push(owners);
+				if (confirm && owners.every(owner => [...messageOwners.values()].includes(owner))) {
+					for (const [messageId, owner] of messageOwners) if (owners.includes(owner)) revisions.set(messageId, true);
+				}
+			}
+		},
+		MessageUtils: {rerenderAll: () => {calls.rerenderAll++;}}
+	};
+	const adapter = createDiscordRenderAdapter({
+		BDFDB,
+		document,
+		requestAnimationFrame: callback => callback(),
+		setTimeout: callback => callback(),
+		getUserScrollIntentSequence: () => 1,
+		captureScrollState: () => ({scrollTop: scroller.scrollTop}),
+		restoreScrollState: state => {scroller.scrollTop = state.scrollTop;}
+	});
+	return {adapter, calls, messageNodes, messageOwners};
+}
+
+test("refreshMessages updates every mounted message owner in one batch", async () => {
+	const {adapter, calls, messageNodes, messageOwners} = createTargetedOwnerHarness();
+	const outcome = await adapter.refreshMessages(request);
+
+	assert.deepEqual(calls.findOwnerNodes, [...messageNodes.values()]);
+	assert.deepEqual(calls.forceUpdateBatches, [[...messageOwners.values()]]);
+	assert.equal(calls.rerenderAll, 0);
+	assert.deepEqual(outcome.confirmedIds, ["m1", "m2"]);
+});
+
+test("an unconfirmed automatic display retries exact owners without remounting the chat", async () => {
+	const {adapter, calls, messageOwners} = createTargetedOwnerHarness({confirm: false});
+	const outcome = await adapter.refreshMessages(request);
+
+	assert.deepEqual(calls.forceUpdateBatches, [[...messageOwners.values()], [...messageOwners.values()]]);
+	assert.equal(calls.rerenderAll, 0);
+	assert.deepEqual(outcome.missingIds, ["m1", "m2"]);
+	assert.equal(outcome.fallbackUsed, false);
 });

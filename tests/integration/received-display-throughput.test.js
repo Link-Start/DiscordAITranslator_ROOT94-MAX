@@ -462,24 +462,19 @@ test("a burst interrupted by a channel clear does not resurrect provider work", 
 	finally {harness.restore();}
 });
 
-test("a translation arriving while you type does not repaint the chat list", async () => {
+test("a translation arriving while you type is displayed promptly", async () => {
 	const harness = createHarness();
 	try {
 		const {plugin, calls} = harness;
 		const channelId = "channel-typing";
-		let typing = true;
-		plugin.isChannelTextAreaFocused = () => typing;
+		plugin.isChannelTextAreaFocused = () => true;
 		plugin.isViewingMessageHistory = () => false;
 		plugin.captureReceivedMessageSource({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", source: {content: "hello", embeds: []}});
 		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
 		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
 
 		await new Promise(resolve => setTimeout(resolve, 300));
-		assert.equal(calls.forceUpdate, 0, "typing must not be interrupted by a repaint");
-
-		typing = false;
-		await new Promise(resolve => setTimeout(resolve, 700));
-		assert.equal(calls.forceUpdate, 1, "the repaint must still happen once typing stops");
+		assert.equal(calls.forceUpdate, 1, "targeted display must not wait for typing to stop");
 		assert.equal(plugin.getReceivedDisplayRuntimeView("m1").translated, true);
 	}
 	finally {
@@ -513,25 +508,19 @@ test("a translation arriving while the settings panel is open does not repaint t
 	}
 });
 
-test("a translation repaint waits until active scrolling becomes idle", async () => {
+test("a translation repaint is displayed during active scrolling", async () => {
 	const harness = createHarness();
 	try {
 		const {plugin, calls} = harness;
 		const channelId = "channel-active-scroll";
-		let scrolling = true;
-		plugin.isUserActivelyScrollingMessages = () => scrolling;
+		plugin.isUserActivelyScrollingMessages = () => true;
 		plugin.isViewingMessageHistory = () => true;
 		plugin.captureReceivedMessageSource({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", source: {content: "hello", embeds: []}});
 		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
 		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
 
-		await new Promise(resolve => setTimeout(resolve, 700));
-		assert.equal(calls.forceUpdate, 0, "an active scroll window must block every chat repaint");
-
-		scrolling = false;
-		const repaintDeadline = Date.now() + 2000;
-		while (!calls.forceUpdate && Date.now() < repaintDeadline) await new Promise(resolve => setTimeout(resolve, 25));
-		assert.equal(calls.forceUpdate, 1, "the coalesced repaint must resume after scrolling becomes idle");
+		await new Promise(resolve => setTimeout(resolve, 350));
+		assert.equal(calls.forceUpdate, 1, "targeted display must not wait for scrolling to stop");
 	}
 	finally {
 		harness.plugin.clearReceivedDisplayFlushQueue();
@@ -563,7 +552,7 @@ test("a targeted repaint appears promptly even while reading back through histor
 	}
 });
 
-test("a repaint that needed the full-list fallback backs off before the next one", async () => {
+test("an unconfirmed targeted repaint never remounts the chat or slows the next batch", async () => {
 	const harness = createHarness({confirmDirectly: false});
 	try {
 		const {plugin, calls} = harness;
@@ -575,14 +564,13 @@ test("a repaint that needed the full-list fallback backs off before the next one
 		await plugin.commitReceivedDisplayResult({messageId: "m1", channelId, generation: 1, sourceSignature: "sig-m1", origin: "automatic", status: "translated", translation: {content: "你好"}}, {refresh: false});
 		plugin.scheduleReceivedDisplayFlush(channelId, "m1");
 		await new Promise(resolve => setTimeout(resolve, 350));
-		assert.equal(calls.rerenderAll >= 1, true, "this harness forces the full-list fallback");
+		assert.equal(calls.rerenderAll, 0, "automatic display must never remount the full chat list");
 
-		// A full-list remount does disturb a reader, so the next one waits longer.
 		await plugin.commitReceivedDisplayResult({messageId: "m2", channelId, generation: 1, sourceSignature: "sig-m2", origin: "automatic", status: "translated", translation: {content: "你好二"}}, {refresh: false});
 		const updatesBefore = calls.forceUpdate;
 		plugin.scheduleReceivedDisplayFlush(channelId, "m2");
 		await new Promise(resolve => setTimeout(resolve, 350));
-		assert.equal(calls.forceUpdate, updatesBefore, "after a disruptive fallback the next repaint waits out the calm delay");
+		assert.equal(calls.forceUpdate > updatesBefore, true, "the next targeted batch must keep the live cadence");
 	}
 	finally {
 		harness.plugin.clearReceivedDisplayFlushQueue();

@@ -1,11 +1,21 @@
 const {createPluginInstance} = require("./createPluginInstance");
 
-function createHarness({confirmDirectly = true, confirmAfterFallback = true} = {}) {
+function createHarness({confirmDirectly = true, confirmAfterFallback = true, mountedMessageIds = null} = {}) {
 	const originalDocument = global.document;
 	const originalRequestAnimationFrame = global.requestAnimationFrame;
-	const calls = {forceUpdate: 0, rerenderAll: 0};
-	let confirmed = false;
-	const messageElement = {querySelector: () => confirmed ? {} : null};
+	const calls = {forceUpdate: 0, forceUpdateBatches: [], rerenderAll: 0};
+	const mounted = mountedMessageIds && new Set(mountedMessageIds.map(String));
+	const confirmed = new Set();
+	const messageElements = new Map();
+	function getMessageElement(messageId) {
+		const id = String(messageId);
+		if (mounted && !mounted.has(id)) return null;
+		if (!messageElements.has(id)) messageElements.set(id, {
+			messageId: id,
+			querySelector: () => confirmed.has(id) ? {} : null
+		});
+		return messageElements.get(id);
+	}
 	const scroller = {
 		scrollTop: 100,
 		scrollHeight: 1000,
@@ -21,7 +31,10 @@ function createHarness({confirmDirectly = true, confirmAfterFallback = true} = {
 		// "message-" needle never did, so the element read as unmounted and every
 		// refresh in this harness leaned on the full-list fallback - which stopped
 		// matching reality once virtualised rows no longer trigger that fallback.
-		if (typeof selector == "string" && selector.includes("chat-messages")) return messageElement;
+			if (typeof selector == "string" && selector.includes("chat-messages")) {
+				const match = selector.match(/chat-messages-([^"\]]+)/);
+				return match ? getMessageElement(match[1]) : null;
+			}
 			return null;
 		},
 		getElementById: () => null
@@ -37,16 +50,18 @@ function createHarness({confirmDirectly = true, confirmAfterFallback = true} = {
 			LibraryComponents: {TooltipContainer: "TooltipContainer"},
 			ReactUtils: {
 				createElement: (type, props) => ({type, key: props && props.key, props: props || {}}),
-				findOwner: () => ({props: {channelStream: []}}),
-				forceUpdate: () => {
+				findOwner: element => element ? {props: {message: {id: element.messageId}, channelStream: []}} : null,
+				forceUpdate: (...owners) => {
 					calls.forceUpdate++;
-					if (confirmDirectly) confirmed = true;
+					const messageIds = owners.map(owner => owner && owner.props && owner.props.message && String(owner.props.message.id)).filter(Boolean);
+					calls.forceUpdateBatches.push(messageIds);
+					if (confirmDirectly) for (const messageId of messageIds) confirmed.add(messageId);
 				}
 			},
 			MessageUtils: {
 				rerenderAll: () => {
 					calls.rerenderAll++;
-					if (confirmAfterFallback) confirmed = true;
+					if (confirmAfterFallback) for (const messageId of messageElements.keys()) confirmed.add(messageId);
 				}
 			}
 		}

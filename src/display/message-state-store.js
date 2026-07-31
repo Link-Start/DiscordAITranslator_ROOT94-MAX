@@ -128,6 +128,9 @@ function createMessageStateStore({journal = null} = {}) {
 	// Reply-preview eligibility is decided per channel for a BASE message id, not for the
 	// referenced message the preview paints, so it cannot live on a record.
 	const previewEligibility = new Map();
+	// Preview translations are keyed by the referenced message, but React paints them in
+	// every replying message row that quotes it. Keep that one-to-many ownership separate.
+	const previewHostsByChannel = new Map();
 	let revision = 0;
 	let previewPendingSequence = 0;
 
@@ -268,7 +271,28 @@ function createMessageStateStore({journal = null} = {}) {
 	}
 
 	function clearPreviewState(messageId) {
+		const record = records.get(normalizeIdentity(messageId));
+		if (record) clearPreviewHostMappings(previewChannelIdOf(record), [record.messageId]);
 		return updateProjection(messageId, {preview: null, previewSignature: null, previewPending: null});
+	}
+
+	function getPreviewHostMessageIds(channelId, referencedMessageIds = null) {
+		const references = previewHostsByChannel.get(normalizeIdentity(channelId));
+		if (!references) return [];
+		const requested = referencedMessageIds == null ? [...references.keys()] : [...new Set(referencedMessageIds.map(normalizeIdentity).filter(Boolean))];
+		const hostIds = new Set();
+		for (const referencedMessageId of requested) for (const hostMessageId of references.get(referencedMessageId) || []) hostIds.add(hostMessageId);
+		return [...hostIds];
+	}
+
+	function clearPreviewHostMappings(channelId = null, referencedMessageIds = null) {
+		if (channelId === null || channelId === undefined) return previewHostsByChannel.clear();
+		const normalizedChannelId = normalizeIdentity(channelId);
+		const references = previewHostsByChannel.get(normalizedChannelId);
+		if (!references) return;
+		if (referencedMessageIds == null) return previewHostsByChannel.delete(normalizedChannelId);
+		for (const referencedMessageId of referencedMessageIds) references.delete(normalizeIdentity(referencedMessageId));
+		if (!references.size) previewHostsByChannel.delete(normalizedChannelId);
 	}
 
 	function deleteRecord(record) {
@@ -377,6 +401,7 @@ function createMessageStateStore({journal = null} = {}) {
 			const inFlightStatuses = new Set([MESSAGE_STATUSES.PENDING, MESSAGE_STATUSES.TRANSLATING]);
 			const pruned = listChannel(normalizedChannelId).filter(record => record.origin !== MESSAGE_ORIGINS.MANUAL && !inFlightStatuses.has(record.status) && (record.status !== MESSAGE_STATUSES.CANCELLED || record.renderStatus === RENDER_STATUSES.CONFIRMED) && !record.archive && !record.suppressed && !record.previewPending).filter(deleteRecord);
 			previewEligibility.delete(normalizedChannelId);
+			clearPreviewHostMappings(normalizedChannelId);
 			if (!channelMessageIds.has(normalizedChannelId)) {
 				channelGenerations.delete(normalizedChannelId);
 			}
@@ -482,6 +507,7 @@ function createMessageStateStore({journal = null} = {}) {
 			if (!preserveArchive) changes.archive = null;
 			if (!preserveSuppressed) changes.suppressed = false;
 			if (clearPreview) {
+				clearPreviewHostMappings(previewChannelIdOf(record), [record.messageId]);
 				changes.preview = null;
 				changes.previewSignature = null;
 				changes.previewPending = null;
@@ -643,11 +669,25 @@ function createMessageStateStore({journal = null} = {}) {
 		},
 		clearPreviews(channelId = null) {
 			const normalizedChannelId = normalizeIdentity(channelId);
-			return [...records.values()]
+			const cleared = [...records.values()]
 				.filter(record => record.preview || record.previewSignature || record.previewPending)
 				.filter(record => !normalizedChannelId || previewChannelIdOf(record) === normalizedChannelId)
 				.map(record => clearPreviewState(record.messageId));
+			clearPreviewHostMappings(channelId);
+			return cleared;
 		},
+		markPreviewHost(channelId, referencedMessageId, hostMessageId) {
+			const normalizedChannelId = normalizeIdentity(channelId);
+			const normalizedReferencedId = normalizeIdentity(referencedMessageId);
+			const normalizedHostId = normalizeIdentity(hostMessageId);
+			if (!normalizedChannelId || !normalizedReferencedId || !normalizedHostId) return false;
+			if (!previewHostsByChannel.has(normalizedChannelId)) previewHostsByChannel.set(normalizedChannelId, new Map());
+			const references = previewHostsByChannel.get(normalizedChannelId);
+			if (!references.has(normalizedReferencedId)) references.set(normalizedReferencedId, new Set());
+			references.get(normalizedReferencedId).add(normalizedHostId);
+			return true;
+		},
+		getPreviewHostMessageIds,
 		markPreviewEligible(channelId, messageId) {
 			const normalizedChannelId = normalizeIdentity(channelId);
 			const normalizedMessageId = normalizeIdentity(messageId);

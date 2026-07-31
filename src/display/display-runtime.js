@@ -10,19 +10,9 @@ function createDisplayRuntime(dependencies) {
 	const store = createMessageStateStore({journal});
 	const renderAdapter = createDiscordRenderAdapter(dependencies);
 	const controller = createTranslationDisplayController({store, renderAdapter, journal});
-	// Whether the most recent transaction had to fall back to a full-list rerender.
-	// A targeted repaint does not disturb a reader, but a full remount does, so the
-	// caller uses this to pick a calmer cadence for the next repaint.
-	let lastFlushUsedFallback = false;
-
-	function trackFallback(outcome) {
-		lastFlushUsedFallback = !!(outcome && outcome.fallbackUsed);
-		return outcome;
-	}
 
 	return Object.freeze({
 		getTransitionJournal: () => journal,
-		lastRenderUsedFallback: () => lastFlushUsedFallback,
 		captureSource: snapshot => store.captureSource(snapshot),
 		setChannelGeneration: (channelId, generation) => store.setChannelGeneration(channelId, generation),
 		getChannelGeneration: channelId => store.getChannelGeneration(channelId),
@@ -31,9 +21,9 @@ function createDisplayRuntime(dependencies) {
 		releasePending: request => store.releasePending(request),
 		commitMessageResult: (result, options) => controller.commitMessageResult(result, options),
 		commitHistoricalBatch: results => controller.commitHistoricalBatch(results),
-		renderMessages: messageIds => controller.renderMessages(messageIds).then(trackFallback),
+		renderMessages: messageIds => controller.renderMessages(messageIds),
 		restoreMessage: (messageId, options) => controller.restoreMessage(messageId, options),
-		restoreChannel: channelId => controller.restoreChannel(channelId),
+		restoreChannel: (channelId, options) => controller.restoreChannel(channelId, options),
 		restoreAll: options => controller.restoreAll(options),
 		// The surface the legacy display maps are being retired onto. These are plain
 		// store passthroughs rather than controller operations because none of them
@@ -67,6 +57,8 @@ function createDisplayRuntime(dependencies) {
 		clearPreview: messageId => store.clearPreview(messageId),
 		clearPreviews: channelId => store.clearPreviews(channelId),
 		listPreviewed: () => store.listPreviewed(),
+		markPreviewHost: (channelId, referencedMessageId, hostMessageId) => store.markPreviewHost(channelId, referencedMessageId, hostMessageId),
+		getPreviewHostMessageIds: (channelId, referencedMessageIds) => store.getPreviewHostMessageIds(channelId, referencedMessageIds),
 		markPreviewEligible: (channelId, messageId) => store.markPreviewEligible(channelId, messageId),
 		isPreviewEligible: (channelId, messageId) => store.isPreviewEligible(channelId, messageId),
 		clearPreviewEligibility: channelId => store.clearPreviewEligibility(channelId)

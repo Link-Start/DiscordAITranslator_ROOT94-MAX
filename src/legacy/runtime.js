@@ -1257,10 +1257,10 @@ module.exports = (_ => {
 				return this.ensureReceivedDisplayRuntime().isPreviewEligible(channelId, messageId);
 			}
 
-			markReplyPreviewRenderMessage (message) {
+			markReplyPreviewRenderMessage (message, {channelId = null, hostMessageId = null} = {}) {
+				if (message && message.id && channelId && hostMessageId) this.ensureReceivedDisplayRuntime().markPreviewHost(channelId, message.id, hostMessageId);
 				if (message && typeof message == "object") {
-					try {message.__DiscordAITranslatorReplyPreview = true;}
-					catch (err) {}
+					try {message.__DiscordAITranslatorReplyPreview = true;} catch (err) {}
 				}
 			}
 
@@ -1719,7 +1719,7 @@ module.exports = (_ => {
 				return this.ensureLiveTranslationQueue().invalidateRequestForMessage(messageId, channelId, currentSignature);
 			}
 
-			clearAutoTranslationQueue (channelId = null) {
+			clearAutoTranslationQueue (channelId = null, options = {}) {
 				// The queue module owns the queue itself; the surrounding cancellations are
 				// cross-feature and stay here.
 				this.cancelHistoricalTranslationJobs(channelId, channelId ? "channel-queue-cleared" : "all-queues-cleared");
@@ -1727,13 +1727,13 @@ module.exports = (_ => {
 				this.invalidateSentAutomaticTranslationRequests(channelId);
 				this.ensureLiveTranslationQueue().clearQueue(channelId);
 				if (!channelId) {
-					this.ensureReceivedDisplayRuntime().clearPreviews(null);
+					if (!options.preservePreviews) this.ensureReceivedDisplayRuntime().clearPreviews(null);
 					this.ensureReceivedDisplayRuntime().clearPreviewEligibility(null);
 					loadedTranslationStatusStore.resetSeen(null);
 					this.clearLoadedAutoTranslationStatus();
 					return;
 				}
-				this.ensureReceivedDisplayRuntime().clearPreviews(channelId);
+				if (!options.preservePreviews) this.ensureReceivedDisplayRuntime().clearPreviews(channelId);
 				this.ensureReceivedDisplayRuntime().clearPreviewEligibility(channelId);
 				loadedTranslationStatusStore.resetSeen(channelId);
 				if (loadedTranslationStatusStore.isForChannel(channelId)) this.clearLoadedAutoTranslationStatus();
@@ -2549,16 +2549,7 @@ module.exports = (_ => {
 			}
 
 			waitForHistoricalTranslationCommit (job) {
-				if (typeof document == "undefined") return Promise.resolve();
-				return new Promise(resolve => {
-					const waitUntilIdle = _ => {
-						if (!this.isHistoricalTranslationJobCurrent(job)) return resolve();
-						const messageViewport = this.ensureMessageViewportStore();
-						if (messageViewport.getTimeSinceInputActivity() >= 300 && !messageViewport.isUserScrollingChannel(job.channelId)) return resolve();
-						setTimeout(waitUntilIdle, 120);
-					};
-					waitUntilIdle();
-				});
+				return Promise.resolve();
 			}
 
 			createHistoricalTranslationJobConfigurationSignature (channelId) {
@@ -2632,10 +2623,11 @@ module.exports = (_ => {
 					try {batchOutcome = await this.commitHistoricalReceivedDisplayBatch(results);}
 					catch (error) {batchOutcome = null;}
 				}
-				const batchCommitted = !!(batchOutcome && (batchOutcome.confirmedIds && batchOutcome.confirmedIds.length || batchOutcome.missingIds && batchOutcome.missingIds.length || batchOutcome.staleIds && batchOutcome.staleIds.length || batchOutcome.deferredIds && batchOutcome.deferredIds.length));
-				const batchRejected = !!(results.length && !batchCommitted);
 				const failedCount = this.updateFailedHistoricalTranslationSnapshots(summary, job.channelId);
-				this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed: batchRejected ? 0 : summary.translated.length, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length});
+				const blockedIds = new Set([].concat(batchOutcome && batchOutcome.missingIds || [], batchOutcome && batchOutcome.retryIds || [], batchOutcome && batchOutcome.rejectedIds || [], batchOutcome && batchOutcome.staleIds || []).map(String));
+				const displayReadyIds = new Set([].concat(batchOutcome && batchOutcome.confirmedIds || [], batchOutcome && batchOutcome.deferredIds || []).map(String).filter(messageId => !blockedIds.has(messageId)));
+				const displayed = summary.translated.filter(item => item && item.message && displayReadyIds.has(String(item.message.id))).length;
+				this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length});
 			}
 
 			rerenderHistoricalTranslationJob (_job) {
@@ -2644,11 +2636,11 @@ module.exports = (_ => {
 			}
 
 			updateHistoricalTranslationJobStatus (job) {
-				if (!job || !job.channelId) return;
+				if (!job || !job.channelId || job.state == "committed") return;
 				const records = [...job.items.values()];
 				const retainedFailedCount = this.getFailedHistoricalTranslationCount(job.channelId);
 				const currentFailedCount = records.filter(record => record.status == "failed").length;
-				this.updateLoadedAutoTranslationStatus({active: job.state != "committed" && job.state != "cancelled", collecting: job.state == "collecting", done: job.state == "committed", channelId: job.channelId, total: records.length, processed: records.filter(record => HISTORICAL_TERMINAL_ITEM_STATES.has(record.status)).length, displayed: records.filter(record => record.status == "translated").length, skipped: records.filter(record => record.status == "skipped").length, failed: currentFailedCount, retryable: retainedFailedCount, aiDropped: currentFailedCount});
+				this.updateLoadedAutoTranslationStatus({active: job.state != "cancelled", collecting: job.state == "collecting", done: false, channelId: job.channelId, total: records.length, processed: records.filter(record => HISTORICAL_TERMINAL_ITEM_STATES.has(record.status)).length, displayed: 0, skipped: records.filter(record => record.status == "skipped").length, failed: currentFailedCount, retryable: retainedFailedCount, aiDropped: currentFailedCount});
 			}
 
 			getHistoricalAiBatchItemLimit (channelId = null) {
@@ -3115,14 +3107,12 @@ module.exports = (_ => {
 				if (!this.receivedDisplayRuntimeInstance) this.receivedDisplayRuntimeInstance = createDisplayRuntime({
 					BDFDB: {
 						dotCN: BDFDB.dotCN || {},
-						ReactUtils: BDFDB.ReactUtils,
-						MessageUtils: BDFDB.MessageUtils
+						ReactUtils: BDFDB.ReactUtils
 					},
 					document: {
 						querySelector: selector => typeof document == "undefined" || !document || !selector ? null : document.querySelector(selector)
 					},
 					requestAnimationFrame: callback => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : setTimeout(callback, 0),
-					setTimeout: (callback, delay) => setTimeout(callback, delay),
 					isRuntimeActive: () => pluginRuntimeActive,
 					getUserScrollIntentSequence: () => this.ensureMessageViewportStore().getUserScrollIntentSequence(),
 					// Scroll preservation is best-effort: a capture or restore failure must never
@@ -3166,8 +3156,8 @@ module.exports = (_ => {
 				return this.ensureReceivedDisplayRuntime().getDisplayView(messageId);
 			}
 
-			restoreReceivedDisplayChannel (channelId) {
-				return this.ensureReceivedDisplayRuntime().restoreChannel(channelId);
+			restoreReceivedDisplayChannel (channelId, options) {
+				return this.ensureReceivedDisplayRuntime().restoreChannel(channelId, options);
 			}
 
 			restoreAllReceivedDisplay (options) {
@@ -3197,7 +3187,7 @@ module.exports = (_ => {
 			// Repaint cadence lives in the scheduler module; the plugin only supplies the
 			// predicates that depend on Discord state.
 			canRepaintReceivedDisplayNow () {
-				return !this.isTranslatorSettingsSurfaceOpen() && !this.isChannelTextAreaFocused() && !this.isUserActivelyScrollingMessages();
+				return !this.isTranslatorSettingsSurfaceOpen();
 			}
 
 			ensureReceivedDisplayRepaintScheduler () {
@@ -3205,7 +3195,6 @@ module.exports = (_ => {
 					renderMessages: messageIds => this.ensureReceivedDisplayRuntime().renderMessages(messageIds),
 					canRepaintNow: () => this.canRepaintReceivedDisplayNow(),
 					isViewingHistory: () => this.isViewingMessageHistory(),
-					lastRenderUsedFallback: () => this.ensureReceivedDisplayRuntime().lastRenderUsedFallback(),
 					isSettingsSurfaceOpen: () => this.isTranslatorSettingsSurfaceOpen(),
 					isTextAreaFocused: () => this.isChannelTextAreaFocused(),
 					repaintAll: () => this.rerenderMessagesWithScrollPreserved(),
@@ -3213,10 +3202,6 @@ module.exports = (_ => {
 					clearTimeout: timer => BDFDB.TimeUtils.clear(timer)
 				});
 				return this.receivedDisplayRepaintSchedulerInstance;
-			}
-
-			getReceivedDisplayFlushDelay () {
-				return this.ensureReceivedDisplayRepaintScheduler().getNextDelay();
 			}
 
 			scheduleReceivedDisplayFlush (channelId, messageId, delay = null) {
@@ -3553,12 +3538,11 @@ module.exports = (_ => {
 					// restore transaction repaints originals with acknowledgement.
 					const displayGeneration = this.getReceivedDisplayGeneration(channelId);
 					if (displayGeneration !== undefined) this.setReceivedDisplayGeneration(channelId, displayGeneration + 1);
-					this.clearAutoTranslationQueue(channelId);
+					this.clearAutoTranslationQueue(channelId, {preservePreviews: true});
 					this.resetAutoTranslationTracking(channelId);
-					try {await this.restoreReceivedDisplayChannel(channelId);}
+					try {await this.restoreReceivedDisplayChannel(channelId, {clearPreviews: true});}
 					finally {
 						this.clearDisplayedAutoTranslations(channelId);
-						this.scheduleTranslationRerender();
 						this.processAutoTranslationQueue();
 					}
 					return;

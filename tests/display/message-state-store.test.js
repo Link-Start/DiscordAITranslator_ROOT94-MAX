@@ -1232,6 +1232,37 @@ test("reply preview eligibility is keyed by channel and base message", () => {
 	assert.equal(store.isPreviewEligible(null, null), false);
 });
 
+test("reply preview host ownership is one-to-many and channel-isolated", () => {
+	const store = createMessageStateStore();
+
+	assert.equal(store.markPreviewHost("c1", "referenced", "reply-1"), true);
+	store.markPreviewHost("c1", "referenced", "reply-2");
+	store.markPreviewHost("c1", "referenced", "reply-1");
+	store.markPreviewHost("c2", "referenced", "reply-3");
+
+	assert.deepEqual(store.getPreviewHostMessageIds("c1", ["referenced"]), ["reply-1", "reply-2"]);
+	assert.deepEqual(store.getPreviewHostMessageIds("c2"), ["reply-3"]);
+	assert.equal(store.markPreviewHost("", "referenced", "reply"), false);
+	assert.equal(store.markPreviewHost("c1", "", "reply"), false);
+	assert.equal(store.markPreviewHost("c1", "referenced", ""), false);
+});
+
+test("clearing preview state retires only its recorded host rows", () => {
+	const store = createMessageStateStore();
+	for (const [messageId, channelId] of [["referenced-1", "c1"], ["referenced-2", "c1"], ["referenced-3", "c2"]]) {
+		store.commitPreviewResult({messageId, channelId, signature: messageId, translation: {translatedContent: messageId}});
+		store.markPreviewHost(channelId, messageId, `host-${messageId}`);
+	}
+
+	store.clearPreview("referenced-1");
+	assert.deepEqual(store.getPreviewHostMessageIds("c1"), ["host-referenced-2"]);
+	store.clearPreviews("c1");
+	assert.deepEqual(store.getPreviewHostMessageIds("c1"), []);
+	assert.deepEqual(store.getPreviewHostMessageIds("c2"), ["host-referenced-3"]);
+	store.pruneChannel("c2");
+	assert.deepEqual(store.getPreviewHostMessageIds("c2"), []);
+});
+
 test("eligibility is not a record flag and clears per channel or entirely", () => {
 	const store = createMessageStateStore();
 	store.markPreviewEligible("c1", "base-1");
