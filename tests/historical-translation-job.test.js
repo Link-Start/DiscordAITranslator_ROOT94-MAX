@@ -31,6 +31,80 @@ function createLoadedMessages(startId, count, prefix, channelId = "channel-histo
 	return messages;
 }
 
+function createInitialSourcePrefetchHarness({
+	channelId = "channel-history-job",
+	selectedChannelId = channelId
+} = {}) {
+	let activeSelectedChannelId = selectedChannelId;
+	let enabled = true;
+	let prefetchSignal = null;
+	let resolveFetch = null;
+	const plugin = configureHistoricalCoordinatorPlugin({
+		pluginOptions: {
+			settings: {
+				choices: {
+					received: {input: "auto", output: "zh-CN"},
+					sent: {input: "auto", output: "en"}
+				}
+			},
+			defaults: {
+				choices: {
+					received: {value: {input: "auto", output: "zh-CN"}},
+					sent: {value: {input: "auto", output: "en"}}
+				}
+			},
+			bdfdb: {
+				LibraryStores: {
+					SelectedChannelStore: {getChannelId: () => activeSelectedChannelId},
+					MessageStore: {
+						getMessages: requestedChannelId => requestedChannelId == channelId ? {
+							toArray: () => createLoadedMessages(80, 20, "cached", channelId)
+						} : null
+					}
+				},
+				LibraryModules: {
+					MessageActions: {
+						fetchMessages: request => {
+							prefetchSignal = request.signal;
+							return new Promise(resolve => {
+								resolveFetch = () => resolve({body: {messages: createLoadedMessages(60, 10, "prefetched", channelId)}});
+							});
+						}
+					}
+				}
+			}
+		}
+	});
+	plugin.requestAiBatchTranslation = () => {
+		throw new Error("provider must not run before the prefetch gate resolves");
+	};
+	return {
+		plugin,
+		channelId,
+		getSignal: () => prefetchSignal,
+		resolveFetch: () => resolveFetch && resolveFetch(),
+		setSelectedChannelId: value => {activeSelectedChannelId = value;},
+		setEnabled: value => {enabled = value;},
+		applyEnablementOverride() {
+			plugin.isTranslationEnabled = requestedChannelId => requestedChannelId == channelId ? enabled : true;
+			plugin.setChannelEnablementStateValue = (_channelId, nextValue) => {enabled = nextValue;};
+			plugin.restoreReceivedDisplayChannel = async () => {};
+			plugin.clearDisplayedAutoTranslations = () => {};
+			plugin.processAutoTranslationQueue = () => {};
+		},
+		startInitialPass() {
+			plugin.processMessages({
+				instance: {
+					props: {
+						channel: {id: channelId},
+						channelStream: createLoadedMessages(100, 20, "rendered", channelId).map(message => ({content: message}))
+					}
+				}
+			});
+		}
+	};
+}
+
 test("legacy historical queue runtime is absent after coordinator migration", () => {
 	const source = fs.readFileSync(path.resolve(__dirname, "..", "src", "legacy", "runtime.js"), "utf8");
 	const removedRuntimeNames = [
@@ -913,7 +987,8 @@ test("initial loaded-message pass seals one 50-ID snapshot from rendered cached 
 	await new Promise(resolve => setImmediate(resolve));
 	await plugin.waitForHistoricalTranslationJobs(channelId);
 
-	assert.deepEqual(fetchCalls, [{channelId, beforeMessageId: "61", limit: 10, signal: null}]);
+	assert.deepEqual(fetchCalls.map(request => ({channelId: request.channelId, beforeMessageId: request.beforeMessageId, limit: request.limit})), [{channelId, beforeMessageId: "61", limit: 10}]);
+	assert.ok(fetchCalls[0].signal);
 	assert.equal(requestedIds.length, 1);
 	assert.equal(requestedIds[0].length, 50);
 	assert.deepEqual(requestedIds[0], createLoadedMessages(100, 50, "expected", channelId).map(message => message.id));
@@ -988,7 +1063,8 @@ test("switching channels cancels an in-flight initial historical source build be
 	await new Promise(resolve => setImmediate(resolve));
 	await plugin.waitForHistoricalTranslationJobs(channelId);
 
-	assert.deepEqual(fetchCalls, [{channelId, beforeMessageId: "61", limit: 10, signal: null}]);
+	assert.deepEqual(fetchCalls.map(request => ({channelId: request.channelId, beforeMessageId: request.beforeMessageId, limit: request.limit})), [{channelId, beforeMessageId: "61", limit: 10}]);
+	assert.ok(fetchCalls[0].signal);
 	assert.deepEqual(requestedIds, []);
 	assert.deepEqual(plugin.historicalDisplayBatchCommits, []);
 	assert.equal(JSON.stringify(prefetchedMessages), prefetchedSnapshot);
@@ -1121,6 +1197,45 @@ test("advancing the historical source generation cancels an in-flight initial hi
 	assert.deepEqual(plugin.historicalDisplayBatchCommits, []);
 	assert.equal(JSON.stringify(prefetchedMessages), prefetchedSnapshot);
 });
+
+for (const scenario of [
+	{
+		name: "advancing the historical source generation aborts an in-flight prefetch before it can publish",
+		cancel: harness => harness.plugin.advanceHistoricalMessageSourceGeneration(harness.channelId)
+	},
+	{
+		name: "disabling the channel aborts an in-flight prefetch before it can publish",
+		cancel: async harness => {
+			harness.applyEnablementOverride();
+			await harness.plugin.toggleTranslation(harness.channelId);
+		}
+	},
+	{
+		name: "switching channels aborts an in-flight prefetch before it can publish",
+		cancel: harness => {
+			harness.setSelectedChannelId("channel-b");
+			harness.plugin.prepareAutoTranslationChannelSession("channel-b");
+		}
+	}
+]) {
+	test(scenario.name, async () => {
+		const harness = createInitialSourcePrefetchHarness();
+		harness.startInitialPass();
+		await new Promise(resolve => setImmediate(resolve));
+
+		const signal = harness.getSignal();
+		assert.ok(signal, "prefetch must expose a signal to the fetch layer");
+		assert.equal(signal.aborted, false);
+
+		await scenario.cancel(harness);
+
+		assert.equal(signal.aborted, true);
+		harness.resolveFetch();
+		await new Promise(resolve => setImmediate(resolve));
+		await harness.plugin.waitForHistoricalTranslationJobs(harness.channelId);
+		assert.deepEqual(harness.plugin.historicalDisplayBatchCommits, []);
+	});
+}
 
 test("messages loaded during a running historical job form the next atomic job", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});

@@ -128,7 +128,7 @@ test("build prefetches only the missing eligible quantity", async () => {
 		limit: 4
 	});
 
-	assert.deepEqual(prefetchCalls, [{channelId: "channel-1", beforeMessageId: "200", limit: 2}]);
+	assert.deepEqual(prefetchCalls, [{channelId: "channel-1", beforeMessageId: "200", limit: 2, signal: null}]);
 	assert.deepEqual(result.items, [
 		{id: "400", content: "rendered-400"},
 		{id: "200", content: "cached-200"},
@@ -166,7 +166,7 @@ test("off-channel rendered cached and prefetched messages are excluded before th
 		limit: 3
 	});
 
-	assert.deepEqual(prefetchCalls, [{channelId: "channel-1", beforeMessageId: "250", limit: 1}]);
+	assert.deepEqual(prefetchCalls, [{channelId: "channel-1", beforeMessageId: "250", limit: 1, signal: null}]);
 	assert.deepEqual(result, {
 		items: [
 			{id: "400", content: "rendered-400"},

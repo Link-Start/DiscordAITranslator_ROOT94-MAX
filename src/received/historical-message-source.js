@@ -5,6 +5,10 @@
 	toQueueItem = message => message,
 	isGenerationCurrent = () => true
 } = {}) {
+	function isAborted(signal) {
+		return !!(signal && signal.aborted);
+	}
+
 	function isCurrent(channelId, generation) {
 		return isGenerationCurrent(channelId, generation);
 	}
@@ -67,13 +71,13 @@
 		return {items, total: items.length, prefetched, cancelled: false};
 	}
 
-	async function build({channelId, generation, renderedMessages = [], limit = 0} = {}) {
+	async function build({channelId, generation, renderedMessages = [], limit = 0, signal = null} = {}) {
 		const boundedLimit = Math.max(0, parseInt(limit, 10) || 0);
 		if (!channelId || !boundedLimit) return {items: [], total: 0, prefetched: 0, cancelled: false};
-		if (!isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
+		if (isAborted(signal) || !isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
 
 		const cachedMessages = await listCachedMessages(channelId) || [];
-		if (!isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
+		if (isAborted(signal) || !isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
 
 		let combinedMessages = sortNewestFirst(uniqueMessages([].concat(renderedMessages || [], cachedMessages || []).filter(message => isChannelMessage(message, channelId))));
 		let eligibleMessages = collectEligible(combinedMessages, boundedLimit);
@@ -83,12 +87,14 @@
 			const missing = boundedLimit - eligibleMessages.length;
 			const oldestKnownMessage = combinedMessages[combinedMessages.length - 1] || null;
 			try {
+				if (isAborted(signal) || !isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
 				const prefetchedMessages = await prefetchMessages({
 					channelId,
 					beforeMessageId: oldestKnownMessage && oldestKnownMessage.id != null ? String(oldestKnownMessage.id) : null,
-					limit: missing
+					limit: missing,
+					signal
 				}) || [];
-				if (!isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
+				if (isAborted(signal) || !isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
 				combinedMessages = sortNewestFirst(uniqueMessages(combinedMessages.concat(prefetchedMessages.filter(message => isChannelMessage(message, channelId)))));
 				const prefetchedEligibleMessages = collectEligible(combinedMessages, boundedLimit);
 				prefetchedCount = Math.max(0, prefetchedEligibleMessages.length - eligibleMessages.length);
@@ -97,7 +103,7 @@
 			catch (error) {}
 		}
 
-		if (!isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
+		if (isAborted(signal) || !isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
 		return buildResult(eligibleMessages, prefetchedCount);
 	}
 

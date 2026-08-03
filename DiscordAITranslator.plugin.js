@@ -6925,6 +6925,10 @@ var require_historical_message_source = __commonJS({
       toQueueItem = /* @__PURE__ */ __name((message) => message, "toQueueItem"),
       isGenerationCurrent = /* @__PURE__ */ __name(() => !0, "isGenerationCurrent")
     } = {}) {
+      function isAborted(signal) {
+        return !!(signal && signal.aborted);
+      }
+      __name(isAborted, "isAborted");
       function isCurrent(channelId, generation) {
         return isGenerationCurrent(channelId, generation);
       }
@@ -6969,29 +6973,31 @@ var require_historical_message_source = __commonJS({
         return { items, total: items.length, prefetched, cancelled: !1 };
       }
       __name(buildResult, "buildResult");
-      async function build({ channelId, generation, renderedMessages = [], limit = 0 } = {}) {
+      async function build({ channelId, generation, renderedMessages = [], limit = 0, signal = null } = {}) {
         let boundedLimit = Math.max(0, parseInt(limit, 10) || 0);
         if (!channelId || !boundedLimit) return { items: [], total: 0, prefetched: 0, cancelled: !1 };
-        if (!isCurrent(channelId, generation)) return { items: [], total: 0, prefetched: 0, cancelled: !0 };
+        if (isAborted(signal) || !isCurrent(channelId, generation)) return { items: [], total: 0, prefetched: 0, cancelled: !0 };
         let cachedMessages = await listCachedMessages(channelId) || [];
-        if (!isCurrent(channelId, generation)) return { items: [], total: 0, prefetched: 0, cancelled: !0 };
+        if (isAborted(signal) || !isCurrent(channelId, generation)) return { items: [], total: 0, prefetched: 0, cancelled: !0 };
         let combinedMessages = sortNewestFirst(uniqueMessages([].concat(renderedMessages || [], cachedMessages || []).filter((message) => isChannelMessage(message, channelId)))), eligibleMessages = collectEligible(combinedMessages, boundedLimit), prefetchedCount = 0;
         if (eligibleMessages.length < boundedLimit) {
           let missing = boundedLimit - eligibleMessages.length, oldestKnownMessage = combinedMessages[combinedMessages.length - 1] || null;
           try {
+            if (isAborted(signal) || !isCurrent(channelId, generation)) return { items: [], total: 0, prefetched: 0, cancelled: !0 };
             let prefetchedMessages = await prefetchMessages({
               channelId,
               beforeMessageId: oldestKnownMessage && oldestKnownMessage.id != null ? String(oldestKnownMessage.id) : null,
-              limit: missing
+              limit: missing,
+              signal
             }) || [];
-            if (!isCurrent(channelId, generation)) return { items: [], total: 0, prefetched: 0, cancelled: !0 };
+            if (isAborted(signal) || !isCurrent(channelId, generation)) return { items: [], total: 0, prefetched: 0, cancelled: !0 };
             combinedMessages = sortNewestFirst(uniqueMessages(combinedMessages.concat(prefetchedMessages.filter((message) => isChannelMessage(message, channelId)))));
             let prefetchedEligibleMessages = collectEligible(combinedMessages, boundedLimit);
             prefetchedCount = Math.max(0, prefetchedEligibleMessages.length - eligibleMessages.length), eligibleMessages = prefetchedEligibleMessages;
           } catch {
           }
         }
-        return isCurrent(channelId, generation) ? buildResult(eligibleMessages, prefetchedCount) : { items: [], total: 0, prefetched: 0, cancelled: !0 };
+        return isAborted(signal) || !isCurrent(channelId, generation) ? { items: [], total: 0, prefetched: 0, cancelled: !0 } : buildResult(eligibleMessages, prefetchedCount);
       }
       return __name(build, "build"), Object.freeze({ build });
     }
@@ -7059,6 +7065,7 @@ var require_discord_history_adapter = __commonJS({
     async function callFetch(fetchMessages, payload) {
       let lastError = null;
       for (let candidate of resolveFetchCandidates(fetchMessages)) {
+        if (payload.signal && payload.signal.aborted) return [];
         let attempts = [
           () => candidate(payload),
           () => candidate({
@@ -7076,9 +7083,11 @@ var require_discord_history_adapter = __commonJS({
         ];
         for (let attempt of attempts)
           try {
+            if (payload.signal && payload.signal.aborted) return [];
             let result = await attempt();
             if (result != null) return result;
           } catch (error) {
+            if (payload.signal && payload.signal.aborted) return [];
             lastError = error;
           }
       }
@@ -7103,6 +7112,125 @@ var require_discord_history_adapter = __commonJS({
     }
     __name(createDiscordHistoryAdapter, "createDiscordHistoryAdapter");
     module2.exports = { createDiscordHistoryAdapter };
+  }
+});
+
+// src/received/historical-source-runtime.js
+var require_historical_source_runtime = __commonJS({
+  "src/received/historical-source-runtime.js"(exports2, module2) {
+    var { createHistoricalMessageSource } = require_historical_message_source(), { createDiscordHistoryAdapter } = require_discord_history_adapter();
+    function createHistoricalSourceRuntime({
+      createSource = createHistoricalMessageSource,
+      createHistoryAdapter = createDiscordHistoryAdapter,
+      createAbortController = /* @__PURE__ */ __name(() => typeof AbortController == "function" ? new AbortController() : null, "createAbortController"),
+      messageStore = null,
+      fetchMessages = null,
+      isTranslationEnabled = /* @__PURE__ */ __name(() => !1, "isTranslationEnabled"),
+      getSelectedChannelId = /* @__PURE__ */ __name(() => null, "getSelectedChannelId"),
+      cloneMessage = /* @__PURE__ */ __name((message) => message, "cloneMessage"),
+      getMessageChannelId = /* @__PURE__ */ __name(() => null, "getMessageChannelId"),
+      extractOriginalContentData = /* @__PURE__ */ __name(() => null, "extractOriginalContentData"),
+      cloneOriginalContentData = /* @__PURE__ */ __name((originalContentData) => originalContentData, "cloneOriginalContentData"),
+      shouldAutoTranslateReceivedMessage = /* @__PURE__ */ __name(() => !1, "shouldAutoTranslateReceivedMessage"),
+      getCachedReceivedTranslation = /* @__PURE__ */ __name(() => null, "getCachedReceivedTranslation"),
+      collectHistoricalTranslationMessage = /* @__PURE__ */ __name(() => !1, "collectHistoricalTranslationMessage"),
+      finishHistoricalTranslationSnapshot = /* @__PURE__ */ __name(() => !1, "finishHistoricalTranslationSnapshot"),
+      getFailedHistoricalTranslationCount = /* @__PURE__ */ __name(() => 0, "getFailedHistoricalTranslationCount"),
+      updateLoadedAutoTranslationStatus = /* @__PURE__ */ __name(() => {
+      }, "updateLoadedAutoTranslationStatus"),
+      getCurrentBatchNumber = /* @__PURE__ */ __name(() => 0, "getCurrentBatchNumber")
+    } = {}) {
+      let historyAdapter = createHistoryAdapter({ messageStore, fetchMessages }), generations = {}, inFlightBuilds = {};
+      function abortInFlightBuild(channelId = null) {
+        if (!channelId) {
+          for (let key in inFlightBuilds) abortInFlightBuild(key);
+          return;
+        }
+        let entry = inFlightBuilds[channelId];
+        if (entry) {
+          delete inFlightBuilds[channelId];
+          try {
+            entry.controller && typeof entry.controller.abort == "function" && !entry.controller.signal.aborted && entry.controller.abort();
+          } catch {
+          }
+        }
+      }
+      __name(abortInFlightBuild, "abortInFlightBuild");
+      function getGeneration(channelId) {
+        return channelId ? (generations[channelId] || (generations[channelId] = 1), generations[channelId]) : 0;
+      }
+      __name(getGeneration, "getGeneration");
+      function advanceGeneration(channelId = null) {
+        if (!channelId) {
+          abortInFlightBuild();
+          for (let key in generations) generations[key] = (generations[key] || 0) + 1;
+          return generations;
+        }
+        return abortInFlightBuild(channelId), generations[channelId] = (generations[channelId] || 0) + 1, generations[channelId];
+      }
+      __name(advanceGeneration, "advanceGeneration");
+      function isGenerationCurrent(channelId, generation) {
+        if (!channelId || !isTranslationEnabled(channelId) || getGeneration(channelId) != generation) return !1;
+        let selectedChannelId = getSelectedChannelId() || channelId;
+        return !selectedChannelId || selectedChannelId == channelId;
+      }
+      __name(isGenerationCurrent, "isGenerationCurrent");
+      function handleChannelSessionChange(previousChannelId, channelId) {
+        previousChannelId && previousChannelId != channelId && advanceGeneration(previousChannelId), channelId && previousChannelId != channelId && advanceGeneration(channelId);
+      }
+      __name(handleChannelSessionChange, "handleChannelSessionChange");
+      function createQueueItem(message, channelId) {
+        let messageChannelId = getMessageChannelId(message, channelId), originalContentData = cloneOriginalContentData(extractOriginalContentData(message));
+        return {
+          message: cloneMessage(message),
+          channel: { id: messageChannelId },
+          originalContentData,
+          historicalLoad: !0,
+          deferHistoricalSnapshotStart: !0,
+          cachedTranslation: getCachedReceivedTranslation(message, messageChannelId, originalContentData) || null
+        };
+      }
+      __name(createQueueItem, "createQueueItem");
+      async function buildInitialHistoricalTranslationSnapshot({ channelId, generation, renderedMessages = [], limit = 0 } = {}) {
+        if (!channelId || !isGenerationCurrent(channelId, generation)) return { items: [], total: 0, prefetched: 0, accepted: 0, cancelled: !0 };
+        abortInFlightBuild(channelId);
+        let controller = createAbortController(), entry = { generation, controller };
+        inFlightBuilds[channelId] = entry;
+        let signal = controller && controller.signal || null, source = createSource({
+          listCachedMessages: /* @__PURE__ */ __name((requestChannelId) => historyAdapter.listCachedMessages(requestChannelId), "listCachedMessages"),
+          prefetchMessages: /* @__PURE__ */ __name((request) => historyAdapter.prefetchMessages(Object.assign({}, request, { signal })), "prefetchMessages"),
+          isEligible: /* @__PURE__ */ __name((message) => {
+            let messageChannelId = getMessageChannelId(message, channelId), originalContentData = extractOriginalContentData(message);
+            return shouldAutoTranslateReceivedMessage(message, { id: messageChannelId }, originalContentData, !0);
+          }, "isEligible"),
+          toQueueItem: /* @__PURE__ */ __name((message) => createQueueItem(message, channelId), "toQueueItem"),
+          isGenerationCurrent: /* @__PURE__ */ __name((requestChannelId, requestGeneration) => isGenerationCurrent(requestChannelId, requestGeneration), "isGenerationCurrent")
+        });
+        try {
+          let result = await source.build({ channelId, generation, renderedMessages, limit, signal });
+          if (!result || result.cancelled || !isGenerationCurrent(channelId, generation)) return Object.assign({ accepted: 0 }, result || { items: [], total: 0, prefetched: 0, cancelled: !0 });
+          let accepted = 0;
+          for (let queueItem of result.items || []) collectHistoricalTranslationMessage(queueItem) && accepted++;
+          if (accepted) finishHistoricalTranslationSnapshot(channelId);
+          else {
+            let failedCount = getFailedHistoricalTranslationCount(channelId);
+            updateLoadedAutoTranslationStatus({ active: !1, collecting: !1, done: !0, channelId, batch: getCurrentBatchNumber(channelId), total: result.total || 0, processed: 0, displayed: 0, skipped: 0, failed: 0, retryable: failedCount, aiDropped: 0 });
+          }
+          return Object.assign({ accepted }, result);
+        } finally {
+          inFlightBuilds[channelId] === entry && delete inFlightBuilds[channelId];
+        }
+      }
+      return __name(buildInitialHistoricalTranslationSnapshot, "buildInitialHistoricalTranslationSnapshot"), Object.freeze({
+        getGeneration,
+        advanceGeneration,
+        isGenerationCurrent,
+        handleChannelSessionChange,
+        buildInitialHistoricalTranslationSnapshot
+      });
+    }
+    __name(createHistoricalSourceRuntime, "createHistoricalSourceRuntime");
+    module2.exports = { createHistoricalSourceRuntime };
   }
 });
 
@@ -9015,7 +9143,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           foreignLanguageDecisionRuntime,
           receivedMessageFilterRuntime,
           createReceivedTranslationRuntime
-        } = require_received_translation_runtime(), { createHistoricalMessageSource } = require_historical_message_source(), { createDiscordHistoryAdapter } = require_discord_history_adapter(), {
+        } = require_received_translation_runtime(), { createHistoricalSourceRuntime } = require_historical_source_runtime(), {
           LOADED_AUTO_TRANSLATE_RANGE_MODES,
           loadedAutoTranslatePolicy,
           aiDecisionPolicy,
@@ -10058,41 +10186,41 @@ __________________ __________________ __________________
             });
           }
           resetAutoTranslationTracking(channelId = null) {
-            return this.advanceHistoricalMessageSourceGeneration(channelId), this.ensureLiveTranslationQueue().resetTracking(channelId);
+            return this.ensureHistoricalSourceRuntime().advanceGeneration(channelId), this.ensureLiveTranslationQueue().resetTracking(channelId);
           }
           getAutoTranslationChannelState(channelId) {
             return this.ensureLiveTranslationQueue().getChannelState(channelId);
           }
           prepareAutoTranslationChannelSession(channelId) {
-            let previousChannelId = this.ensureLiveTranslationQueue().getLastChannelId();
-            return previousChannelId && previousChannelId != channelId && this.advanceHistoricalMessageSourceGeneration(previousChannelId), channelId && previousChannelId != channelId && this.advanceHistoricalMessageSourceGeneration(channelId), this.ensureLiveTranslationQueue().prepareChannelSession(channelId);
+            return this.ensureHistoricalSourceRuntime().handleChannelSessionChange(this.ensureLiveTranslationQueue().getLastChannelId(), channelId), this.ensureLiveTranslationQueue().prepareChannelSession(channelId);
           }
-          ensureHistoricalMessageSourceGenerations() {
-            return this.historicalMessageSourceGenerations || (this.historicalMessageSourceGenerations = {}), this.historicalMessageSourceGenerations;
+          ensureHistoricalSourceRuntime() {
+            return this.historicalSourceRuntimeInstance || (this.historicalSourceRuntimeInstance = createHistoricalSourceRuntime({
+              messageStore: BDFDB.LibraryStores && BDFDB.LibraryStores.MessageStore,
+              fetchMessages: BDFDB.LibraryModules && (BDFDB.LibraryModules.MessageActions || BDFDB.LibraryModules.MessageManager || BDFDB.LibraryModules.MessageUtils),
+              isTranslationEnabled: /* @__PURE__ */ __name((channelId) => this.isTranslationEnabled(channelId), "isTranslationEnabled"),
+              getSelectedChannelId: /* @__PURE__ */ __name(() => BDFDB.LibraryStores && BDFDB.LibraryStores.SelectedChannelStore && typeof BDFDB.LibraryStores.SelectedChannelStore.getChannelId == "function" ? BDFDB.LibraryStores.SelectedChannelStore.getChannelId() : null, "getSelectedChannelId"),
+              cloneMessage: /* @__PURE__ */ __name((message) => this.cloneHistoricalSourceMessage(message), "cloneMessage"),
+              getMessageChannelId: /* @__PURE__ */ __name((message, fallbackChannelId) => this.getMessageChannelId(message, fallbackChannelId), "getMessageChannelId"),
+              extractOriginalContentData: /* @__PURE__ */ __name((message) => this.extractOriginalContentData(message), "extractOriginalContentData"),
+              cloneOriginalContentData: /* @__PURE__ */ __name((originalContentData) => this.cloneOriginalContentData(originalContentData), "cloneOriginalContentData"),
+              shouldAutoTranslateReceivedMessage: /* @__PURE__ */ __name((message, channel, originalContentData, ignoreQueued) => this.shouldAutoTranslateReceivedMessage(message, channel, originalContentData, ignoreQueued), "shouldAutoTranslateReceivedMessage"),
+              getCachedReceivedTranslation: /* @__PURE__ */ __name((message, channelId, originalContentData) => this.getCachedReceivedTranslation(message, channelId, originalContentData), "getCachedReceivedTranslation"),
+              collectHistoricalTranslationMessage: /* @__PURE__ */ __name((queueItem) => this.collectHistoricalTranslationMessage(queueItem), "collectHistoricalTranslationMessage"),
+              finishHistoricalTranslationSnapshot: /* @__PURE__ */ __name((channelId) => this.finishHistoricalTranslationSnapshot(channelId), "finishHistoricalTranslationSnapshot"),
+              getFailedHistoricalTranslationCount: /* @__PURE__ */ __name((channelId) => this.getFailedHistoricalTranslationCount(channelId), "getFailedHistoricalTranslationCount"),
+              updateLoadedAutoTranslationStatus: /* @__PURE__ */ __name((update) => this.updateLoadedAutoTranslationStatus(update), "updateLoadedAutoTranslationStatus"),
+              getCurrentBatchNumber: /* @__PURE__ */ __name((channelId) => loadedTranslationStatusStore.getCurrentBatchNumber(channelId), "getCurrentBatchNumber")
+            })), this.historicalSourceRuntimeInstance;
           }
           getHistoricalMessageSourceGeneration(channelId) {
-            if (!channelId) return 0;
-            let generations = this.ensureHistoricalMessageSourceGenerations();
-            return generations[channelId] || (generations[channelId] = 1), generations[channelId];
+            return this.ensureHistoricalSourceRuntime().getGeneration(channelId);
           }
           advanceHistoricalMessageSourceGeneration(channelId = null) {
-            let generations = this.ensureHistoricalMessageSourceGenerations();
-            if (!channelId) {
-              for (let key in generations) generations[key] = (generations[key] || 0) + 1;
-              return generations;
-            }
-            return generations[channelId] = (generations[channelId] || 0) + 1, generations[channelId];
+            return this.ensureHistoricalSourceRuntime().advanceGeneration(channelId);
           }
           isHistoricalMessageSourceGenerationCurrent(channelId, generation) {
-            if (!channelId || !this.isTranslationEnabled(channelId) || this.getHistoricalMessageSourceGeneration(channelId) != generation) return !1;
-            let selectedChannelId = BDFDB.LibraryStores && BDFDB.LibraryStores.SelectedChannelStore && typeof BDFDB.LibraryStores.SelectedChannelStore.getChannelId == "function" ? BDFDB.LibraryStores.SelectedChannelStore.getChannelId() : channelId;
-            return !selectedChannelId || selectedChannelId == channelId;
-          }
-          ensureDiscordHistoryAdapter() {
-            return this.discordHistoryAdapterInstance || (this.discordHistoryAdapterInstance = createDiscordHistoryAdapter({
-              messageStore: BDFDB.LibraryStores && BDFDB.LibraryStores.MessageStore,
-              fetchMessages: BDFDB.LibraryModules && (BDFDB.LibraryModules.MessageActions || BDFDB.LibraryModules.MessageManager || BDFDB.LibraryModules.MessageUtils)
-            })), this.discordHistoryAdapterInstance;
+            return this.ensureHistoricalSourceRuntime().isGenerationCurrent(channelId, generation);
           }
           compareMessageIds(messageIdA, messageIdB) {
             if (!messageIdA && !messageIdB) return 0;
@@ -10844,59 +10972,13 @@ __________________ __________________ __________________
           cloneHistoricalSourceMessage(message) {
             if (!message) return null;
             let clone = new BDFDB.DiscordObjects.Message(message);
-            return clone.embeds = (message.embeds || []).map((embed) => Object.assign({}, embed, {
-              fields: (embed.fields || []).map((field) => Object.assign({}, field)),
-              footer: embed.footer ? Object.assign({}, embed.footer) : embed.footer
-            })), clone.attachments = (message.attachments || []).map((attachment) => Object.assign({}, attachment)), clone.author = message.author ? Object.assign({}, message.author) : message.author, clone;
+            return clone.embeds = (message.embeds || []).map((embed) => Object.assign({}, embed, { fields: (embed.fields || []).map((field) => Object.assign({}, field)), footer: embed.footer ? Object.assign({}, embed.footer) : embed.footer })), clone.attachments = (message.attachments || []).map((attachment) => Object.assign({}, attachment)), clone.author = message.author ? Object.assign({}, message.author) : message.author, clone;
           }
           buildInitialHistoricalTranslationSnapshot({ channelId, generation, renderedMessages = [], limit = 0 } = {}) {
-            if (!channelId || !this.isHistoricalMessageSourceGenerationCurrent(channelId, generation)) return Promise.resolve({ items: [], total: 0, prefetched: 0, accepted: 0, cancelled: !0 });
-            let historyAdapter = this.ensureDiscordHistoryAdapter();
-            return createHistoricalMessageSource({
-              listCachedMessages: /* @__PURE__ */ __name((requestChannelId) => historyAdapter.listCachedMessages(requestChannelId), "listCachedMessages"),
-              prefetchMessages: /* @__PURE__ */ __name((request) => historyAdapter.prefetchMessages(request), "prefetchMessages"),
-              isEligible: /* @__PURE__ */ __name((message) => {
-                let messageChannelId = this.getMessageChannelId(message, channelId), originalContentData = this.extractOriginalContentData(message);
-                return this.shouldAutoTranslateReceivedMessage(message, { id: messageChannelId }, originalContentData, !0);
-              }, "isEligible"),
-              toQueueItem: /* @__PURE__ */ __name((message) => {
-                let messageChannelId = this.getMessageChannelId(message, channelId), originalContentData = this.cloneOriginalContentData(this.extractOriginalContentData(message));
-                return {
-                  message: this.cloneHistoricalSourceMessage(message),
-                  channel: { id: messageChannelId },
-                  originalContentData,
-                  historicalLoad: !0,
-                  deferHistoricalSnapshotStart: !0,
-                  cachedTranslation: this.getCachedReceivedTranslation(message, messageChannelId, originalContentData) || null
-                };
-              }, "toQueueItem"),
-              isGenerationCurrent: /* @__PURE__ */ __name((requestChannelId, requestGeneration) => this.isHistoricalMessageSourceGenerationCurrent(requestChannelId, requestGeneration), "isGenerationCurrent")
-            }).build({
-              channelId,
-              generation,
-              renderedMessages,
-              limit
-            }).then((result) => {
-              if (!result || result.cancelled || !this.isHistoricalMessageSourceGenerationCurrent(channelId, generation)) return Object.assign({ accepted: 0 }, result || { items: [], total: 0, prefetched: 0, cancelled: !0 });
-              let accepted = 0;
-              for (let queueItem of result.items || []) this.collectHistoricalTranslationMessage(queueItem) && accepted++;
-              if (accepted) this.finishHistoricalTranslationSnapshot(channelId);
-              else {
-                let failedCount = this.getFailedHistoricalTranslationCount(channelId);
-                this.updateLoadedAutoTranslationStatus({ active: !1, collecting: !1, done: !0, channelId, batch: loadedTranslationStatusStore.getCurrentBatchNumber(), total: result.total || 0, processed: 0, displayed: 0, skipped: 0, failed: 0, retryable: failedCount, aiDropped: 0 });
-              }
-              return Object.assign({ accepted }, result);
-            });
+            return this.ensureHistoricalSourceRuntime().buildInitialHistoricalTranslationSnapshot({ channelId, generation, renderedMessages, limit });
           }
           createHistoricalTranslationRetrySnapshot(item, channelId) {
-            return !item || !item.message || !item.message.id || !channelId ? null : {
-              message: this.cloneHistoricalSourceMessage(item.message),
-              channel: Object.assign({}, item.channel || {}, { id: channelId }),
-              originalContentData: this.cloneOriginalContentData(item.originalContentData || this.extractOriginalContentData(item.message)),
-              historicalLoad: !0,
-              deferWhileReading: !0,
-              reason: item.reason || "provider_failed"
-            };
+            return !item || !item.message || !item.message.id || !channelId ? null : { message: this.cloneHistoricalSourceMessage(item.message), channel: Object.assign({}, item.channel || {}, { id: channelId }), originalContentData: this.cloneOriginalContentData(item.originalContentData || this.extractOriginalContentData(item.message)), historicalLoad: !0, deferWhileReading: !0, reason: item.reason || "provider_failed" };
           }
           updateFailedHistoricalTranslationSnapshots(summary, channelId) {
             if (!channelId) return 0;
