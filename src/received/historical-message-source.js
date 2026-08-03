@@ -47,6 +47,11 @@
 		return unique;
 	}
 
+	function isChannelMessage(message, channelId) {
+		if (!message || !channelId) return false;
+		return String(message.channel_id != null ? message.channel_id : message.channelId || "") == String(channelId);
+	}
+
 	function collectEligible(messages, limit) {
 		const items = [];
 		for (const message of messages) {
@@ -70,7 +75,7 @@
 		const cachedMessages = await listCachedMessages(channelId) || [];
 		if (!isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
 
-		let combinedMessages = sortNewestFirst(uniqueMessages([].concat(renderedMessages || [], cachedMessages || [])));
+		let combinedMessages = sortNewestFirst(uniqueMessages([].concat(renderedMessages || [], cachedMessages || []).filter(message => isChannelMessage(message, channelId))));
 		let eligibleMessages = collectEligible(combinedMessages, boundedLimit);
 		let prefetchedCount = 0;
 
@@ -84,7 +89,7 @@
 					limit: missing
 				}) || [];
 				if (!isCurrent(channelId, generation)) return {items: [], total: 0, prefetched: 0, cancelled: true};
-				combinedMessages = sortNewestFirst(uniqueMessages(combinedMessages.concat(prefetchedMessages)));
+				combinedMessages = sortNewestFirst(uniqueMessages(combinedMessages.concat(prefetchedMessages.filter(message => isChannelMessage(message, channelId)))));
 				const prefetchedEligibleMessages = collectEligible(combinedMessages, boundedLimit);
 				prefetchedCount = Math.max(0, prefetchedEligibleMessages.length - eligibleMessages.length);
 				eligibleMessages = prefetchedEligibleMessages;
