@@ -3,6 +3,8 @@ BetterDiscordAddons-sparse/
 *.bak
 node_modules/
 coverage/
+.worktrees/
+.superpowers/
 .claude/settings.local.json
 DiscordAITranslator.debug.plugin.js
 *.backup.plugin.js
