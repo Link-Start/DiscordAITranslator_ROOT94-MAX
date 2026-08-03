@@ -6,6 +6,10 @@ function createMessage(id, content = `message-${id}`) {
 	return {id: String(id), content, channel_id: "channel-1"};
 }
 
+function createChannelMessage(id, content, channelId, key = "channel_id") {
+	return {id: String(id), content, [key]: channelId};
+}
+
 function createSource(overrides = {}) {
 	return createHistoricalMessageSource({
 		listCachedMessages: async () => [],
@@ -134,6 +138,45 @@ test("build prefetches only the missing eligible quantity", async () => {
 	assert.equal(result.total, 4);
 	assert.equal(result.prefetched, 2);
 	assert.equal(result.cancelled, false);
+});
+
+test("off-channel rendered cached and prefetched messages are excluded before the limit", async () => {
+	const prefetchCalls = [];
+	const source = createSource({
+		listCachedMessages: async () => [
+			createChannelMessage(350, "cached-other-channel", "channel-2"),
+			createChannelMessage(250, "cached-250", "channel-1")
+		],
+		prefetchMessages: async request => {
+			prefetchCalls.push(request);
+			return [
+				createChannelMessage(150, "prefetched-other-channel", "channel-2"),
+				createChannelMessage(100, "prefetched-100", "channel-1", "channelId")
+			];
+		}
+	});
+
+	const result = await source.build({
+		channelId: "channel-1",
+		generation: 1,
+		renderedMessages: [
+			createChannelMessage(500, "rendered-other-channel", "channel-2"),
+			createMessage(400, "rendered-400")
+		],
+		limit: 3
+	});
+
+	assert.deepEqual(prefetchCalls, [{channelId: "channel-1", beforeMessageId: "250", limit: 1}]);
+	assert.deepEqual(result, {
+		items: [
+			{id: "400", content: "rendered-400"},
+			{id: "250", content: "cached-250"},
+			{id: "100", content: "prefetched-100"}
+		],
+		total: 3,
+		prefetched: 1,
+		cancelled: false
+	});
 });
 
 test("a prefetch failure seals the actual available eligible total", async () => {
