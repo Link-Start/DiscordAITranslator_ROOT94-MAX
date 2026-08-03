@@ -56,6 +56,7 @@ function resolveFetchCandidates(fetchMessages) {
 async function callFetch(fetchMessages, payload) {
 	let lastError = null;
 	for (const candidate of resolveFetchCandidates(fetchMessages)) {
+		if (payload.signal && payload.signal.aborted) return [];
 		const attempts = [
 			() => candidate(payload),
 			() => candidate({
@@ -73,10 +74,14 @@ async function callFetch(fetchMessages, payload) {
 		];
 		for (const attempt of attempts) {
 			try {
+				if (payload.signal && payload.signal.aborted) return [];
 				const result = await attempt();
 				if (result != null) return result;
 			}
-			catch (error) {lastError = error;}
+			catch (error) {
+				if (payload.signal && payload.signal.aborted) return [];
+				lastError = error;
+			}
 		}
 	}
 	if (lastError) throw lastError;

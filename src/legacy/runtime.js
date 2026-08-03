@@ -82,8 +82,7 @@ module.exports = (_ => {
 			receivedMessageFilterRuntime,
 			createReceivedTranslationRuntime
 		} = require("../received/received-translation-runtime");
-		const {createHistoricalMessageSource} = require("../received/historical-message-source");
-		const {createDiscordHistoryAdapter} = require("../received/discord-history-adapter");
+		const {createHistoricalSourceRuntime} = require("../received/historical-source-runtime");
 		const {
 			LOADED_AUTO_TRANSLATE_RANGE_MODES,
 			loadedAutoTranslatePolicy,
@@ -1204,59 +1203,29 @@ module.exports = (_ => {
 					channelId
 				});
 			}
+			resetAutoTranslationTracking (channelId = null) {this.ensureHistoricalSourceRuntime().advanceGeneration(channelId); return this.ensureLiveTranslationQueue().resetTracking(channelId);}
+			getAutoTranslationChannelState (channelId) {return this.ensureLiveTranslationQueue().getChannelState(channelId);}
+			prepareAutoTranslationChannelSession (channelId) {this.ensureHistoricalSourceRuntime().handleChannelSessionChange(this.ensureLiveTranslationQueue().getLastChannelId(), channelId); return this.ensureLiveTranslationQueue().prepareChannelSession(channelId);}
 
-			resetAutoTranslationTracking (channelId = null) {
-				this.advanceHistoricalMessageSourceGeneration(channelId);
-				return this.ensureLiveTranslationQueue().resetTracking(channelId);
-			}
-
-			getAutoTranslationChannelState (channelId) {
-				return this.ensureLiveTranslationQueue().getChannelState(channelId);
-			}
-
-			prepareAutoTranslationChannelSession (channelId) {
-				const previousChannelId = this.ensureLiveTranslationQueue().getLastChannelId();
-				if (previousChannelId && previousChannelId != channelId) this.advanceHistoricalMessageSourceGeneration(previousChannelId);
-				if (channelId && previousChannelId != channelId) this.advanceHistoricalMessageSourceGeneration(channelId);
-				return this.ensureLiveTranslationQueue().prepareChannelSession(channelId);
-			}
-
-			ensureHistoricalMessageSourceGenerations () {
-				if (!this.historicalMessageSourceGenerations) this.historicalMessageSourceGenerations = {};
-				return this.historicalMessageSourceGenerations;
-			}
-
-			getHistoricalMessageSourceGeneration (channelId) {
-				if (!channelId) return 0;
-				const generations = this.ensureHistoricalMessageSourceGenerations();
-				if (!generations[channelId]) generations[channelId] = 1;
-				return generations[channelId];
-			}
-
-			advanceHistoricalMessageSourceGeneration (channelId = null) {
-				const generations = this.ensureHistoricalMessageSourceGenerations();
-				if (!channelId) {
-					for (const key in generations) generations[key] = (generations[key] || 0) + 1;
-					return generations;
-				}
-				generations[channelId] = (generations[channelId] || 0) + 1;
-				return generations[channelId];
-			}
-
-			isHistoricalMessageSourceGenerationCurrent (channelId, generation) {
-				if (!channelId || !this.isTranslationEnabled(channelId)) return false;
-				if (this.getHistoricalMessageSourceGeneration(channelId) != generation) return false;
-				const selectedChannelId = BDFDB.LibraryStores && BDFDB.LibraryStores.SelectedChannelStore && typeof BDFDB.LibraryStores.SelectedChannelStore.getChannelId == "function" ? BDFDB.LibraryStores.SelectedChannelStore.getChannelId() : channelId;
-				return !selectedChannelId || selectedChannelId == channelId;
-			}
-
-			ensureDiscordHistoryAdapter () {
-				if (!this.discordHistoryAdapterInstance) this.discordHistoryAdapterInstance = createDiscordHistoryAdapter({
+			ensureHistoricalSourceRuntime () {
+				if (!this.historicalSourceRuntimeInstance) this.historicalSourceRuntimeInstance = createHistoricalSourceRuntime({
 					messageStore: BDFDB.LibraryStores && BDFDB.LibraryStores.MessageStore,
-					fetchMessages: BDFDB.LibraryModules && (BDFDB.LibraryModules.MessageActions || BDFDB.LibraryModules.MessageManager || BDFDB.LibraryModules.MessageUtils)
+					fetchMessages: BDFDB.LibraryModules && (BDFDB.LibraryModules.MessageActions || BDFDB.LibraryModules.MessageManager || BDFDB.LibraryModules.MessageUtils),
+					isTranslationEnabled: channelId => this.isTranslationEnabled(channelId),
+					getSelectedChannelId: () => BDFDB.LibraryStores && BDFDB.LibraryStores.SelectedChannelStore && typeof BDFDB.LibraryStores.SelectedChannelStore.getChannelId == "function" ? BDFDB.LibraryStores.SelectedChannelStore.getChannelId() : null,
+					cloneMessage: message => this.cloneHistoricalSourceMessage(message), getMessageChannelId: (message, fallbackChannelId) => this.getMessageChannelId(message, fallbackChannelId),
+					extractOriginalContentData: message => this.extractOriginalContentData(message), cloneOriginalContentData: originalContentData => this.cloneOriginalContentData(originalContentData),
+					shouldAutoTranslateReceivedMessage: (message, channel, originalContentData, ignoreQueued) => this.shouldAutoTranslateReceivedMessage(message, channel, originalContentData, ignoreQueued),
+					getCachedReceivedTranslation: (message, channelId, originalContentData) => this.getCachedReceivedTranslation(message, channelId, originalContentData), collectHistoricalTranslationMessage: queueItem => this.collectHistoricalTranslationMessage(queueItem),
+					finishHistoricalTranslationSnapshot: channelId => this.finishHistoricalTranslationSnapshot(channelId), getFailedHistoricalTranslationCount: channelId => this.getFailedHistoricalTranslationCount(channelId),
+					updateLoadedAutoTranslationStatus: update => this.updateLoadedAutoTranslationStatus(update),
+					getCurrentBatchNumber: channelId => loadedTranslationStatusStore.getCurrentBatchNumber(channelId)
 				});
-				return this.discordHistoryAdapterInstance;
+				return this.historicalSourceRuntimeInstance;
 			}
+			getHistoricalMessageSourceGeneration (channelId) {return this.ensureHistoricalSourceRuntime().getGeneration(channelId);}
+			advanceHistoricalMessageSourceGeneration (channelId = null) {return this.ensureHistoricalSourceRuntime().advanceGeneration(channelId);}
+			isHistoricalMessageSourceGenerationCurrent (channelId, generation) {return this.ensureHistoricalSourceRuntime().isGenerationCurrent(channelId, generation);}
 
 			compareMessageIds (messageIdA, messageIdB) {
 				if (!messageIdA && !messageIdB) return 0;
@@ -2297,73 +2266,11 @@ module.exports = (_ => {
 				};
 			}
 
-			cloneHistoricalSourceMessage (message) {
-				if (!message) return null;
-				const clone = new BDFDB.DiscordObjects.Message(message);
-				clone.embeds = (message.embeds || []).map(embed => Object.assign({}, embed, {
-					fields: (embed.fields || []).map(field => Object.assign({}, field)),
-					footer: embed.footer ? Object.assign({}, embed.footer) : embed.footer
-				}));
-				clone.attachments = (message.attachments || []).map(attachment => Object.assign({}, attachment));
-				clone.author = message.author ? Object.assign({}, message.author) : message.author;
-				return clone;
-			}
+			cloneHistoricalSourceMessage (message) {if (!message) return null; const clone = new BDFDB.DiscordObjects.Message(message); clone.embeds = (message.embeds || []).map(embed => Object.assign({}, embed, {fields: (embed.fields || []).map(field => Object.assign({}, field)), footer: embed.footer ? Object.assign({}, embed.footer) : embed.footer})); clone.attachments = (message.attachments || []).map(attachment => Object.assign({}, attachment)); clone.author = message.author ? Object.assign({}, message.author) : message.author; return clone;}
 
-			buildInitialHistoricalTranslationSnapshot ({channelId, generation, renderedMessages = [], limit = 0} = {}) {
-				if (!channelId || !this.isHistoricalMessageSourceGenerationCurrent(channelId, generation)) return Promise.resolve({items: [], total: 0, prefetched: 0, accepted: 0, cancelled: true});
-				const historyAdapter = this.ensureDiscordHistoryAdapter();
-				const source = createHistoricalMessageSource({
-					listCachedMessages: requestChannelId => historyAdapter.listCachedMessages(requestChannelId),
-					prefetchMessages: request => historyAdapter.prefetchMessages(request),
-					isEligible: message => {
-						const messageChannelId = this.getMessageChannelId(message, channelId);
-						const originalContentData = this.extractOriginalContentData(message);
-						return this.shouldAutoTranslateReceivedMessage(message, {id: messageChannelId}, originalContentData, true);
-					},
-					toQueueItem: message => {
-						const messageChannelId = this.getMessageChannelId(message, channelId);
-						const originalContentData = this.cloneOriginalContentData(this.extractOriginalContentData(message));
-						return {
-							message: this.cloneHistoricalSourceMessage(message),
-							channel: {id: messageChannelId},
-							originalContentData,
-							historicalLoad: true,
-							deferHistoricalSnapshotStart: true,
-							cachedTranslation: this.getCachedReceivedTranslation(message, messageChannelId, originalContentData) || null
-						};
-					},
-					isGenerationCurrent: (requestChannelId, requestGeneration) => this.isHistoricalMessageSourceGenerationCurrent(requestChannelId, requestGeneration)
-				});
-				return source.build({
-					channelId,
-					generation,
-					renderedMessages,
-					limit
-				}).then(result => {
-					if (!result || result.cancelled || !this.isHistoricalMessageSourceGenerationCurrent(channelId, generation)) return Object.assign({accepted: 0}, result || {items: [], total: 0, prefetched: 0, cancelled: true});
-					let accepted = 0;
-					for (const queueItem of result.items || []) if (this.collectHistoricalTranslationMessage(queueItem)) accepted++;
-					if (accepted) this.finishHistoricalTranslationSnapshot(channelId);
-					else {
-						const failedCount = this.getFailedHistoricalTranslationCount(channelId);
-						this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId, batch: loadedTranslationStatusStore.getCurrentBatchNumber(), total: result.total || 0, processed: 0, displayed: 0, skipped: 0, failed: 0, retryable: failedCount, aiDropped: 0});
-					}
-					return Object.assign({accepted}, result);
-				});
-			}
+			buildInitialHistoricalTranslationSnapshot ({channelId, generation, renderedMessages = [], limit = 0} = {}) {return this.ensureHistoricalSourceRuntime().buildInitialHistoricalTranslationSnapshot({channelId, generation, renderedMessages, limit});}
 
-			createHistoricalTranslationRetrySnapshot (item, channelId) {
-				if (!item || !item.message || !item.message.id || !channelId) return null;
-				const message = this.cloneHistoricalSourceMessage(item.message);
-				return {
-					message,
-					channel: Object.assign({}, item.channel || {}, {id: channelId}),
-					originalContentData: this.cloneOriginalContentData(item.originalContentData || this.extractOriginalContentData(item.message)),
-					historicalLoad: true,
-					deferWhileReading: true,
-					reason: item.reason || "provider_failed"
-				};
-			}
+			createHistoricalTranslationRetrySnapshot (item, channelId) {if (!item || !item.message || !item.message.id || !channelId) return null; return {message: this.cloneHistoricalSourceMessage(item.message), channel: Object.assign({}, item.channel || {}, {id: channelId}), originalContentData: this.cloneOriginalContentData(item.originalContentData || this.extractOriginalContentData(item.message)), historicalLoad: true, deferWhileReading: true, reason: item.reason || "provider_failed"};}
 
 			updateFailedHistoricalTranslationSnapshots (summary, channelId) {
 				if (!channelId) return 0;
@@ -2386,7 +2293,6 @@ module.exports = (_ => {
 				const entry = channelId && this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
 				return entry && entry.items ? entry.items.length : 0;
 			}
-
 			retryFailedHistoricalTranslations (channelId = null) {
 				channelId = channelId || BDFDB.LibraryStores.SelectedChannelStore.getChannelId();
 				const failedEntry = channelId && this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
