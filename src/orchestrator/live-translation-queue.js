@@ -48,7 +48,7 @@ function createLiveTranslationQueue({
 	clearChannelTranslationQueue = () => {},
 	onChannelSessionLeft = () => {},
 	onChannelSessionStarted = () => {},
-	onQueueIdle = () => {},
+	onLiveTurnStarted = () => {},
 	// Translation policy. Everything below decides what a translation IS; the queue only
 	// decides when it runs, in what order, and what happens to the item afterwards.
 	getBatchEngineKey = () => null,
@@ -76,6 +76,7 @@ function createLiveTranslationQueue({
 	let liveAutoTranslating = false;
 	let retryTimer = null;
 	let channelStates = {};
+	let liveTurnCounts = {};
 	let lastChannelId = null;
 
 	function getRequestKey(messageId, channelId) {
@@ -173,7 +174,6 @@ function createLiveTranslationQueue({
 			queue = [];
 			queuedMessages = {};
 			cancelQueueRetry();
-			if (!liveAutoTranslating) onQueueIdle();
 			return;
 		}
 		const key = normalizeChannelId(channelId);
@@ -185,26 +185,36 @@ function createLiveTranslationQueue({
 		// The whole queue, not just this channel's slice: the retry exists to resume
 		// processing, so it stays armed while any item is still waiting.
 		if (!queue.length && retryTimer) cancelQueueRetry();
-		if (!queue.length && !liveAutoTranslating) onQueueIdle();
 	}
 
 	function getChannelState(channelId) {
 		if (!channelId) return null;
 		const key = normalizeChannelId(channelId);
-		if (!channelStates[key]) channelStates[key] = {
-			initialized: false,
-			boundaryMessageId: null
-		};
+		if (!channelStates[key]) channelStates[key] = {initialized: false, boundaryMessageId: null};
 		return channelStates[key];
+	}
+
+	function getStartedLiveTurnCount(channelId) {
+		return liveTurnCounts[normalizeChannelId(channelId)] || 0;
+	}
+
+	function noteLiveTurnStarted(channelId) {
+		const key = normalizeChannelId(channelId);
+		if (!key) return 0;
+		liveTurnCounts[key] = (liveTurnCounts[key] || 0) + 1;
+		onLiveTurnStarted(channelId, liveTurnCounts[key]);
+		return liveTurnCounts[key];
 	}
 
 	function resetTracking(channelId = null) {
 		if (channelId) {
 			delete channelStates[normalizeChannelId(channelId)];
+			delete liveTurnCounts[normalizeChannelId(channelId)];
 			resetLoadedMessageTracking(channelId);
 		}
 		else {
 			channelStates = {};
+			liveTurnCounts = {};
 			resetLoadedMessageTracking();
 		}
 		clearEligibleReplyPreviewMessages(channelId);
@@ -379,6 +389,7 @@ function createLiveTranslationQueue({
 				}
 			}
 			if (!prepared.length) return;
+			noteLiveTurnStarted(channelId);
 			let resultMap = null;
 			try {resultMap = await requestBurstTranslation(context, prepared);}
 			catch (error) {resultMap = null;}
@@ -422,6 +433,7 @@ function createLiveTranslationQueue({
 	}
 
 	function translateSingle(queueItem) {
+		noteLiveTurnStarted(queueItem && queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem && queueItem.message));
 		liveAutoTranslating = true;
 		translateSingleItem(queueItem).then(_ => {
 			finishRequest(queueItem.liveRequest);
@@ -436,7 +448,7 @@ function createLiveTranslationQueue({
 
 	function processQueue() {
 		if (!beginProcessing()) return;
-		if (!queue.length) return onQueueIdle();
+		if (!queue.length) return;
 		const nextItem = queue.shift();
 		if (!nextItem || !nextItem.message) return processQueue();
 		if (nextItem.historicalLoad) {
@@ -503,6 +515,11 @@ function createLiveTranslationQueue({
 		beginProcessing,
 		isQueueEmpty: () => !queue.length,
 		getQueueLength: () => queue.length,
+		hasQueuedLiveForChannel(channelId) {
+			const key = normalizeChannelId(channelId);
+			return !!key && queue.some(queueItem => queueItem && !queueItem.historicalLoad && normalizeChannelId(queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem.message)) === key);
+		},
+		getStartedLiveTurnCount,
 		// A copy: a reader must not be able to reorder the queue behind this module's back.
 		getQueueSnapshot: () => queue.slice(),
 		collectBatchItems,
