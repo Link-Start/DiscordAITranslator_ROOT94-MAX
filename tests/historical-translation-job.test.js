@@ -1301,7 +1301,57 @@ test("live messages run while a historical provider request is pending", async (
 	assert.equal(liveTranslateCalls, 1);
 
 	resolveBatch({"100": "旧消息"});
-	await historicalRunning;
+await historicalRunning;
+});
+
+test("a queued live item receives the next slot before a sealed follow-up historical job", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	try {
+		const requestedIds = [];
+		const batchResolvers = [];
+		const providerOrder = [];
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			const ids = preparedItems.map(item => String(item.message.id));
+			requestedIds.push(ids);
+			providerOrder.push(`historical:${ids.join(",")}`);
+			return new Promise(resolve => batchResolvers.push(resolve));
+		};
+		plugin.applyStoredTranslationToMessage = () => ({});
+		plugin.rerenderMessagesWithScrollPreserved = () => {};
+		plugin.translateMessage = message => {
+			providerOrder.push(`live:${message.id}`);
+			return Promise.resolve(true);
+		};
+
+		plugin.queueAutoTranslateMessage(createMessage("100", "first historical"), {id: "channel-history-job"}, {content: "first historical"}, {historicalLoad: true});
+		const firstRunning = plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
+		await new Promise(resolve => setImmediate(resolve));
+
+		plugin.queueAutoTranslateMessage(createMessage("200", "follow-up historical"), {id: "channel-history-job"}, {content: "follow-up historical"}, {historicalLoad: true});
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(requestedIds, [["100"]], "the follow-up job must stay queued while the first historical request is active");
+
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(true);
+		plugin.queueAutoTranslateMessage(createMessage("300", "queued live"), {id: "channel-history-job"}, {content: "queued live"});
+		assert.equal(plugin.ensureLiveTranslationQueue().getQueueLength(), 1, "the live queue must retain the waiting message");
+
+		batchResolvers.shift()({"100": "第一条"});
+		await firstRunning;
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(providerOrder, ["historical:100"], "the next slot must stay open for queued live work");
+
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
+		plugin.processAutoTranslationQueue();
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(providerOrder.slice(0, 2), ["historical:100", "live:300"], "the queued live item must run before the sealed follow-up historical job");
+
+		batchResolvers.shift()({"200": "第二条"});
+		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
+		assert.deepEqual(providerOrder, ["historical:100", "live:300", "historical:200"]);
+	}
+	finally {
+		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
+	}
 });
 
 test("cached historical translations commit without a provider request", async () => {

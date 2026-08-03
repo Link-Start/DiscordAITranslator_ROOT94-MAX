@@ -2392,7 +2392,6 @@ module.exports = (_ => {
 				if (!entry.runningPromise) this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false});
 				return true;
 			}
-
 			startCollectedHistoricalTranslationJobs (channelId, options = {}) {
 				const entry = this.getHistoricalTranslationJobQueue(channelId, false);
 				if (!entry) return Promise.resolve(null);
@@ -2413,13 +2412,12 @@ module.exports = (_ => {
 					}
 					if (entry.runningPromise == runningPromise) entry.runningPromise = null;
 					entry.jobs = entry.jobs.filter(candidate => candidate != job);
-					if (entry.jobs.some(candidate => candidate && candidate.state == "collecting" && candidate.sealed)) this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false});
+					if (entry.jobs.some(candidate => candidate && candidate.state == "collecting" && candidate.sealed)) this.ensureLiveTranslationQueue().getQueueLength() ? this.resumeQueuedHistoricalTranslationJobs() : this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false});
 					else if (!entry.jobs.length && !entry.startToken && this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry)) this.ensureHistoricalJobRegistry().deleteQueue(channelId);
 				});
 				entry.runningPromise = runningPromise;
 				return runningPromise;
 			}
-
 			async waitForHistoricalTranslationJobs (channelId) {
 				while (true) {
 					const entry = this.getHistoricalTranslationJobQueue(channelId, false);
@@ -2682,7 +2680,6 @@ module.exports = (_ => {
 			parseAiBatchTranslationResponse (content, expectedIds = null) {
 				return this.ensureProviderClient().parseAiBatchTranslationResponse(content, expectedIds);
 			}
-
 			requestAiBatchTranslation (engineKey, preparedItems) {
 				return this.ensureProviderClient().requestAiBatchTranslation(engineKey, preparedItems);
 			}
@@ -2690,7 +2687,10 @@ module.exports = (_ => {
 			processAutoTranslationQueue () {
 				return this.ensureLiveTranslationQueue().processQueue();
 			}
-		
+			resumeQueuedHistoricalTranslationJobs () {
+				if (this.ensureLiveTranslationQueue().getQueueLength() || this.ensureLiveTranslationQueue().isLiveAutoTranslating()) return;
+				for (const entry of this.ensureHistoricalJobRegistry().listQueues()) if (entry && !entry.runningPromise && entry.jobs.some(job => job && job.state == "collecting" && job.sealed)) this.startCollectedHistoricalTranslationJobs(entry.channelId, {sealCurrent: false});
+			}
 			forceUpdateAll () {
 				this.ensureSettingsStore().reload();
 				this.ensureTranslationCacheStore().loadPersisted();
@@ -2921,15 +2921,12 @@ module.exports = (_ => {
 			get modelCatalogState () {
 				return this.ensureProviderClient().getModelCatalogState();
 			}
-
 			ensureHistoricalJobRegistry () {
 				if (!this.historicalJobRegistryInstance) this.historicalJobRegistryInstance = createHistoricalJobRegistry();
 				return this.historicalJobRegistryInstance;
 			}
-
 			ensureLiveTranslationQueue () {
 				if (!this.liveTranslationQueueInstance) this.liveTranslationQueueInstance = createLiveTranslationQueue({
-
 					isRuntimeActive: () => pluginRuntimeActive,
 					isTranslationEnabled: channelId => this.isTranslationEnabled(channelId),
 					extractOriginalContentData: message => this.extractOriginalContentData(message),
@@ -2949,6 +2946,7 @@ module.exports = (_ => {
 					onChannelSessionLeft: channelId => this.ensureReceivedDisplayRuntime().pruneChannel(channelId),
 					// new_only hides what is already on screen, so a fresh session drops the automatic records the previous one painted.
 					onChannelSessionStarted: channelId => this.getReceivedAutoTranslateScope() == "new_only" && this.clearDisplayedAutoTranslations(channelId),
+					onQueueIdle: () => this.resumeQueuedHistoricalTranslationJobs(),
 					getBatchEngineKey: channelId => this.getHistoricalAiBatchEngineKey(channelId),
 					createBurstContext: channelId => ({
 					engineKey: this.getHistoricalAiBatchEngineKey(channelId),

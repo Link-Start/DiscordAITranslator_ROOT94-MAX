@@ -5449,6 +5449,8 @@ var require_live_translation_queue = __commonJS({
       }, "onChannelSessionLeft"),
       onChannelSessionStarted = /* @__PURE__ */ __name(() => {
       }, "onChannelSessionStarted"),
+      onQueueIdle = /* @__PURE__ */ __name(() => {
+      }, "onQueueIdle"),
       // Translation policy. Everything below decides what a translation IS; the queue only
       // decides when it runs, in what order, and what happens to the item afterwards.
       getBatchEngineKey = /* @__PURE__ */ __name(() => null, "getBatchEngineKey"),
@@ -5526,14 +5528,14 @@ var require_live_translation_queue = __commonJS({
       __name(scheduleQueueRetry, "scheduleQueueRetry");
       function clearQueue(channelId = null) {
         if (invalidateRequests(channelId), !channelId) {
-          queue = [], queuedMessages = {}, cancelQueueRetry();
+          queue = [], queuedMessages = {}, cancelQueueRetry(), liveAutoTranslating || onQueueIdle();
           return;
         }
         let key = normalizeChannelId(channelId);
         queue = queue.filter((queueItem) => {
           let shouldRemove = !!(queueItem && queueItem.channel && normalizeChannelId(queueItem.channel.id) === key);
           return shouldRemove && queueItem.message && queueItem.message.id && (!queueItem.liveRequest || queuedMessages[queueItem.message.id] === queueItem.liveRequest) && delete queuedMessages[queueItem.message.id], !shouldRemove;
-        }), !queue.length && retryTimer && cancelQueueRetry();
+        }), !queue.length && retryTimer && cancelQueueRetry(), !queue.length && !liveAutoTranslating && onQueueIdle();
       }
       __name(clearQueue, "clearQueue");
       function getChannelState(channelId) {
@@ -5710,7 +5712,8 @@ var require_live_translation_queue = __commonJS({
       }
       __name(translateSingle, "translateSingle");
       function processQueue() {
-        if (!beginProcessing() || !queue.length) return;
+        if (!beginProcessing()) return;
+        if (!queue.length) return onQueueIdle();
         let nextItem = queue.shift();
         if (!nextItem || !nextItem.message) return processQueue();
         if (nextItem.historicalLoad)
@@ -11097,7 +11100,7 @@ __________________ __________________ __________________
                 let messageId = record && record.source && record.source.message && record.source.message.id, queuedMarker = messageId && this.ensureLiveTranslationQueue().getQueuedMarker(messageId);
                 queuedMarker && queuedMarker.type == "historical" && queuedMarker.jobId == job.id && this.ensureLiveTranslationQueue().clearQueuedMessage(messageId);
               }
-              entry.runningPromise == runningPromise && (entry.runningPromise = null), entry.jobs = entry.jobs.filter((candidate) => candidate != job), entry.jobs.some((candidate) => candidate && candidate.state == "collecting" && candidate.sealed) ? this.startCollectedHistoricalTranslationJobs(channelId, { sealCurrent: !1 }) : !entry.jobs.length && !entry.startToken && this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry) && this.ensureHistoricalJobRegistry().deleteQueue(channelId);
+              entry.runningPromise == runningPromise && (entry.runningPromise = null), entry.jobs = entry.jobs.filter((candidate) => candidate != job), entry.jobs.some((candidate) => candidate && candidate.state == "collecting" && candidate.sealed) ? this.ensureLiveTranslationQueue().getQueueLength() ? this.resumeQueuedHistoricalTranslationJobs() : this.startCollectedHistoricalTranslationJobs(channelId, { sealCurrent: !1 }) : !entry.jobs.length && !entry.startToken && this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry) && this.ensureHistoricalJobRegistry().deleteQueue(channelId);
             });
             return entry.runningPromise = runningPromise, runningPromise;
           }
@@ -11294,6 +11297,10 @@ __________________ __________________ __________________
           processAutoTranslationQueue() {
             return this.ensureLiveTranslationQueue().processQueue();
           }
+          resumeQueuedHistoricalTranslationJobs() {
+            if (!(this.ensureLiveTranslationQueue().getQueueLength() || this.ensureLiveTranslationQueue().isLiveAutoTranslating()))
+              for (let entry of this.ensureHistoricalJobRegistry().listQueues()) entry && !entry.runningPromise && entry.jobs.some((job) => job && job.state == "collecting" && job.sealed) && this.startCollectedHistoricalTranslationJobs(entry.channelId, { sealCurrent: !1 });
+          }
           forceUpdateAll() {
             this.ensureSettingsStore().reload(), this.ensureTranslationCacheStore().loadPersisted(), this.ensureReceivedDisplayRuntime().clearAllSuppression(), this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.ensureReceivedDisplayRuntime().clearPreviews(null), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
           }
@@ -11462,6 +11469,7 @@ __________________ __________________ __________________
               onChannelSessionLeft: /* @__PURE__ */ __name((channelId) => this.ensureReceivedDisplayRuntime().pruneChannel(channelId), "onChannelSessionLeft"),
               // new_only hides what is already on screen, so a fresh session drops the automatic records the previous one painted.
               onChannelSessionStarted: /* @__PURE__ */ __name((channelId) => this.getReceivedAutoTranslateScope() == "new_only" && this.clearDisplayedAutoTranslations(channelId), "onChannelSessionStarted"),
+              onQueueIdle: /* @__PURE__ */ __name(() => this.resumeQueuedHistoricalTranslationJobs(), "onQueueIdle"),
               getBatchEngineKey: /* @__PURE__ */ __name((channelId) => this.getHistoricalAiBatchEngineKey(channelId), "getBatchEngineKey"),
               createBurstContext: /* @__PURE__ */ __name((channelId) => ({
                 engineKey: this.getHistoricalAiBatchEngineKey(channelId),
