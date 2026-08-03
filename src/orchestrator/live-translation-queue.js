@@ -48,6 +48,7 @@ function createLiveTranslationQueue({
 	clearChannelTranslationQueue = () => {},
 	onChannelSessionLeft = () => {},
 	onChannelSessionStarted = () => {},
+	onQueueIdle = () => {},
 	// Translation policy. Everything below decides what a translation IS; the queue only
 	// decides when it runs, in what order, and what happens to the item afterwards.
 	getBatchEngineKey = () => null,
@@ -172,6 +173,7 @@ function createLiveTranslationQueue({
 			queue = [];
 			queuedMessages = {};
 			cancelQueueRetry();
+			if (!liveAutoTranslating) onQueueIdle();
 			return;
 		}
 		const key = normalizeChannelId(channelId);
@@ -183,6 +185,7 @@ function createLiveTranslationQueue({
 		// The whole queue, not just this channel's slice: the retry exists to resume
 		// processing, so it stays armed while any item is still waiting.
 		if (!queue.length && retryTimer) cancelQueueRetry();
+		if (!queue.length && !liveAutoTranslating) onQueueIdle();
 	}
 
 	function getChannelState(channelId) {
@@ -433,7 +436,7 @@ function createLiveTranslationQueue({
 
 	function processQueue() {
 		if (!beginProcessing()) return;
-		if (!queue.length) return;
+		if (!queue.length) return onQueueIdle();
 		const nextItem = queue.shift();
 		if (!nextItem || !nextItem.message) return processQueue();
 		if (nextItem.historicalLoad) {

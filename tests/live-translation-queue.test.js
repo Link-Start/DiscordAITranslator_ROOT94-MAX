@@ -225,6 +225,17 @@ test("a manual translation in progress blocks the live queue without dropping it
 	assert.deepEqual(harness.log.single, ["m1"]);
 });
 
+test("the first live item starts in the same queue turn without arming a batch timer", () => {
+	const harness = createHarness();
+	harness.state.batchEngine = "ai";
+
+	assert.equal(harness.queue.queueMessage(createMessage("m1"), {id: "c1"}), true);
+
+	assert.deepEqual(harness.log.single, ["m1"], "the first live item must start before the caller yields");
+	assert.deepEqual(harness.log.burstRequests, [], "a lone live item must not wait for a batch to fill");
+	assert.equal(harness.pendingTimers().length, 0, "immediate dispatch must not hide behind a timer");
+});
+
 test("a provider backoff arms exactly one retry that resumes the queue", () => {
 	const harness = createHarness();
 	harness.state.backoff = true;

@@ -483,6 +483,39 @@ test("a translation arriving while you type is displayed promptly", async () => 
 	}
 });
 
+test("the 120 ms repaint window coalesces only paint while live loading appears immediately", async () => {
+	const {harness, plugin, calls} = createLiveBurstPlugin(40);
+	try {
+		const channel = {id: "channel-live-loading"};
+		const [message] = createBurstMessages(channel.id, 1);
+		plugin.captureReceivedMessageSource({
+			messageId: message.id,
+			channelId: channel.id,
+			generation: plugin.getReceivedDisplayCommitGeneration(channel.id),
+			sourceSignature: plugin.createReceivedTranslationSignature(message, channel.id, {content: message.content, embeds: []}),
+			source: {content: message.content, embeds: []}
+		});
+
+		plugin.queueAutoTranslateMessage(message, channel, {content: message.content, embeds: []});
+
+		assert.equal(calls.single, 1, "provider work must start immediately");
+		assert.equal(calls.batch, 0, "one live message must stay on the direct path");
+		assert.equal(harness.calls.forceUpdate, 0, "the repaint window must not fire in the queue turn");
+		assert.equal(plugin.getReceivedDisplayRuntimeView(message.id).showLoading, true, "the loading view must be available immediately");
+
+		await new Promise(resolve => setTimeout(resolve, 80));
+		assert.equal(harness.calls.forceUpdate, 0, "provider completion must still wait for the repaint coalescer");
+		assert.equal(plugin.getReceivedDisplayRuntimeView(message.id).translated, true, "the translated state must already be committed before paint");
+
+		await new Promise(resolve => setTimeout(resolve, 180));
+		assert.equal(harness.calls.forceUpdate, 1, "the coalesced repaint must land once the 120 ms window expires");
+	}
+	finally {
+		harness.plugin.clearReceivedDisplayFlushQueue();
+		harness.restore();
+	}
+});
+
 test("a translation arriving while the settings panel is open does not repaint the chat list", async () => {
 	const harness = createHarness();
 	try {
