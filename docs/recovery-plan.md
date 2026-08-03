@@ -26,7 +26,7 @@ The completed display-migration tasks below remain verification history. The nex
 - The compact theme-aware status uses `translation icon completed/total · elapsed`; detailed counts are hover-only.
 - Disable and stop restore automatic message text, reply previews, embeds, and titles together while preserving manual translation ownership.
 
-### Task A: Build the historical message source
+### Task 1: Build the historical message source
 
 **Files:** create `src/received/historical-message-source.js` and `tests/historical-message-source.test.js`.
 
@@ -50,7 +50,7 @@ await source.build({channelId, generation, renderedMessages, limit});
 - [ ] Implement the pure source builder without provider, display, or status dependencies.
 - [ ] Run `node --test tests/historical-message-source.test.js` and commit the isolated module.
 
-### Task B: Integrate cache enumeration and bounded prefetch
+### Task 2: Integrate cache enumeration and bounded prefetch
 
 **Files:** modify `src/received/received-translation-runtime.js`, `src/legacy/runtime.js`, `tests/received-translation-runtime.test.js`, and `tests/historical-translation-job.test.js`.
 
@@ -62,7 +62,7 @@ await source.build({channelId, generation, renderedMessages, limit});
 - [ ] Wire the first loaded-message pass to build once, deduplicate before queueing, and preserve the existing historical job batch/repair/atomic-commit pipeline.
 - [ ] Run the two focused suites and commit.
 
-### Task C: Lock live-message immediacy and priority
+### Task 3: Lock live-message immediacy and priority
 
 **Files:** modify `tests/live-translation-queue.test.js`, `tests/historical-translation-job.test.js`, `tests/integration/received-display-throughput.test.js`, and only the owning scheduler modules if a red test proves a gap.
 
@@ -72,7 +72,7 @@ await source.build({channelId, generation, renderedMessages, limit});
 - [ ] Make the smallest scheduler change required by the red tests; retain current provider backoff and live burst behavior.
 - [ ] Run the three focused suites and commit.
 
-### Task D: Complete the component-scoped display transaction
+### Task 4: Complete the component-scoped display transaction
 
 **Files:** modify `src/display/discord-render-adapter.js`, `src/display/translation-display-controller.js`, `src/display/display-runtime.js`, `src/legacy/runtime.js`, `tests/display/discord-render-adapter.test.js`, and `tests/integration/received-display-lifecycle.test.js`.
 
@@ -89,7 +89,7 @@ refreshDisplayTransaction({channelId, messageIds, ownerMessageIds = []});
 - [ ] Preserve one anchor restoration unless the user-intent sequence changes; keep composer and unrelated surfaces outside the transaction.
 - [ ] Run focused display and lifecycle suites and commit.
 
-### Task E: Replace the verbose loaded-status capsule
+### Task 5: Replace the verbose loaded-status capsule
 
 **Files:** modify `src/status/loaded-translation-status-store.js`, `src/ui/styles.js`, the status DOM methods in `src/legacy/runtime.js`, `tests/loaded-translation-status-store.test.js`, and the status regression cases in `tests/historical-translation-job.test.js`.
 
@@ -107,7 +107,7 @@ failed:     48/50 · 2!
 - [ ] Replace sentence-style primary text with the language-neutral compact contract while retaining localized hover detail and diagnostic phase data.
 - [ ] Prove status updates do not invoke any message-list repaint and commit.
 
-### Task F: Lifecycle completion, cleanup, and verification
+### Task 6: Lifecycle completion, cleanup, and verification
 
 **Files:** modify only owning modules identified by red tests; update this section with evidence after verification.
 
