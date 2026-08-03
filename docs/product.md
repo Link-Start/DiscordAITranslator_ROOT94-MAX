@@ -53,13 +53,20 @@ The channel popout does not contain:
 
 ## Live And Historical Messages
 
-- Live messages use an immediate queue and never wait for loaded-history work.
-- Loaded messages form one channel-scoped, ID-keyed job up to the configured limit.
-- A historical job may make several provider or repair requests, but valid terminal results become visible in one atomic rerender.
-- Completed translations become visible immediately even while the user is typing or scrolling.
+- Live messages use a dedicated high-priority path. The first new message is submitted immediately, without a fixed batching delay, and its translation is displayed as soon as that request returns.
+- A live message shows a fixed-size translation loading icon while its request is pending. Messages arriving in the same event-loop turn may share one request, but the runtime never waits to fill a batch.
+- Historical work is lower priority and never makes a live message wait for the whole historical job. If the provider permits concurrency, one live request and one historical request may run together; otherwise an in-flight request may finish, then the next available request slot always serves live work first.
+- Historical collection merges rendered messages with messages already present in Discord's message cache. It deduplicates by message ID, orders newest first, and selects up to the configured number of eligible messages.
+- If the cache contains fewer eligible messages than the configured limit, the plugin performs a bounded background prefetch only to fill that job. It does not simulate scrolling, inject the prefetched messages into the visible list, or continue paging beyond the configured limit.
+- The configured historical quantity is a maximum. Status uses the actual immutable job size: a job with 50 eligible messages reports `/50`, while a channel with only 20 available eligible messages reports `/20`.
+- Loaded messages form one immutable, channel-scoped, ID-keyed job. A historical job may make several provider or repair requests, but valid terminal results become visible in one atomic display transaction.
+- Historical results that belong to virtualized rows are stored without repainting the chat. Those rows render their final stored state when they later mount.
+- Completed translations become visible even while the user is typing or scrolling; interaction never creates a display delay.
 - One historical display transaction refreshes the mounted message rows in that configured batch together while preserving the viewport anchor once; if the user changes scroll intent during paint, the plugin does not pull the viewport back. Virtualized rows render their final stored state when they mount.
 - Automatic translation display never remounts the full chat list.
-- The loaded-message status counts confirmed and virtualized-ready translations only; missing, retrying, rejected, and stale rows are not reported as displayed.
+- The compact loaded-message status is `translation icon completed/total · elapsed`, for example `20/50 · 8s`. It counts valid results stored for visible or virtualized rows, not merely currently painted rows.
+- The status icon uses the active Discord theme: brand color while translating, positive when complete, warning during repair, and danger for terminal partial failure. Detailed visible, background-ready, and retry counts appear only in the hover explanation.
+- A completed status remains briefly and then collapses. Status updates never repaint the message list.
 - Missing, duplicate, malformed, empty, wrong-language, and placeholder-damaged batch results enter repair instead of disappearing.
 - Each pending message uses a fixed-size CSS loading indicator without timer-driven React rerenders.
 - Disabling automatic translation restores messages, reply previews, embeds, and titles through one display transaction without a second broad repaint.

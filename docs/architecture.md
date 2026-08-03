@@ -261,6 +261,41 @@ Discord patch
 
 Historical results enter the state store together. One historical display transaction then refreshes the exact committed message IDs. New live messages use a separate path and do not wait for historical work.
 
+## Live And Historical Scheduling
+
+The orchestrator owns two independent lanes:
+
+- The live lane is high priority and has no intentional batching timer. A new message starts as soon as a provider slot is available. Messages observed in the same event-loop turn may be coalesced without adding delay.
+- The historical lane is low priority. One immutable job contains up to the configured number of eligible message snapshots and commits its terminal valid results in one display transaction.
+
+When the provider supports two concurrent requests, one slot may serve live work while one serves historical work. With a single slot, a running request is allowed to finish, then live work is selected before the next historical request. Historical repair never starves live translation.
+
+## Historical Message Source
+
+`HistoricalMessageSource` builds a channel-scoped snapshot in this order:
+
+1. Capture rendered message snapshots.
+2. Read compatible snapshots already held by Discord's message store.
+3. Deduplicate by message ID and order newest first.
+4. Apply translation eligibility rules.
+5. If fewer than the configured maximum remain, issue one bounded prefetch sequence for only the missing quantity.
+
+Prefetched records stay in plugin-owned job and translation state. The source does not simulate user scrolling, mutate Discord store objects, or insert records into the virtualized list. Prefetch is cancelled when the channel generation changes or automatic translation is disabled. A failed prefetch seals the job at its actual available size instead of blocking live work.
+
+## Display Transaction And Host Ownership
+
+Translation state and Discord component ownership are related but distinct. A display transaction contains translated message IDs plus any host-row IDs whose reply previews project those translations. The channel-isolated mapping is one referenced message ID to zero or more host reply-row IDs.
+
+The render adapter refreshes all mounted owners in one component-scoped update, performs at most one targeted retry for unconfirmed mounted owners, and never remounts the whole chat list. A row without a mounted owner remains virtualized-ready and renders from the state store when mounted.
+
+Before the update, the adapter captures a visible anchor and offset. It restores that offset once after paint unless user scroll intent changed during the transaction. Composer, channel list, member list, and unrelated channels are not part of the transaction.
+
+## Loaded Translation Status
+
+`TranslationStatusStore` derives its total from the sealed historical job snapshot and its completed count from valid results committed to translation state, including virtualized-ready rows. It does not use the number of currently mounted rows and does not overwrite the exact final count with later generic job progress.
+
+The primary capsule is language-neutral: translation icon, `completed/total`, and elapsed seconds while active. Retry, visible-row, background-ready, and provider detail stay in the hover explanation. The component consumes Discord theme variables and updates independently from message rendering.
+
 ## Disable And Stop Flow
 
 Disabling one channel:

@@ -10,6 +10,45 @@
 
 ---
 
+## Active Automatic Translation Recovery Design (Approved 2026-08-04)
+
+The completed display-migration tasks below remain verification history. The next active work is the approved automatic-translation recovery slice. It must be implemented with failing regression tests before behavior changes and must not be deployed to Discord until the user separately permits deployment.
+
+### Approved behavior
+
+- Historical quantity is a maximum over eligible messages, not a scan window over arbitrary raw messages.
+- Historical collection merges rendered messages and Discord's cached messages, then performs a bounded background prefetch only when needed to fill the configured maximum.
+- Prefetch does not simulate scrolling, populate the visible list, or page beyond the configured maximum.
+- Live messages use an immediate high-priority lane with a per-message loading icon. They do not wait for the historical job or for a batching timer.
+- Historical messages form one immutable ID-keyed job. Provider transport may split an oversized request internally, but display commits once after validation and one targeted repair pass.
+- Mounted message owners and reply-preview host owners refresh in one component-scoped display transaction. Virtualized rows render from stored state when mounted.
+- The viewport anchor restores once unless user intent changes. Composer and unrelated Discord surfaces are excluded from the transaction.
+- The compact theme-aware status uses `translation icon completed/total · elapsed`; detailed counts are hover-only.
+- Disable and stop restore automatic message text, reply previews, embeds, and titles together while preserving manual translation ownership.
+
+### Required TDD sequence
+
+- [ ] Collect the configured number from rendered, cached, and bounded-prefetched messages without user scrolling.
+- [ ] Prove the first live message starts without a batching delay and receives priority over remaining historical work.
+- [ ] Validate ID-keyed batch responses, stale source signatures, duplicates, unknown IDs, malformed results, and one repair pass.
+- [ ] Commit one historical batch atomically while live results display immediately and independently.
+- [ ] Refresh mounted message and reply-preview host owners without hover and without a full-list remount.
+- [ ] Preserve viewport and composer stability while displaying translations during active scrolling and typing.
+- [ ] Restore message text, reply previews, embeds, and thread titles in one channel-isolated transaction.
+- [ ] Drive the compact status from the sealed job total and valid stored results, including virtualized-ready rows.
+- [ ] Run focused tests, deterministic build, full `npm run verify`, and `git diff --check`.
+- [ ] Produce the verified repository artifact only; leave installed Discord files untouched until deployment is explicitly permitted.
+
+### Ownership boundaries
+
+- `HistoricalMessageSource`: rendered/cache/prefetch snapshot construction only.
+- `TranslationJobCoordinator`: live priority, historical scheduling, cancellation, retry, and timeout.
+- `MessageStateStore`: channel/message/source-version translation facts and manual-versus-automatic ownership.
+- `TranslationDisplayController` and `DiscordRenderAdapter`: atomic state-to-view transaction, owner acknowledgement, anchor preservation, and restoration.
+- `TranslationStatusStore`: compact progress state independent of message rendering.
+
+---
+
 ## Scope
 
 This plan implements the first architecture milestone only:
