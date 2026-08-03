@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const {createDiscordHistoryAdapter} = require("../src/received/discord-history-adapter");
 const {
 	foreignLanguageDecisionRuntime,
 	receivedMessageFilterRuntime,
@@ -82,6 +83,7 @@ function createPlugin(overrides = {}) {
 		clearedCache: [],
 		snapshots: [],
 		prepared: [],
+		historicalSourceBuilds: [],
 		languageChoice: [],
 		detectLanguage: [],
 		scrollWatchers: 0
@@ -148,6 +150,13 @@ function createPlugin(overrides = {}) {
 		attachAutoTranslationScrollWatcher: () => {calls.scrollWatchers++;},
 		updateLoadedAutoTranslationStatus: update => calls.status.push(update),
 		shouldDeferInitialAutoTranslate: () => false,
+		getHistoricalMessageSourceGeneration: () => 1,
+		getReceivedAutoTranslateLoadedLimit: () => 50,
+		buildInitialHistoricalTranslationSnapshot: payload => {
+			calls.historicalSourceBuilds.push(payload);
+			const renderedMessages = payload && payload.renderedMessages || [];
+			return Promise.resolve({accepted: renderedMessages.length, total: renderedMessages.length});
+		},
 		markLoadedAutoTranslationMessageSeen: (channelId, messageId) => {
 			const key = `${channelId}|${messageId}`;
 			const wasSeen = seenMessages.has(key);
@@ -500,6 +509,34 @@ test("an already initialised channel opens no banner and starts no scroll watche
 	assert.equal(plugin.calls.scrollWatchers, 0);
 });
 
+test("the initial loaded_messages pass builds one historical snapshot from rendered messages instead of queueing each message", async () => {
+	const runtime = createRuntime();
+	const plugin = createPlugin({
+		getReceivedAutoTranslateScope: () => "loaded_messages",
+		getHistoricalMessageSourceGeneration: () => 9,
+		getReceivedAutoTranslateLoadedLimit: () => 50,
+		channelState: {boundaryMessageId: "100", initialized: false}
+	});
+
+	runtime.processMessages(plugin, createEvent([
+		{content: {id: "300", content: "first", attachments: []}},
+		{content: {id: "200", content: "second", attachments: []}}
+	]));
+	await new Promise(resolve => setImmediate(resolve));
+
+	assert.equal(plugin.calls.queued.length, 0);
+	assert.equal(plugin.calls.historicalSourceBuilds.length, 1);
+	assert.deepEqual(plugin.calls.historicalSourceBuilds[0], {
+		channelId: "channel-1",
+		generation: 9,
+		renderedMessages: [
+			{id: "300", content: "first", attachments: []},
+			{id: "200", content: "second", attachments: []}
+		],
+		limit: 50
+	});
+});
+
 test("a deferred first pass marks the whole stream skipAutoQueue", () => {
 	const runtime = createRuntime();
 	const plugin = createPlugin({
@@ -526,6 +563,7 @@ test("each stream entry with attachments is checked, and grouped entries are wal
 		channelId: "channel-1",
 		channel: {id: "channel-1"},
 		historicalLoadedPass: true,
+		renderedHistoricalMessages: [],
 		autoTranslateBoundaryId: "100",
 		highestMessageId: "100",
 		skipInitialLoadedMessages: false,
@@ -541,11 +579,12 @@ test("each stream entry with attachments is checked, and grouped entries are wal
 		skipAutoQueue: false,
 		autoTranslateBoundaryId: "100",
 		historicalLoad: true,
-		deferHistoricalSnapshotStart: true
+		deferHistoricalSnapshotStart: true,
+		skipHistoricalQueue: true
 	});
 });
 
-test("finishing the pass advances the boundary, marks the channel initialised and closes the banner", () => {
+test("finishing the initial loaded pass advances the boundary, marks the channel initialised and starts one historical source build", async () => {
 	const runtime = createRuntime();
 	const plugin = createPlugin();
 	const channelState = {boundaryMessageId: "100", initialized: false};
@@ -554,15 +593,23 @@ test("finishing the pass advances the boundary, marks the channel initialised an
 		channelState,
 		shouldInitializeAutoTranslation: true,
 		historicalLoadedPass: true,
+		historicalSourceGeneration: 1,
+		renderedHistoricalMessages: [{id: "300", attachments: []}],
 		collectedHistoricalMessages: true,
 		highestMessageId: "400"
 	});
+	await new Promise(resolve => setImmediate(resolve));
 	assert.equal(channelState.boundaryMessageId, "400");
 	assert.equal(channelState.initialized, true);
-	assert.deepEqual(plugin.calls.snapshots, ["channel-1"]);
-	assert.equal(plugin.calls.status.length, 1);
-	assert.equal(plugin.calls.status[0].done, true);
-	assert.equal(plugin.calls.status[0].batch, 7);
+	assert.equal(plugin.calls.snapshots.length, 0);
+	assert.equal(plugin.calls.status.length, 0);
+	assert.equal(plugin.calls.historicalSourceBuilds.length, 1);
+	assert.deepEqual(plugin.calls.historicalSourceBuilds[0], {
+		channelId: "channel-1",
+		generation: 1,
+		renderedMessages: [{id: "300", attachments: []}],
+		limit: 50
+	});
 });
 
 test("a channel with historical work still queued keeps its banner open", () => {
@@ -571,7 +618,7 @@ test("a channel with historical work still queued keeps its banner open", () => 
 	runtime.finishProcessMessages(plugin, {
 		channelId: "channel-1",
 		channelState: null,
-		historicalLoadedPass: true,
+		historicalLoadedPass: false,
 		collectedHistoricalMessages: true,
 		highestMessageId: "400"
 	});
@@ -803,4 +850,41 @@ test("checkMessage ignores malformed stream entries and otherwise runs the whole
 	assert.equal(plugin.calls.captured.length, 1);
 	assert.equal(plugin.calls.captured[0].channelId, "channel-1");
 	assert.equal(plugin.calls.queued.length, 1);
+});
+
+test("the Discord history adapter enumerates cache and fetch results across supported fixture shapes without mutating fixtures", async () => {
+	const cachedMessages = [
+		{id: "300", channel_id: "channel-1", content: "cached-300"},
+		{id: "200", channel_id: "channel-1", content: "cached-200"}
+	];
+	const prefetchedMessages = [
+		{id: "100", channel_id: "channel-1", content: "prefetched-100"}
+	];
+	const cachedSnapshot = JSON.stringify(cachedMessages);
+	const prefetchedSnapshot = JSON.stringify(prefetchedMessages);
+	const adapter = createDiscordHistoryAdapter({
+		messageStore: {
+			getMessages: () => ({
+				toArray: () => cachedMessages
+			})
+		},
+		fetchMessages: {
+			fetchMessages: async request => ({
+				request,
+				body: {
+					messages: new Map(prefetchedMessages.map(message => [message.id, message]))
+				}
+			})
+		}
+	});
+
+	const cached = await adapter.listCachedMessages("channel-1");
+	const prefetched = await adapter.prefetchMessages({channelId: "channel-1", beforeMessageId: "200", limit: 1});
+
+	assert.deepEqual(cached.map(message => message.id), ["300", "200"]);
+	assert.deepEqual(prefetched.map(message => message.id), ["100"]);
+	assert.deepEqual(JSON.parse(JSON.stringify(cachedMessages)), JSON.parse(cachedSnapshot));
+	assert.deepEqual(JSON.parse(JSON.stringify(prefetchedMessages)), JSON.parse(prefetchedSnapshot));
+	assert.notStrictEqual(cached[0], cachedMessages[0]);
+	assert.notStrictEqual(prefetched[0], prefetchedMessages[0]);
 });
