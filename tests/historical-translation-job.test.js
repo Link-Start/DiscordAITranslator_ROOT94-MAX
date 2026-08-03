@@ -31,6 +31,16 @@ function createLoadedMessages(startId, count, prefix, channelId = "channel-histo
 	return messages;
 }
 
+function createDeferred() {
+	let resolve = null;
+	let reject = null;
+	const promise = new Promise((resolvePromise, rejectPromise) => {
+		resolve = resolvePromise;
+		reject = rejectPromise;
+	});
+	return {promise, resolve, reject};
+}
+
 function createInitialSourcePrefetchHarness({
 	channelId = "channel-history-job",
 	selectedChannelId = channelId
@@ -1350,6 +1360,175 @@ test("a queued live item receives the next slot before a sealed follow-up histor
 		assert.deepEqual(providerOrder, ["historical:100", "live:300", "historical:200"]);
 	}
 	finally {
+		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
+	}
+});
+
+test("a started live turn consumes the handoff so a later same-channel live arrival cannot starve follow-up history", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const batchResolvers = [];
+	const liveResolvers = new Map();
+	const providerOrder = [];
+	try {
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			const channelId = preparedItems[0] && preparedItems[0].channelId || "unknown";
+			const ids = preparedItems.map(item => String(item.message.id));
+			providerOrder.push(`historical:${channelId}:${ids.join(",")}`);
+			const deferred = createDeferred();
+			batchResolvers.push(deferred);
+			return deferred.promise;
+		};
+		plugin.applyStoredTranslationToMessage = () => ({});
+		plugin.rerenderMessagesWithScrollPreserved = () => {};
+		plugin.translateMessage = (message, channel) => {
+			const deferred = createDeferred();
+			providerOrder.push(`live:${channel.id}:${message.id}`);
+			liveResolvers.set(String(message.id), deferred);
+			return deferred.promise;
+		};
+
+		plugin.queueAutoTranslateMessage(createMessage("100", "first historical"), {id: "channel-history-job"}, {content: "first historical"}, {historicalLoad: true});
+		const firstRunning = plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
+		await new Promise(resolve => setImmediate(resolve));
+
+		plugin.queueAutoTranslateMessage(createMessage("200", "follow-up historical"), {id: "channel-history-job"}, {content: "follow-up historical"}, {historicalLoad: true});
+		plugin.queueAutoTranslateMessage(createMessage("300", "live first"), {id: "channel-history-job"}, {content: "live first"});
+		await new Promise(resolve => setImmediate(resolve));
+		plugin.queueAutoTranslateMessage(createMessage("400", "live second"), {id: "channel-history-job"}, {content: "live second"});
+		await new Promise(resolve => setImmediate(resolve));
+
+		batchResolvers.shift().resolve({"100": "第一条"});
+		await firstRunning;
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.deepEqual(
+			providerOrder.slice(0, 3),
+			["historical:channel-history-job:100", "live:channel-history-job:300", "historical:channel-history-job:200"],
+			"once the first live turn has started, the follow-up historical job must resume before a later same-channel live arrival"
+		);
+
+		liveResolvers.get("300").resolve(true);
+		await new Promise(resolve => setImmediate(resolve));
+		liveResolvers.get("400").resolve(true);
+		batchResolvers.shift().resolve({"200": "第二条"});
+		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
+	}
+	finally {
+		for (const deferred of batchResolvers) deferred.resolve({});
+		for (const deferred of liveResolvers.values()) deferred.resolve(true);
+		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
+	}
+});
+
+test("other-channel live traffic does not delay a channel's follow-up historical continuation", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const batchResolvers = [];
+	const liveResolvers = new Map();
+	const providerOrder = [];
+	try {
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			const channelId = preparedItems[0] && preparedItems[0].channelId || "unknown";
+			const ids = preparedItems.map(item => String(item.message.id));
+			providerOrder.push(`historical:${channelId}:${ids.join(",")}`);
+			const deferred = createDeferred();
+			batchResolvers.push(deferred);
+			return deferred.promise;
+		};
+		plugin.applyStoredTranslationToMessage = () => ({});
+		plugin.rerenderMessagesWithScrollPreserved = () => {};
+		plugin.translateMessage = (message, channel) => {
+			const deferred = createDeferred();
+			providerOrder.push(`live:${channel.id}:${message.id}`);
+			liveResolvers.set(`${channel.id}:${message.id}`, deferred);
+			return deferred.promise;
+		};
+
+		plugin.queueAutoTranslateMessage(createMessage("100", "c1 first historical"), {id: "channel-history-job"}, {content: "c1 first historical"}, {historicalLoad: true});
+		const firstRunning = plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
+		await new Promise(resolve => setImmediate(resolve));
+
+		plugin.queueAutoTranslateMessage(createMessage("200", "c1 follow-up historical"), {id: "channel-history-job"}, {content: "c1 follow-up historical"}, {historicalLoad: true});
+		plugin.queueAutoTranslateMessage(createMessage("300", "c1 live"), {id: "channel-history-job"}, {content: "c1 live"});
+		await new Promise(resolve => setImmediate(resolve));
+		plugin.queueAutoTranslateMessage(Object.assign(createMessage("400", "c2 live"), {channel_id: "channel-live-c2"}), {id: "channel-live-c2"}, {content: "c2 live"});
+		await new Promise(resolve => setImmediate(resolve));
+
+		batchResolvers.shift().resolve({"100": "第一条"});
+		await firstRunning;
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.deepEqual(
+			providerOrder.slice(0, 3),
+			["historical:channel-history-job:100", "live:channel-history-job:300", "historical:channel-history-job:200"],
+			"another channel's live queue must not delay the current channel's follow-up historical handoff"
+		);
+
+		liveResolvers.get("channel-history-job:300").resolve(true);
+		await new Promise(resolve => setImmediate(resolve));
+		liveResolvers.get("channel-live-c2:400").resolve(true);
+		batchResolvers.shift().resolve({"200": "第二条"});
+		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
+	}
+	finally {
+		for (const deferred of batchResolvers) deferred.resolve({});
+		for (const deferred of liveResolvers.values()) deferred.resolve(true);
+		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
+		plugin.cancelHistoricalTranslationJobs("channel-live-c2", "test-cleanup");
+	}
+});
+
+test("clearing a channel retires its parked live handoff so a later live turn cannot resume stale history", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const batchResolvers = [];
+	const liveResolvers = new Map();
+	const providerOrder = [];
+	try {
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			const channelId = preparedItems[0] && preparedItems[0].channelId || "unknown";
+			const ids = preparedItems.map(item => String(item.message.id));
+			providerOrder.push(`historical:${channelId}:${ids.join(",")}`);
+			const deferred = createDeferred();
+			batchResolvers.push(deferred);
+			return deferred.promise;
+		};
+		plugin.applyStoredTranslationToMessage = () => ({});
+		plugin.rerenderMessagesWithScrollPreserved = () => {};
+		plugin.translateMessage = (message, channel) => {
+			const deferred = createDeferred();
+			providerOrder.push(`live:${channel.id}:${message.id}`);
+			liveResolvers.set(`${channel.id}:${message.id}`, deferred);
+			return deferred.promise;
+		};
+
+		plugin.queueAutoTranslateMessage(createMessage("100", "first historical"), {id: "channel-history-job"}, {content: "first historical"}, {historicalLoad: true});
+		const firstRunning = plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
+		await new Promise(resolve => setImmediate(resolve));
+
+		plugin.queueAutoTranslateMessage(createMessage("200", "follow-up historical"), {id: "channel-history-job"}, {content: "follow-up historical"}, {historicalLoad: true});
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(true);
+		plugin.queueAutoTranslateMessage(createMessage("300", "queued live"), {id: "channel-history-job"}, {content: "queued live"});
+		await new Promise(resolve => setImmediate(resolve));
+
+		batchResolvers.shift().resolve({"100": "第一条"});
+		await firstRunning;
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(providerOrder, ["historical:channel-history-job:100"], "the parked handoff waits for the next live turn to start");
+
+		plugin.clearAutoTranslationQueue("channel-history-job");
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
+		plugin.queueAutoTranslateMessage(createMessage("500", "fresh live after clear"), {id: "channel-history-job"}, {content: "fresh live after clear"});
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.deepEqual(providerOrder, ["historical:channel-history-job:100", "live:channel-history-job:500"], "a fresh live turn after clear must not revive the cancelled follow-up history");
+
+		liveResolvers.get("channel-history-job:500").resolve(true);
+		await new Promise(resolve => setImmediate(resolve));
+		assert.equal(plugin.isHistoricalMessagePending("200", "channel-history-job"), false);
+	}
+	finally {
+		for (const deferred of batchResolvers) deferred.resolve({});
+		for (const deferred of liveResolvers.values()) deferred.resolve(true);
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
 		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
 	}
 });

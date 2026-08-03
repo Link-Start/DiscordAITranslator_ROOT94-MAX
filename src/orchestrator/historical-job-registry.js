@@ -23,7 +23,7 @@ function createHistoricalJobRegistry() {
 			if (!key) return null;
 			let entry = queues.get(key);
 			if (!entry && createWhenMissing) {
-				entry = {channelId: key, generation: 0, jobs: [], runningPromise: null, startToken: null, intakeBlocked: false};
+				entry = {channelId: key, generation: 0, jobs: [], runningPromise: null, startToken: null, intakeBlocked: false, pendingLiveHandoffTurn: null};
 				queues.set(key, entry);
 			}
 			return entry || null;
