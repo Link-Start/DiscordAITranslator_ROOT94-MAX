@@ -1991,6 +1991,34 @@ test("invalid batch items are repaired, but a skip verdict is terminal", async (
 	assert.equal(rerenderCount, 0);
 });
 
+test("historical authentication failure uses the detailed provider result and makes no repair requests", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin();
+	const channelId = "channel-history-auth";
+	let detailedCalls = 0;
+	let legacyCalls = 0;
+	let repairBatchCalls = 0;
+	let repairCalls = 0;
+	plugin.requestAiBatchTranslationDetailed = () => {
+		detailedCalls++;
+		return Promise.resolve({translations: null, failureKind: "auth", statusCode: 401});
+	};
+	plugin.requestAiBatchTranslation = () => {legacyCalls++; return Promise.resolve(null);};
+	plugin.repairHistoricalTranslationJobBatch = () => {repairBatchCalls++; return Promise.resolve(null);};
+	plugin.repairHistoricalTranslationJobItem = () => {repairCalls++; return Promise.resolve({status: "failed"});};
+	for (const id of ["auth-1", "auth-2"]) {
+		const message = createMessage(id, `source ${id}`);
+		plugin.queueAutoTranslateMessage(message, {id: channelId}, {content: message.content}, {historicalLoad: true});
+	}
+
+	await plugin.startCollectedHistoricalTranslationJobs(channelId);
+
+	assert.equal(detailedCalls, 1);
+	assert.equal(legacyCalls, 0);
+	assert.equal(repairBatchCalls, 0);
+	assert.equal(repairCalls, 0);
+	assert.equal(plugin.getFailedHistoricalTranslationCount(channelId), 2);
+});
+
 test("failed historical items are retained by channel and retried in a new bounded job", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
 	const channelId = "channel-history-retry";

@@ -3195,9 +3195,10 @@ ${sample.text}`
         return adapter ? adapter(data, callback) : callback("");
       }
       __name(translate, "translate");
-      function requestAiBatchTranslation(engineKey, preparedItems) {
+      function requestAiBatchTranslationDetailed(engineKey, preparedItems) {
         return new Promise((resolve) => {
-          if (!engineKey || !preparedItems || !preparedItems.length || !isEngineConfiguredForRuntime(engineKey)) return resolve(null);
+          let finishFailure = /* @__PURE__ */ __name((failureKind, statusCode = null) => resolve({ translations: null, failureKind, statusCode }), "finishFailure");
+          if (!engineKey || !preparedItems || !preparedItems.length || !isEngineConfiguredForRuntime(engineKey)) return finishFailure("configuration");
           let auth = getAuth(engineKey), apiKey = auth.key || "", apiEndpoint = normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint), modelId = auth.model || translationEngines[engineKey].model, output = preparedItems[0].output, input = preparedItems[0].input, payloadItems = preparedItems.map((item) => ({
             id: String(item.message.id),
             text: item.protectedText.replace(/\n/g, " [NEWLINE] ").replace(/\s+/g, " ")
@@ -3212,27 +3213,42 @@ Rules:
 6. Do not add explanations. Do not output any language other than the target language except preserved protected content.
 
 Messages JSON:
-${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => resolve(parseAiBatchTranslationResponse(content, payloadItems.map((item) => item.id))), "finish");
+${JSON.stringify(payloadItems)}`, finishResponse = /* @__PURE__ */ __name((error, response, body, parseResponseText) => {
+            let statusCode = response && response.statusCode || null;
+            if (!error && response && statusCode == 200) {
+              let translations = parseAiBatchTranslationResponse(parseResponseText(body), payloadItems.map((item) => item.id));
+              return translations === null ? finishFailure("malformed", statusCode) : resolve({ translations, failureKind: null, statusCode });
+            }
+            if (statusCode == 401 || statusCode == 403) {
+              let labels = getLabels();
+              return dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`), finishFailure("auth", statusCode);
+            }
+            return error || !response || statusCode == 408 || statusCode == 429 || statusCode >= 500 ? finishFailure("transient", statusCode) : finishFailure("permanent", statusCode);
+          }, "finishResponse");
           if (engineKey == "openai")
             return requestWithTimeout(apiEndpoint, {
               method: "post",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
               body: JSON.stringify({ model: modelId, instructions: systemPrompt, input: batchPrompt, store: !1 })
-            }, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+            }, (error, response, body) => finishResponse(error, response, body, parseOpenAiResponseText));
           if (engineKey == "gemini") {
             let geminiModelId = String(modelId || "").replace(/^models\//, ""), requestUrl = `${apiEndpoint}/${encodeURIComponent(geminiModelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
             return requestWithTimeout(requestUrl, {
               method: "post",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ system_instruction: { parts: [{ text: systemPrompt }] }, contents: [{ role: "user", parts: [{ text: batchPrompt }] }], generationConfig: { temperature: 0.1, topP: 0.8 } })
-            }, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseGeminiResponseText(body)) : resolve(null));
+            }, (error, response, body) => finishResponse(error, response, body, parseGeminiResponseText));
           }
           requestWithTimeout(apiEndpoint, {
             method: "post",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
             body: JSON.stringify({ model: modelId, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: batchPrompt }], temperature: 0.1, top_p: 0.8, ...engineRequestExtras(engineKey) })
-          }, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+          }, (error, response, body) => finishResponse(error, response, body, parseOpenAiResponseText));
         });
+      }
+      __name(requestAiBatchTranslationDetailed, "requestAiBatchTranslationDetailed");
+      function requestAiBatchTranslation(engineKey, preparedItems) {
+        return requestAiBatchTranslationDetailed(engineKey, preparedItems).then((outcome) => outcome.translations);
       }
       return __name(requestAiBatchTranslation, "requestAiBatchTranslation"), Object.freeze({
         translationEngines,
@@ -3255,6 +3271,7 @@ ${JSON.stringify(payloadItems)}`, finish = /* @__PURE__ */ __name((content) => r
         chatCompletionsTranslate,
         requestAiProviderTranslation,
         requestAiBatchTranslation,
+        requestAiBatchTranslationDetailed,
         normalizeApiEndpoint,
         getModelCatalogEndpoint,
         mapLanguageCodeForEngine,
@@ -5948,18 +5965,22 @@ var require_live_translation_queue = __commonJS({
           if (!prepared.length) return;
           channelSession.noteLiveTurnStarted(channelId);
           for (let preparedItem of prepared) if (preparedItem && preparedItem.queueItem && preparedItem.queueItem.liveRequest && recordLiveRequestConsumption(preparedItem.queueItem.liveRequest, "burst")) break;
-          let resultMap = null;
+          let batchOutcome = null;
           try {
-            resultMap = await requestBurstTranslation(context, prepared);
+            batchOutcome = await requestBurstTranslation(context, prepared);
           } catch {
-            resultMap = null;
+            batchOutcome = null;
           }
-          let commits = [];
+          let detailedOutcome = batchOutcome && typeof batchOutcome == "object" && (Object.prototype.hasOwnProperty.call(batchOutcome, "translations") || batchOutcome.failureKind), resultMap = detailedOutcome ? batchOutcome.translations : batchOutcome, terminalFailure = detailedOutcome && ["auth", "configuration", "permanent"].includes(batchOutcome.failureKind), commits = [];
           for (let preparedItem of prepared) {
             let queueItem = preparedItem.queueItem;
             try {
               let resolved = resolveBurstItemResult(preparedItem, resultMap, channelId) || { status: "retry" };
               if (resolved.status === "retry") {
+                if (terminalFailure) {
+                  settled.add(queueItem), requestRegistry.finishRequest(queueItem.liveRequest);
+                  continue;
+                }
                 requeueBurstItem(queueItem, settled);
                 continue;
               }
@@ -6190,7 +6211,16 @@ var require_historical_job_registry = __commonJS({
 // src/orchestrator/historical-translation-job.js
 var require_historical_translation_job = __commonJS({
   "src/orchestrator/historical-translation-job.js"(exports2, module2) {
-    var HISTORICAL_TERMINAL_ITEM_STATES = /* @__PURE__ */ new Set(["translated", "skipped", "failed", "cancelled"]), HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100, _HistoricalTranslationJob = class _HistoricalTranslationJob {
+    var HISTORICAL_TERMINAL_ITEM_STATES = /* @__PURE__ */ new Set(["translated", "skipped", "failed", "cancelled"]), HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100;
+    function normalizeBatchOutcome(outcome) {
+      return !!(outcome && typeof outcome == "object" && Object.prototype.hasOwnProperty.call(outcome, "translations") && Object.prototype.hasOwnProperty.call(outcome, "failureKind")) ? outcome : { translations: outcome, failureKind: null, statusCode: null };
+    }
+    __name(normalizeBatchOutcome, "normalizeBatchOutcome");
+    function isTerminalProviderFailure(failureKind) {
+      return ["auth", "configuration", "permanent"].includes(failureKind);
+    }
+    __name(isTerminalProviderFailure, "isTerminalProviderFailure");
+    var _HistoricalTranslationJob = class _HistoricalTranslationJob {
       constructor(config = {}) {
         this.id = config.id || `historical-${Date.now()}`, this.channelId = config.channelId || null, this.generation = config.generation || 0, this.configurationSignature = config.configurationSignature || null, this.dependencies = Object.assign({
           prepare: /* @__PURE__ */ __name((item) => ({ status: "pending", prepared: item }), "prepare"),
@@ -6263,14 +6293,20 @@ var require_historical_translation_job = __commonJS({
         }
         let translatingRecords = [...this.items.values()].filter((record) => record.status == "translating");
         if (translatingRecords.length && this.state != "cancelled") {
-          let resultMap = null;
+          let batchOutcome = null;
           try {
-            resultMap = await this.dependencies.translateBatch(translatingRecords.map((record) => record.prepared), this);
+            batchOutcome = await this.dependencies.translateBatch(translatingRecords.map((record) => record.prepared), this);
           } catch {
           }
           if (this.state == "cancelled") return this.createSummary();
+          let { translations: resultMap, failureKind } = normalizeBatchOutcome(batchOutcome);
           for (let record of translatingRecords) {
             if (record.status == "cancelled") continue;
+            if (isTerminalProviderFailure(failureKind)) {
+              record.status = "failed", record.reason = `provider_${failureKind}`;
+              continue;
+            }
+            failureKind == "transient" && (record.transientRetry = !0);
             let messageId = String(record.source.message.id), rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null, validation = { ok: !1 };
             try {
               validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || { ok: !1 };
@@ -6282,24 +6318,29 @@ var require_historical_translation_job = __commonJS({
         if (this.state == "cancelled") return this.createSummary();
         let unresolvedBatchRecords = [...this.items.values()].filter((record) => record.status == "repairing");
         if (unresolvedBatchRecords.length > 1 && typeof this.dependencies.repairBatch == "function") {
-          let chunkSize = Math.min(this.repairBatchSize, Math.max(1, Math.ceil(translatingRecords.length / 2)));
+          let chunkSize = unresolvedBatchRecords.some((record) => record.transientRetry) ? unresolvedBatchRecords.length : Math.min(this.repairBatchSize, Math.max(1, Math.ceil(translatingRecords.length / 2)));
           for (let offset = 0; offset < unresolvedBatchRecords.length && this.state != "cancelled"; offset += chunkSize) {
             let chunk = unresolvedBatchRecords.slice(offset, offset + chunkSize).filter((record) => record.status == "repairing");
             if (!chunk.length) continue;
-            let repairResultMap = null;
+            let repairOutcome = null;
             try {
-              repairResultMap = await this.dependencies.repairBatch(chunk.map((record) => record.prepared), this);
+              repairOutcome = await this.dependencies.repairBatch(chunk.map((record) => record.prepared), this);
             } catch {
             }
             if (this.state == "cancelled") return this.createSummary();
+            let { translations: repairResultMap, failureKind: repairFailureKind } = normalizeBatchOutcome(repairOutcome);
             for (let record of chunk) {
               if (record.status == "cancelled") continue;
+              if (isTerminalProviderFailure(repairFailureKind) || repairFailureKind == "transient") {
+                record.status = "failed", record.reason = `provider_${repairFailureKind}`;
+                continue;
+              }
               let messageId = String(record.source.message.id), rawTranslation = repairResultMap && Object.prototype.hasOwnProperty.call(repairResultMap, messageId) ? repairResultMap[messageId] : null, validation = { ok: !1 };
               try {
                 validation = await this.dependencies.validate(record.prepared, rawTranslation, this) || { ok: !1 };
               } catch {
               }
-              validation.ok ? (record.status = "translated", record.translation = validation.translation) : validation.skipped && (record.status = "skipped", record.reason = validation.reason || "skipped");
+              validation.ok ? (record.status = "translated", record.translation = validation.translation) : validation.skipped ? (record.status = "skipped", record.reason = validation.reason || "skipped") : record.transientRetry && (record.status = "failed", record.reason = "provider_transient");
             }
           }
         }
@@ -11519,12 +11560,12 @@ __________________ __________________ __________________
           translateHistoricalTranslationJobBatch(preparedItems, job) {
             if (!preparedItems.length || !this.isHistoricalTranslationJobCurrent(job)) return Promise.resolve(null);
             let engineKey = this.getHistoricalAiBatchEngineKey(job.channelId);
-            return engineKey ? this.requestAiBatchTranslation(engineKey, preparedItems) : Promise.resolve(null);
+            return engineKey ? this.requestAiBatchTranslationDetailed(engineKey, preparedItems) : Promise.resolve(null);
           }
           repairHistoricalTranslationJobBatch(preparedItems, job) {
             if (!preparedItems.length || !this.isHistoricalTranslationJobCurrent(job)) return Promise.resolve(null);
             let engineKey = this.getHistoricalAiBatchEngineKey(job.channelId);
-            return engineKey ? this.awaitProviderBackoff().then((_2) => this.isHistoricalTranslationJobCurrent(job) ? this.requestAiBatchTranslation(engineKey, preparedItems) : null) : Promise.resolve(null);
+            return engineKey ? this.awaitProviderBackoff().then((_2) => this.isHistoricalTranslationJobCurrent(job) ? this.requestAiBatchTranslationDetailed(engineKey, preparedItems) : null) : Promise.resolve(null);
           }
           validateHistoricalTranslationJobResult(prepared, rawTranslation, job) {
             if (!prepared || rawTranslation == null || String(rawTranslation).trim() === "") return { ok: !1 };
@@ -11654,6 +11695,9 @@ __________________ __________________ __________________
           }
           requestAiBatchTranslation(engineKey, preparedItems) {
             return this.ensureProviderClient().requestAiBatchTranslation(engineKey, preparedItems);
+          }
+          requestAiBatchTranslationDetailed(engineKey, preparedItems) {
+            return Object.prototype.hasOwnProperty.call(this, "requestAiBatchTranslation") ? this.requestAiBatchTranslation(engineKey, preparedItems) : this.ensureProviderClient().requestAiBatchTranslationDetailed(engineKey, preparedItems);
           }
           processAutoTranslationQueue() {
             return this.ensureLiveTranslationQueue().processQueue();
@@ -11838,7 +11882,7 @@ __________________ __________________ __________________
                 output: Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)) || {})
               }), "createBurstContext"),
               prepareBurstItem: /* @__PURE__ */ __name((queueItem, channelId, context) => this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, context.input, context.output), "prepareBurstItem"),
-              requestBurstTranslation: /* @__PURE__ */ __name((context, prepared) => this.requestAiBatchTranslation(context.engineKey, prepared), "requestBurstTranslation"),
+              requestBurstTranslation: /* @__PURE__ */ __name((context, prepared) => this.requestAiBatchTranslationDetailed(context.engineKey, prepared), "requestBurstTranslation"),
               // Skip detection, validation and caching are translation policy and stay here;
               // the queue only learns whether the item is done, done-as-skipped, or must be
               // retried alone.

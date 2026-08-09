@@ -345,11 +345,14 @@ function createLiveTranslationQueue({
 			if (!prepared.length) return;
 			channelSession.noteLiveTurnStarted(channelId);
 			for (const preparedItem of prepared) if (preparedItem && preparedItem.queueItem && preparedItem.queueItem.liveRequest && recordLiveRequestConsumption(preparedItem.queueItem.liveRequest, "burst")) break;
-			let resultMap = null;
+			let batchOutcome = null;
 			try {
-				resultMap = await requestBurstTranslation(context, prepared);
+				batchOutcome = await requestBurstTranslation(context, prepared);
 			}
-			catch (error) {resultMap = null;}
+			catch (error) {batchOutcome = null;}
+			const detailedOutcome = batchOutcome && typeof batchOutcome == "object" && (Object.prototype.hasOwnProperty.call(batchOutcome, "translations") || batchOutcome.failureKind);
+			const resultMap = detailedOutcome ? batchOutcome.translations : batchOutcome;
+			const terminalFailure = detailedOutcome && ["auth", "configuration", "permanent"].includes(batchOutcome.failureKind);
 			const commits = [];
 			for (const preparedItem of prepared) {
 				const queueItem = preparedItem.queueItem;
@@ -357,6 +360,11 @@ function createLiveTranslationQueue({
 					const resolved = resolveBurstItemResult(preparedItem, resultMap, channelId) || {status: "retry"};
 					// One unusable item must not cost the whole burst: retry it alone.
 					if (resolved.status === "retry") {
+						if (terminalFailure) {
+							settled.add(queueItem);
+							requestRegistry.finishRequest(queueItem.liveRequest);
+							continue;
+						}
 						requeueBurstItem(queueItem, settled);
 						continue;
 					}

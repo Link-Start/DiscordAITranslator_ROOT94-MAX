@@ -855,6 +855,45 @@ test("a batch that errors or times out resolves null rather than a partial map",
 	assert.equal(await garbledPending, null);
 });
 
+test("detailed batch outcomes distinguish authentication transient and malformed failures", async () => {
+	for (const statusCode of [401, 403]) {
+		const harness = createHarness({authKeys: AI_AUTH});
+		const pending = harness.client.requestAiBatchTranslationDetailed("openai", preparedItems());
+		harness.respond(0, null, {statusCode}, "bad credentials");
+		assert.deepEqual(await pending, {translations: null, failureKind: "auth", statusCode});
+		assert.equal(harness.calls.length, 1);
+		assert.equal(harness.toasts.length, 1, "the terminal batch still tells the user why it stopped");
+		assert.match(harness.toasts[0].message, /KEYOUTDATED/);
+	}
+
+	const unavailable = createHarness({authKeys: AI_AUTH});
+	const unavailablePending = unavailable.client.requestAiBatchTranslationDetailed("openai", preparedItems());
+	unavailable.respond(0, null, {statusCode: 503}, "unavailable");
+	assert.deepEqual(await unavailablePending, {translations: null, failureKind: "transient", statusCode: 503});
+
+	const timedOut = createHarness({authKeys: AI_AUTH});
+	const timedOutPending = timedOut.client.requestAiBatchTranslationDetailed("openai", preparedItems());
+	timedOut.fireTimer(0);
+	assert.deepEqual(await timedOutPending, {translations: null, failureKind: "transient", statusCode: 504});
+
+	const malformed = createHarness({authKeys: AI_AUTH});
+	const malformedPending = malformed.client.requestAiBatchTranslationDetailed("openai", preparedItems());
+	malformed.respond(0, null, {statusCode: 200}, JSON.stringify({output_text: "not a batch"}));
+	assert.deepEqual(await malformedPending, {translations: null, failureKind: "malformed", statusCode: 200});
+});
+
+test("detailed batch success preserves the old map-only batch API", async () => {
+	const detailed = createHarness({authKeys: AI_AUTH});
+	const detailedPending = detailed.client.requestAiBatchTranslationDetailed("openai", preparedItems());
+	detailed.respond(0, null, {statusCode: 200}, JSON.stringify({output_text: '[{"id":"100","translation":"一"}]'}));
+	assert.deepEqual(await detailedPending, {translations: {"100": "一"}, failureKind: null, statusCode: 200});
+
+	const compatible = createHarness({authKeys: AI_AUTH});
+	const compatiblePending = compatible.client.requestAiBatchTranslation("openai", preparedItems());
+	compatible.respond(0, null, {statusCode: 401}, "bad credentials");
+	assert.equal(await compatiblePending, null);
+});
+
 test("a batch answer for a message that was not asked about is discarded", async () => {
 	const harness = createHarness({authKeys: AI_AUTH});
 	const pending = harness.client.requestAiBatchTranslation("openai", preparedItems());

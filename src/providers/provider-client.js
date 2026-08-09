@@ -1340,9 +1340,10 @@ function createProviderClient({
 
 	// One request for a whole screen of history. The wire shape is a JSON array keyed by
 	// message id, so a partial or reordered answer still lands on the right messages.
-	function requestAiBatchTranslation(engineKey, preparedItems) {
+	function requestAiBatchTranslationDetailed(engineKey, preparedItems) {
 		return new Promise(resolve => {
-			if (!engineKey || !preparedItems || !preparedItems.length || !isEngineConfiguredForRuntime(engineKey)) return resolve(null);
+			const finishFailure = (failureKind, statusCode = null) => resolve({translations: null, failureKind, statusCode});
+			if (!engineKey || !preparedItems || !preparedItems.length || !isEngineConfiguredForRuntime(engineKey)) return finishFailure("configuration");
 			const auth = getAuth(engineKey);
 			const apiKey = auth.key || "";
 			const apiEndpoint = normalizeApiEndpoint(engineKey, auth.endpoint || translationEngines[engineKey].endpoint);
@@ -1362,13 +1363,28 @@ function createProviderClient({
 				? `Apply these skip rules to every message; when a message should not be translated set its "translation" to exactly ${AI_SKIP_TRANSLATION_TOKEN}.\n${getAiAutoTranslatePrompt({input, output})}`
 				: "The plugin has already filtered messages that should be skipped; do not make skip decisions.";
 			const batchPrompt = `Target language is exactly ${output.name || output.id}. Input language is ${input && input.auto ? "auto-detect" : (input.name || input.id || "auto")}. ${decisionRules}\nRules:\n1. Return ONLY a JSON array. Each item must be {"id":"same id","translation":"translated text"}.\n2. Translate every provided natural-language message into exactly the target language.\n3. Preserve placeholders like ⟦0⟧ and ⟦DTA0⟧ exactly. Preserve URLs, code, emoji, mentions, IDs, and product/model names.\n4. Convert [NEWLINE] markers back to real line breaks in the translation; do not show [NEWLINE] literally.\n5. Do not omit any source content, including short interjections, laughter, particles, repeated words, or standalone short lines; translate or preserve them naturally in the target language.\n6. Do not add explanations. Do not output any language other than the target language except preserved protected content.\n\nMessages JSON:\n${JSON.stringify(payloadItems)}`;
-			const finish = content => resolve(parseAiBatchTranslationResponse(content, payloadItems.map(item => item.id)));
+			const finishResponse = (error, response, body, parseResponseText) => {
+				const statusCode = response && response.statusCode || null;
+				if (!error && response && statusCode == 200) {
+					const translations = parseAiBatchTranslationResponse(parseResponseText(body), payloadItems.map(item => item.id));
+					return translations === null
+						? finishFailure("malformed", statusCode)
+						: resolve({translations, failureKind: null, statusCode});
+				}
+				if (statusCode == 401 || statusCode == 403) {
+					const labels = getLabels();
+					dangerToast(`${labels.toast_translating_failed}. ${labels.toast_translating_tryanother}. ${labels.error_keyoutdated}`);
+					return finishFailure("auth", statusCode);
+				}
+				if (error || !response || statusCode == 408 || statusCode == 429 || statusCode >= 500) return finishFailure("transient", statusCode);
+				return finishFailure("permanent", statusCode);
+			};
 			if (engineKey == "openai") {
 				return requestWithTimeout(apiEndpoint, {
 					method: "post",
 					headers: {"Content-Type": "application/json", "Authorization": `Bearer ${apiKey}`},
 					body: JSON.stringify({model: modelId, instructions: systemPrompt, input: batchPrompt, store: false})
-				}, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+				}, (error, response, body) => finishResponse(error, response, body, parseOpenAiResponseText));
 			}
 			if (engineKey == "gemini") {
 				const geminiModelId = String(modelId || "").replace(/^models\//, "");
@@ -1377,14 +1393,18 @@ function createProviderClient({
 					method: "post",
 					headers: {"Content-Type": "application/json"},
 					body: JSON.stringify({system_instruction: {parts: [{text: systemPrompt}]}, contents: [{role: "user", parts: [{text: batchPrompt}]}], generationConfig: {temperature: 0.1, topP: 0.8}})
-				}, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseGeminiResponseText(body)) : resolve(null));
+				}, (error, response, body) => finishResponse(error, response, body, parseGeminiResponseText));
 			}
 			requestWithTimeout(apiEndpoint, {
 				method: "post",
 				headers: {"Content-Type": "application/json", "Authorization": `Bearer ${apiKey}`},
 				body: JSON.stringify({model: modelId, messages: [{role: "system", content: systemPrompt}, {role: "user", content: batchPrompt}], temperature: 0.1, top_p: 0.8, ...engineRequestExtras(engineKey)})
-			}, (error, response, body) => !error && body && response && response && response.statusCode == 200 ? finish(parseOpenAiResponseText(body)) : resolve(null));
+			}, (error, response, body) => finishResponse(error, response, body, parseOpenAiResponseText));
 		});
+	}
+
+	function requestAiBatchTranslation(engineKey, preparedItems) {
+		return requestAiBatchTranslationDetailed(engineKey, preparedItems).then(outcome => outcome.translations);
 	}
 
 	return Object.freeze({
@@ -1408,6 +1428,7 @@ function createProviderClient({
 		chatCompletionsTranslate,
 		requestAiProviderTranslation,
 		requestAiBatchTranslation,
+		requestAiBatchTranslationDetailed,
 		normalizeApiEndpoint,
 		getModelCatalogEndpoint,
 		mapLanguageCodeForEngine,

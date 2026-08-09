@@ -157,6 +157,56 @@ test("the whole snapshot is translated in a single batch call", async () => {
 	assert.deepEqual(summaryIds(summary.translated), ["1", "2", "3"]);
 });
 
+test("an authentication batch failure is terminal and never enters repair", async () => {
+	let batchCalls = 0;
+	let repairBatchCalls = 0;
+	let repairCalls = 0;
+	const job = new HistoricalTranslationJob({
+		dependencies: {
+			prepare: source => ({status: "pending", prepared: source}),
+			translateBatch: () => {batchCalls++; return Promise.resolve({translations: null, failureKind: "auth", statusCode: 401});},
+			validate: () => ({ok: false}),
+			repairBatch: () => {repairBatchCalls++; return Promise.resolve(null);},
+			repair: () => {repairCalls++; return Promise.resolve({status: "failed"});}
+		}
+	});
+	job.add(createMessage("a"));
+	job.add(createMessage("b"));
+
+	const summary = await job.start();
+
+	assert.equal(batchCalls, 1);
+	assert.equal(repairBatchCalls, 0);
+	assert.equal(repairCalls, 0);
+	assert.deepEqual(summaryIds(summary.failed), ["a", "b"]);
+	assert.equal(job.items.get("a").reason, "provider_auth");
+});
+
+test("a transient historical batch gets one batch retry and no third per-item request", async () => {
+	let batchCalls = 0;
+	let repairBatchCalls = 0;
+	let repairCalls = 0;
+	const job = new HistoricalTranslationJob({
+		dependencies: {
+			prepare: source => ({status: "pending", prepared: source}),
+			translateBatch: () => {batchCalls++; return Promise.resolve({translations: null, failureKind: "transient", statusCode: 503});},
+			validate: () => ({ok: false}),
+			repairBatch: () => {repairBatchCalls++; return Promise.resolve({translations: null, failureKind: "transient", statusCode: 503});},
+			repair: () => {repairCalls++; return Promise.resolve({status: "failed"});}
+		}
+	});
+	job.add(createMessage("a"));
+	job.add(createMessage("b"));
+
+	const summary = await job.start();
+
+	assert.equal(batchCalls, 1);
+	assert.equal(repairBatchCalls, 1);
+	assert.equal(repairCalls, 0);
+	assert.deepEqual(summaryIds(summary.failed), ["a", "b"]);
+	assert.equal(job.items.get("a").reason, "provider_transient");
+});
+
 test("repair batches are chunked by repairBatchSize, capped at half the translated set", async () => {
 	async function runChunking(itemCount, repairBatchSize) {
 		const chunkSizes = [];
