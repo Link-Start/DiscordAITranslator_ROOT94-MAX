@@ -123,8 +123,7 @@ Result:
 - `F:\0.codex软件制作库\chatgpt账号\discord翻译\.worktrees\auto-translation-recovery\DiscordAITranslator.plugin.js`
 - `F:\0.codex软件制作库\chatgpt账号\discord翻译\.worktrees\auto-translation-recovery\.superpowers\sdd\auto-translation-recovery-plan\task-3-fix-2-report.md`
 
-## Commit
-- `e7e09da`
+## Commit`r`n- Implementation commit: `f541ecf`
 
 ## Concerns
 - `src/legacy/runtime.js` is still sitting exactly on the current ratchet; any future Task 3 follow-up in that file must remove at least as much legacy code as it adds.
