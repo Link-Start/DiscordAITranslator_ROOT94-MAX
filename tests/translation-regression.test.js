@@ -738,7 +738,7 @@ function createChannelTogglePluginWithExplicitChannels() {
 	return {plugin, persisted};
 }
 
-test("toggling a channel off clears only automatic displayed message translations and keeps manual ones", () => {
+test("toggling a channel off restores every displayed translation only in that channel", async () => {
 	const {plugin} = createChannelTogglePluginWithExplicitChannels();
 	const autoTargetMessage = {
 		id: "toggle-auto-target",
@@ -788,11 +788,11 @@ test("toggling a channel off clears only automatic displayed message translation
 		embeds: {}
 	});
 
-	plugin.toggleTranslation("channel-target");
+	await plugin.toggleTranslation("channel-target");
 
 	assert.equal(plugin.getActiveMessageTranslation(autoTargetMessage, "channel-target"), null);
 	assert.equal(plugin.getActiveMessageTranslation(autoOtherMessage, "channel-other").translatedContent, "其他频道译文");
-	assert.equal(plugin.getActiveMessageTranslation(manualTargetMessage, "channel-target").translatedContent, "手动译文");
+	assert.equal(plugin.getActiveMessageTranslation(manualTargetMessage, "channel-target"), null);
 
 	const autoTargetEvent = {
 		instance: {
@@ -811,6 +811,44 @@ test("toggling a channel off clears only automatic displayed message translation
 
 	assert.equal(autoTargetEvent.instance.props.message.content, "Top up at half price");
 	assert.deepEqual(autoTargetEvent.returnvalue.props.children, []);
+});
+
+test("manual translation after channel disable reuses the retained cached result", async () => {
+	const {plugin} = createChannelTogglePluginWithExplicitChannels();
+	plugin.settings.choices.received.output = "zh-CN";
+	const channel = {id: "channel-target"};
+	const message = {
+		id: "toggle-manual-cache",
+		channel_id: channel.id,
+		content: "Manual cache source",
+		embeds: [],
+		author: {id: "other-user"}
+	};
+	const originalContentData = plugin.extractOriginalContentData(message);
+	const signature = plugin.createReceivedTranslationSignature(message, channel.id, originalContentData);
+	const storedTranslation = {
+		signature,
+		channelId: channel.id,
+		auto: false,
+		manual: true,
+		content: "手动缓存译文",
+		translatedContent: "手动缓存译文",
+		originalContent: message.content,
+		embeds: {},
+		input: {id: "en"},
+		output: {id: "zh-CN"}
+	};
+	plugin.persistTranslationCacheEntry(message.id, signature, storedTranslation);
+	plugin.applyStoredTranslationToMessage(message, storedTranslation, originalContentData);
+
+	await plugin.toggleTranslation(channel.id);
+
+	assert.equal(plugin.getActiveMessageTranslation(message, channel.id), null);
+	assert.equal(plugin.hasCachedTranslationEntry(message.id), true);
+	plugin.translateText = () => {throw new Error("a retained cache hit must not call the provider");};
+
+	assert.equal(await plugin.translateMessage(message, channel, {manual: true, independentOfTextAreaSwitch: true, trackBusy: false}), true);
+	assert.equal(plugin.getActiveMessageTranslation(message, channel.id).translatedContent, "手动缓存译文");
 });
 
 test("toggling a channel off restores a rendered automatic translation back to its original message", () => {
@@ -952,7 +990,7 @@ test("toggling a channel off clears only automatic reply preview translations in
 	assert.equal(otherEvent.instance.props.referencedMessage.message.content, "其他回复译文");
 });
 
-test("toggling a channel off restores automatic embed translations only in that channel", () => {
+test("toggling a channel off restores a manual embed translation only in that channel", () => {
 	const {plugin} = createChannelTogglePluginWithExplicitChannels();
 	const targetMessage = {
 		id: "embed-toggle-target",
@@ -970,7 +1008,8 @@ test("toggling a channel off restores automatic embed translations only in that 
 	};
 	plugin.applyStoredTranslationToMessage(targetMessage, {
 		channelId: "channel-target",
-		auto: true,
+		auto: false,
+		manual: true,
 		content: "目标消息译文",
 		translatedContent: "目标消息译文",
 		originalContent: "Target message",

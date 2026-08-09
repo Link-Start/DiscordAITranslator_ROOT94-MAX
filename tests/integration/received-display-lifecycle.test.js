@@ -18,17 +18,30 @@ function result(messageId, channelId, content = `${messageId} translated`, gener
 	};
 }
 
-test("disabling a channel restores visible originals without hover", async () => {
+function createDeferred() {
+	let resolve;
+	let reject;
+	const promise = new Promise((resolvePromise, rejectPromise) => {
+		resolve = resolvePromise;
+		reject = rejectPromise;
+	});
+	return {promise, resolve, reject};
+}
+
+test("disabling a channel restores automatic and manual originals in one targeted refresh", async () => {
 	const harness = createHarness();
 	try {
 		const {plugin, calls} = harness;
 		delete plugin.isTranslationEnabled;
 		plugin.setChannelEnablementStateValue("channel-a", true);
 		plugin.setChannelEnablementStateValue("channel-b", true);
-		for (const [messageId, channelId] of [["message-1", "channel-a"], ["message-2", "channel-a"], ["message-3", "channel-b"]]) {
+		for (const [messageId, channelId, origin] of [["message-1", "channel-a", "automatic"], ["message-2", "channel-a", "manual"], ["message-3", "channel-b", "automatic"]]) {
 			plugin.captureReceivedMessageSource(snapshot(messageId, channelId));
-			await plugin.commitReceivedDisplayResult(result(messageId, channelId));
+			await plugin.commitReceivedDisplayResult(result(messageId, channelId, `${messageId} translated`, 1, origin));
 		}
+		const runtime = plugin.ensureReceivedDisplayRuntime();
+		runtime.suppress("message-1");
+		runtime.suppress("message-3");
 		const updatesBeforeDisable = calls.forceUpdate;
 
 		await plugin.toggleTranslation("channel-a");
@@ -36,7 +49,11 @@ test("disabling a channel restores visible originals without hover", async () =>
 		assert.equal(plugin.getReceivedDisplayView("message-1").content, "message-1 original");
 		assert.equal(plugin.getReceivedDisplayView("message-2").content, "message-2 original");
 		assert.equal(plugin.getReceivedDisplayView("message-3").content, "message-3 translated");
+		assert.equal(runtime.isSuppressed("message-1"), false);
+		assert.equal(runtime.isSuppressed("message-3"), true);
 		assert.equal(calls.forceUpdate, updatesBeforeDisable + 1);
+		assert.deepEqual(calls.forceUpdateBatches.at(-1), ["message-1", "message-2"]);
+		assert.equal(calls.rerenderAll, 0);
 	}
 	finally {harness.restore();}
 });
@@ -71,17 +88,22 @@ test("disabling clears a preview-only translation by refreshing its replying hos
 		const {plugin, calls} = harness;
 		delete plugin.isTranslationEnabled;
 		plugin.setChannelEnablementStateValue("channel-a", true);
+		plugin.settings.general.showOriginalInReplyPreview = true;
 		const runtime = plugin.ensureReceivedDisplayRuntime();
 		runtime.capturePreviewSource({messageId: "referenced-message", channelId: "channel-a", sourceSignature: "preview-source", source: {content: "original preview", embeds: []}});
-		runtime.commitPreviewResult({messageId: "referenced-message", channelId: "channel-a", signature: "preview-signature", translation: {translatedContent: "translated preview", channelId: "channel-a", auto: true}});
-		plugin.processMessageReply({instance: {props: {
+		runtime.commitPreviewResult({messageId: "referenced-message", channelId: "channel-a", signature: "preview-signature", translation: {content: "translated preview", translatedContent: "translated preview", originalContent: "original preview", channelId: "channel-a", auto: true}});
+		const event = {instance: {props: {
 			referencedMessage: {message: {id: "referenced-message", channel_id: "channel-a", content: "original preview"}},
 			baseMessage: {id: "reply-message", channel_id: "channel-a", content: "reply"}
-		}}});
+		}}};
+		plugin.processMessageReply(event);
+		assert.equal(event.instance.props.referencedMessage.message.content, "translated preview");
 		const updatesBeforeDisable = calls.forceUpdate;
 
 		await plugin.toggleTranslation("channel-a");
+		plugin.processMessageReply(event);
 
+		assert.equal(event.instance.props.referencedMessage.message.content, "original preview");
 		assert.equal(runtime.getPreviewTranslation("referenced-message"), null);
 		assert.equal(calls.forceUpdate, updatesBeforeDisable + 1, "preview cleanup must join the one disable refresh");
 		assert.deepEqual(calls.forceUpdateBatches.at(-1), ["reply-message"], "the preview is painted by the replying row, not the referenced row");
@@ -171,6 +193,37 @@ test("a deleted message is removed from display cache live history and reply pre
 		const late = await plugin.commitReceivedDisplayResult({messageId: message.id, channelId, generation: 1, sourceSignature: "delete-signature", origin: "automatic", status: "translated", translation: {content: "late"}});
 		assert.deepEqual(late.rejectedIds, [message.id]);
 		assert.equal(runtime.getDisplayState(message.id), null);
+	}
+	finally {harness.restore();}
+});
+
+test("disabling restores an already-painted manual reply preview", async () => {
+	const harness = createHarness({mountedMessageIds: ["reply-message"]});
+	try {
+		const {plugin} = harness;
+		delete plugin.isTranslationEnabled;
+		plugin.setChannelEnablementStateValue("channel-a", true);
+		const referencedMessage = {id: "referenced-message", channel_id: "channel-a", content: "original preview", embeds: [], author: {id: "other-user"}};
+		plugin.applyStoredTranslationToMessage(referencedMessage, {
+			channelId: "channel-a",
+			auto: false,
+			manual: true,
+			content: "手动预览译文",
+			translatedContent: "手动预览译文",
+			originalContent: "original preview",
+			embeds: {}
+		});
+		const event = {instance: {props: {
+			referencedMessage: {message: referencedMessage},
+			baseMessage: {id: "reply-message", channel_id: "channel-a", content: "reply"}
+		}}};
+		plugin.processMessageReply(event);
+		assert.equal(event.instance.props.referencedMessage.message.content, "手动预览译文");
+
+		await plugin.toggleTranslation("channel-a");
+		plugin.processMessageReply(event);
+
+		assert.equal(event.instance.props.referencedMessage.message.content, "original preview");
 	}
 	finally {harness.restore();}
 });
@@ -349,6 +402,70 @@ test("channel disable clears compatibility state even when the restore repaint f
 
 		assert.deepEqual(cleared, [["display", "channel-a"], ["queue"]]);
 		assert.equal(plugin.isTranslationEnabled("channel-a"), false);
+	}
+	finally {harness.restore();}
+});
+
+test("a stale disable transaction cannot clear a channel that was re-enabled while restore awaited", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		delete plugin.isTranslationEnabled;
+		plugin.setChannelEnablementStateValue("channel-a", true);
+		const restore = createDeferred();
+		const cleared = [];
+		plugin.restoreReceivedDisplayChannel = () => restore.promise;
+		plugin.clearDisplayedAutoTranslations = channelId => {cleared.push(channelId);};
+
+		const disabling = plugin.toggleTranslation("channel-a");
+		assert.equal(plugin.isTranslationEnabled("channel-a"), false);
+		await plugin.toggleTranslation("channel-a");
+		assert.equal(plugin.isTranslationEnabled("channel-a"), true);
+
+		restore.resolve();
+		await disabling;
+
+		assert.deepEqual(cleared, [], "the obsolete disable cleanup must not erase the new enabled session");
+		assert.equal(plugin.isTranslationEnabled("channel-a"), true);
+	}
+	finally {harness.restore();}
+});
+
+test("the real channel toggle restores its translated thread title", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		delete plugin.isTranslationEnabled;
+		plugin.setChannelEnablementStateValue("channel-a", true);
+		const thread = {id: "channel-a", name: "Original title", parent_id: "forum-a", isThread: () => true};
+		plugin.translateText = (_text, _place, callback) => callback("翻译标题", {id: "en"}, {id: "zh-CN"}, {});
+		plugin.forceUpdateChannelTitleComponents = () => {};
+
+		assert.equal(plugin.queueChannelTitleTranslation(thread), true);
+		assert.equal(plugin.getActiveChannelTitleTranslation(thread), "翻译标题");
+
+		await plugin.toggleTranslation(thread.id);
+
+		assert.equal(plugin.getActiveChannelTitleTranslation(thread), null);
+		assert.equal(thread.name, "Original title");
+	}
+	finally {harness.restore();}
+});
+
+test("channel disable keeps remembered sent-message originals editable", async () => {
+	const harness = createHarness();
+	try {
+		const {plugin} = harness;
+		delete plugin.isTranslationEnabled;
+		plugin.setChannelEnablementStateValue("channel-a", true);
+		plugin.isOwnMessage = () => true;
+		plugin.trackPendingSentOriginal("channel-a", "what the user typed", "translated send");
+		assert.equal(plugin.captureSentOriginalMessage({id: "sent-message", channel_id: "channel-a", content: "translated send"}), true);
+		assert.equal(plugin.getEditableSentMessageText("sent-message", "translated send"), "what the user typed");
+
+		await plugin.toggleTranslation("channel-a");
+
+		assert.equal(plugin.getEditableSentMessageText("sent-message", "translated send"), "what the user typed");
 	}
 	finally {harness.restore();}
 });

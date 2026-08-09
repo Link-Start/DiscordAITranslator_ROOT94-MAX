@@ -195,7 +195,7 @@ test("one historical three-message batch creates exactly one coherent refresh", 
 	assert.equal(refreshes[0].views.every(view => view.channelId === "c1" && view.translated && view.showWatermark), true);
 });
 
-test("restoreChannel refreshes original automatic content once and leaves manual translation", async () => {
+test("restoreChannel refreshes automatic and manual originals in one transaction", async () => {
 	const {store, refreshes, controller} = createHarness();
 	capture(store, "automatic");
 	capture(store, "manual");
@@ -205,13 +205,22 @@ test("restoreChannel refreshes original automatic content once and leaves manual
 	await controller.restoreChannel("c1");
 
 	assert.equal(refreshes.length, 1);
-	assert.deepEqual(refreshes[0].messageIds, ["automatic"]);
-	assert.equal(refreshes[0].views[0].content, "automatic source");
-	assert.equal(refreshes[0].views[0].translated, false);
-	assert.equal(refreshes[0].views[0].showWatermark, false);
-	assert.equal(refreshes[0].views[0].showLoading, false);
-	assert.equal(controller.getDisplayView("manual").content, "manual translated");
-	assert.equal(controller.getDisplayView("manual").translated, true);
+	assert.deepEqual(refreshes[0].messageIds, ["automatic", "manual"]);
+	assert.deepEqual(refreshes[0].views.map(view => view.content), ["automatic source", "manual source"]);
+	assert.equal(refreshes[0].views.every(view => !view.translated && !view.showWatermark && !view.showLoading), true);
+	assert.equal(controller.getDisplayView("manual").content, "manual source");
+	assert.equal(controller.getDisplayView("manual").translated, false);
+});
+
+test("restoreChannel can clear only that channel's manual suppression state", async () => {
+	const {store, controller} = createHarness();
+	store.suppress("c1-message", {channelId: "c1"});
+	store.suppress("c2-message", {channelId: "c2"});
+
+	await controller.restoreChannel("c1", {clearSuppressions: true});
+
+	assert.equal(store.isSuppressed("c1-message"), false);
+	assert.equal(store.isSuppressed("c2-message"), true);
 });
 
 test("restoreChannel refreshes reply-preview host rows in the same transaction", async () => {

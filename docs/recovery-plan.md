@@ -24,7 +24,7 @@ The completed display-migration tasks below remain verification history. The nex
 - Mounted message owners and reply-preview host owners refresh in one component-scoped display transaction. Virtualized rows render from stored state when mounted.
 - The viewport anchor restores once unless user intent changes. Composer and unrelated Discord surfaces are excluded from the transaction.
 - The compact theme-aware status uses `translation icon completed/total · elapsed`; detailed counts are hover-only.
-- Disable and stop restore automatic message text, reply previews, embeds, and titles together while preserving manual translation ownership.
+- Disable restores automatic and manual message presentation, reply previews, embeds, and titles for the affected channel while retaining valid translation-cache entries; stop performs the same presentation restore for every channel.
 
 ### Task 1: Build the historical message source
 
