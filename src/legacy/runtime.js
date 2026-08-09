@@ -68,7 +68,7 @@ module.exports = (_ => {
 		const {createTranslateComponents, translateIcon, translateIconUntranslate} = require("../ui/translate-components");
 		const {createChannelTitleStore} = require("../channel-title/channel-title-store");
 		const {createMessageViewportStore} = require("../viewport/message-viewport-store");
-		const {createLoadedTranslationStatusStore} = require("../status/loaded-translation-status-store");
+		const {LOADED_STATUS_COMPLETION_HIDE_MS, LOADED_STATUS_REFRESH_MS, createLoadedTranslationStatusStore} = require("../status/loaded-translation-status-store");
 		const {createTranslationCacheStore} = require("../cache/translation-cache-store");
 		const {createProviderClient, translationEngines, enginePortals} = require("../providers/provider-client");
 		const {createSentTranslationStore} = require("../sent/sent-translation-store");
@@ -1407,6 +1407,9 @@ module.exports = (_ => {
 			getLoadedAutoTranslationStatusText (status) {
 				return loadedTranslationStatusStore.getStatusText(status);
 			}
+			getLoadedAutoTranslationStatusDetailText (status) {
+				return loadedTranslationStatusStore.getStatusDetailText(status);
+			}
 
 			getLoadedAutoTranslationSkipReasonText (reason) {
 				switch (reason) {
@@ -1429,7 +1432,7 @@ module.exports = (_ => {
 
 			getLoadedAutoTranslationStatusTitleText (status) {
 				if (!status) return "";
-				const baseText = this.getLoadedAutoTranslationStatusText(status);
+				const baseText = this.getLoadedAutoTranslationStatusDetailText(status);
 				const detailParts = [];
 				if (status && status.lastSkipReason) detailParts.push(this.getLoadedAutoTranslationSkipReasonText(status.lastSkipReason));
 				if (status && status.lastSkipPreview) detailParts.push(status.lastSkipPreview);
@@ -1628,7 +1631,7 @@ module.exports = (_ => {
 					this.removeLoadedAutoTranslationStatusElement();
 					return;
 				}
-				loadedTranslationStatusStore.cancelHide();
+				loadedTranslationStatusStore.cancelTimers();
 				if (typeof document == "undefined" || !document.body) return;
 				this.attachAutoTranslationScrollWatcher();
 				this.ensureLoadedAutoTranslationStatusPositionWatcher();
@@ -1640,10 +1643,11 @@ module.exports = (_ => {
 				}
 				const retryableCount = Math.max(0, currentStatus.retryable || 0);
 				const showRetry = !currentStatus.active && retryableCount > 0;
+				const visualPhase = showRetry ? "failed" : currentStatus.phase || (currentStatus.collecting ? "collecting" : currentStatus.done ? "done" : "requesting");
 				// Always normalize the status DOM. This removes legacy progress-line children left by earlier builds.
-				element.className = `translator-loaded-status-floating${showRetry ? " translator-loaded-status-retryable" : ""}`;
-				if (!element.querySelector(".translator-loaded-status-text") || element.querySelector(".translator-loaded-status-progress")) {
-					element.innerHTML = '<span class="translator-loaded-status-dot"></span><span class="translator-loaded-status-text"></span>';
+				element.className = `translator-loaded-status-floating translator-loaded-status-${visualPhase}${showRetry ? " translator-loaded-status-retryable" : ""}`;
+				if (!element.querySelector(".translator-loaded-status-icon") || !element.querySelector(".translator-loaded-status-text") || element.querySelector(".translator-loaded-status-progress")) {
+					element.innerHTML = '<span class="translator-loaded-status-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M12.9 15.1 10.8 13l.1-.1a14.7 14.7 0 0 0 3.1-5.4h2.4V5.4h-5.2V3.3H9.1v2.1H3.9v2.1H12a12.5 12.5 0 0 1-2.6 4.1 12.4 12.4 0 0 1-1.9-2.7H5.4a14.8 14.8 0 0 0 2.5 4.1l-4.2 4.1 1.5 1.5 4.2-4.2 2.6 2.7.9-2Zm5.9-3.4h-2.1L12 22.2h2.2l1.2-3.1h4.8l1.2 3.1h2.2l-4.8-10.5Zm-2.6 5.3 1.6-4.2 1.6 4.2h-3.2Z"/></svg></span><span class="translator-loaded-status-text"></span>';
 				}
 				const textElement = element.querySelector(".translator-loaded-status-text");
 				if (textElement) textElement.textContent = this.getLoadedAutoTranslationStatusText(currentStatus);
@@ -1667,17 +1671,8 @@ module.exports = (_ => {
 				element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus);
 				this.updateInlineLoadedAutoTranslationStatusElements();
 				loadedTranslationStatusStore.schedulePosition(_ => this.positionLoadedAutoTranslationStatusElement(element));
-			}
-
-			hideLoadedAutoTranslationStatus (delay = 1600) {
-				loadedTranslationStatusStore.cancelHide();
-				// In loaded-message mode the capsule is a persistent channel status, not a transient toast.
-				// Keep it visible while the feature is enabled; clearLoadedAutoTranslationStatus removes it when disabled.
-				if (this.shouldShowLoadedAutoTranslationStatus(loadedTranslationStatusStore.getStatus())) {
-					this.updateLoadedAutoTranslationStatus({});
-					return;
-				}
-				loadedTranslationStatusStore.scheduleHide(() => this.removeLoadedAutoTranslationStatusElement(), delay);
+				if (currentStatus.active) loadedTranslationStatusStore.scheduleRefresh(LOADED_STATUS_REFRESH_MS, () => this.updateLoadedAutoTranslationStatus({}));
+				else if (currentStatus.done && !retryableCount && !Math.max(0, currentStatus.failed || currentStatus.aiDropped || 0)) loadedTranslationStatusStore.scheduleHide(LOADED_STATUS_COMPLETION_HIDE_MS, () => this.removeLoadedAutoTranslationStatusElement());
 			}
 
 			clearLoadedAutoTranslationStatus () {

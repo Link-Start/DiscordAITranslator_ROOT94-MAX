@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {createPluginInstance} = require("./helpers/createPluginInstance");
+const {createTranslatorStyles} = require("../src/ui/styles");
 
 function createMessage(id, content) {
 	return {
@@ -2041,8 +2042,8 @@ test("failed historical items are retained by channel and retried in a new bound
 	assert.equal(partialRetryStatus.displayed, 1);
 	assert.equal(partialRetryStatus.failed, 0);
 	assert.equal(partialRetryStatus.retryable, 1);
-	assert.doesNotMatch(plugin.getLoadedAutoTranslationStatusText(partialRetryStatus), /failed 1/i);
-	assert.match(plugin.getLoadedAutoTranslationStatusText(partialRetryStatus), /retry/i);
+	assert.doesNotMatch(plugin.getLoadedAutoTranslationStatusDetailText(partialRetryStatus), /failed 1/i);
+	assert.match(plugin.getLoadedAutoTranslationStatusDetailText(partialRetryStatus), /retry/i);
 
 	holdRetry = false;
 	await plugin.retryFailedHistoricalTranslations(channelId);
@@ -2089,6 +2090,7 @@ test("failed historical status exposes a visible retry action", () => {
 			children: [],
 			className: "",
 			textContent: "",
+			innerHTML: "",
 			appendChild(child) {
 				child.parentNode = this;
 				this.children.push(child);
@@ -2111,12 +2113,19 @@ test("failed historical status exposes a visible retry action", () => {
 	dot.className = "translator-loaded-status-dot";
 	const text = createNode("span");
 	text.className = "translator-loaded-status-text";
+	const staleProgress = createNode("span");
+	staleProgress.className = "translator-loaded-status-progress";
 	statusElement.appendChild(dot);
 	statusElement.appendChild(text);
+	statusElement.appendChild(staleProgress);
 	const body = createNode("body");
 	body.appendChild(statusElement);
 	const originalDocument = global.document;
 	const originalRequestAnimationFrame = global.requestAnimationFrame;
+	const originalSetTimeout = global.setTimeout;
+	const originalClearTimeout = global.clearTimeout;
+	const timers = new Map();
+	let timerSequence = 0;
 	let retriedChannelId = null;
 	global.document = {
 		body,
@@ -2126,16 +2135,33 @@ test("failed historical status exposes a visible retry action", () => {
 		querySelectorAll: () => []
 	};
 	global.requestAnimationFrame = () => 0;
+	global.setTimeout = (callback, delay) => {
+		const handle = ++timerSequence;
+		timers.set(handle, {callback, delay});
+		return handle;
+	};
+	global.clearTimeout = handle => timers.delete(handle);
 	plugin.attachAutoTranslationScrollWatcher = () => {};
 	plugin.ensureLoadedAutoTranslationStatusPositionWatcher = () => {};
 	plugin.positionLoadedAutoTranslationStatusElement = () => {};
 	plugin.updateInlineLoadedAutoTranslationStatusElements = () => {};
+	plugin.scheduleTranslationRerender = () => {throw new Error("status-only updates must not repaint messages");};
+	plugin._testBdfdb.MessageUtils.rerenderAll = () => {throw new Error("status-only updates must not repaint the chat");};
 	plugin.retryFailedHistoricalTranslations = channelId => {
 		retriedChannelId = channelId;
 		return Promise.resolve(true);
 	};
 
 	try {
+		plugin.updateLoadedAutoTranslationStatus({active: true, collecting: false, done: false, channelId: "channel-history-retry-ui", total: 2, processed: 0, displayed: 0, failed: 0, retryable: 0, phase: "requesting"});
+		assert.match(statusElement.className, /translator-loaded-status-requesting/);
+		assert.equal(timers.size, 1, "an active capsule schedules its own timely refresh");
+		const [tickHandle, tickTimer] = [...timers.entries()][0];
+		assert.equal(tickTimer.delay, 1000);
+		timers.delete(tickHandle);
+		tickTimer.callback();
+		assert.equal([...timers.values()][0].delay, 1000, "the status tick re-arms without repainting messages");
+
 		plugin.updateLoadedAutoTranslationStatus({
 			active: false,
 			collecting: false,
@@ -2152,13 +2178,41 @@ test("failed historical status exposes a visible retry action", () => {
 		assert.ok(retryButton);
 		assert.equal(retryButton.textContent, "Retry");
 		assert.match(statusElement.className, /translator-loaded-status-retryable/);
+		assert.match(statusElement.className, /translator-loaded-status-failed/);
+		assert.match(statusElement.innerHTML, /translator-loaded-status-icon/);
+		assert.match(statusElement.innerHTML, /<svg/);
+		assert.equal(text.textContent, "0/2 · 2!");
+		assert.match(statusElement.title, /Loaded translation: batch 1 done, shown 0\/2, failed 2/);
+		assert.equal(timers.size, 0, "a retryable failure remains visible");
 		retryButton.onclick({stopPropagation: () => {}});
 		assert.equal(retriedChannelId, "channel-history-retry-ui");
+
+		plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, total: 2, processed: 2, displayed: 2, failed: 0, retryable: 0, phase: "done"});
+		assert.equal(text.textContent, "2/2");
+		assert.equal(timers.size, 1);
+		const completionTimer = [...timers.values()][0];
+		assert.equal(completionTimer.delay, 3000, "successful completion uses the agreed three-second hide");
+		completionTimer.callback();
+		assert.equal(body.children.includes(statusElement), false);
 	}
 	finally {
 		global.document = originalDocument;
 		global.requestAnimationFrame = originalRequestAnimationFrame;
+		global.setTimeout = originalSetTimeout;
+		global.clearTimeout = originalClearTimeout;
 	}
+});
+
+test("loaded status capsule styling uses a translation icon and Discord theme variables", () => {
+	const classNames = new Proxy({}, {get: () => ""});
+	const styles = createTranslatorStyles({dotCN: classNames, dotCNS: classNames, disCN: classNames});
+
+	assert.match(styles, /\.translator-loaded-status-icon/);
+	assert.match(styles, /var\(--background-floating/);
+	assert.match(styles, /var\(--text-muted/);
+	assert.match(styles, /translator-loaded-status-requesting[\s\S]*var\(--brand-500/);
+	assert.match(styles, /translator-loaded-status-repairing[\s\S]*var\(--status-warning/);
+	assert.match(styles, /translator-loaded-status-failed[\s\S]*var\(--status-danger/);
 });
 
 test("batch parser drops duplicate and unknown IDs so they enter repair", () => {

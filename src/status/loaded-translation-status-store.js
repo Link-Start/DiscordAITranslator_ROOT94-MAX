@@ -15,6 +15,8 @@
 // and nothing in the text distinguished a slow provider from a dead job.
 const LOADED_STATUS_STALLED_AFTER_MS = 45000;
 const LOADED_STATUS_PREVIEW_MAX_LENGTH = 24;
+const LOADED_STATUS_COMPLETION_HIDE_MS = 3000;
+const LOADED_STATUS_REFRESH_MS = 1000;
 
 const LOADED_STATUS_PHASES = Object.freeze(["collecting", "requesting", "repairing", "committing", "done", "failed"]);
 const LOADED_STATUS_PHASE_SET = new Set(LOADED_STATUS_PHASES);
@@ -102,10 +104,9 @@ function renderPhaseSegment(status, chinese, currentTime, stalledAfterMs) {
 	return chinese ? `，${label} ${formatSeconds(currentTime - phaseStartedAt)}` : `, ${label} ${formatSeconds(currentTime - phaseStartedAt)}`;
 }
 
-// Wording is load bearing: the plugin ships both languages and users read the Chinese.
-// Only the phase segment is new; every existing sentence is byte for byte the text the
-// capsule shipped before this module existed.
-function renderStatusText(status, chinese, phaseSegment) {
+// Keep the full localized wording for the hover title. The visible capsule uses the
+// language-neutral numeric renderer above, so long translations never widen the HUD.
+function getStatusCounters(status) {
 	const total = Math.max(0, status && status.total || 0);
 	const processed = Math.max(0, Math.min(total || 0, status && status.processed || 0));
 	const displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0));
@@ -114,6 +115,22 @@ function renderStatusText(status, chinese, phaseSegment) {
 	const failed = Math.max(0, failedValue || 0);
 	const retryable = Math.max(0, status && status.retryable || 0);
 	const batch = Math.max(1, status && status.batch || 1);
+	return {total, processed, displayed, skipped, failed, retryable, batch};
+}
+
+function renderCompactStatusText(status, currentTime) {
+	const {total, processed, displayed, skipped, failed, retryable} = getStatusCounters(status);
+	const ratio = `${status && status.done ? displayed : processed}/${total}`;
+	const repairReady = Math.max(displayed, total - skipped - (retryable || failed));
+	if (status && status.phase === "repairing") return `${repairReady}/${total}${retryable || failed ? ` · ${retryable || failed}↻` : ""}`;
+	if (status && (status.phase === "failed" || status.done && (failed || retryable))) return `${displayed}/${total} · ${failed || retryable}!`;
+	if (status && status.done) return `${displayed}/${total}`;
+	const phaseStartedAt = status && status.phaseStartedAt || 0;
+	return phaseStartedAt ? `${ratio} · ${formatSeconds(currentTime - phaseStartedAt)}` : ratio;
+}
+
+function renderStatusDetailText(status, chinese, phaseSegment) {
+	const {total, processed, displayed, skipped, failed, retryable, batch} = getStatusCounters(status);
 	const extraText = `${skipped ? (chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}`) : ""}${failed ? (chinese ? `，失败 ${failed}` : `, failed ${failed}`) : ""}${retryable && retryable != failed ? (chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}`) : ""}`;
 	if (status && status.done) {
 		if (!total) return failed || retryable ? (chinese ? `已加载翻译：失败 ${failed}，待重试 ${retryable}` : `Loaded translation: ${failed} failed, ${retryable} retry pending`) : (chinese ? "已加载翻译：开启，暂无待翻译" : "Loaded translation: on, no pending messages");
@@ -140,7 +157,10 @@ function createLoadedTranslationStatusStore({
 
 	let status = createEmptyStatus();
 	let hideTimer = null;
+	let refreshTimer = null;
 	let seenMessages = {};
+	let sealedTotal = null;
+	let sealedJobKey = "";
 
 	// An explicit, known phase always wins. Anything else is derived from the flags the
 	// call site already sets, so a caller that has no opinion still gets a truthful
@@ -195,7 +215,14 @@ function createLoadedTranslationStatusStore({
 		update(updates = {}) {
 			const previous = status;
 			const next = Object.assign({}, previous, updates);
+			const nextJobKey = `${normalizeChannelId(next.channelId)}:${Math.max(0, next.batch || 0)}`;
+			if (nextJobKey !== sealedJobKey) {
+				sealedJobKey = nextJobKey;
+				sealedTotal = null;
+			}
 			next.phase = resolvePhase(previous, next, updates);
+			if (sealedTotal === null && !next.collecting && (next.active || next.done) && next.total > 0) sealedTotal = Math.max(0, next.total || 0);
+			if (sealedTotal !== null && !next.collecting) next.total = sealedTotal;
 			// The stall clock restarts on a phase change or on any counter moving,
 			// because either one proves the job is still doing work. phaseStartedAt
 			// answers "how long in this phase", progressAt answers "how long stuck".
@@ -211,8 +238,10 @@ function createLoadedTranslationStatusStore({
 			return this.getStatus();
 		},
 		clear() {
-			this.cancelHide();
+			this.cancelTimers();
 			status = createEmptyStatus();
+			sealedTotal = null;
+			sealedJobKey = "";
 			return this.getStatus();
 		},
 		// Reports whether the phase is progressing, so a caller can log or diagnose
@@ -239,8 +268,12 @@ function createLoadedTranslationStatusStore({
 		},
 		getStatusText(statusOverride) {
 			const target = readStatus(statusOverride);
+			return renderCompactStatusText(target, now());
+		},
+		getStatusDetailText(statusOverride) {
+			const target = readStatus(statusOverride);
 			const chinese = !!isChineseUiLanguage();
-			return renderStatusText(target, chinese, renderPhaseSegment(target, chinese, now(), stalledAfterMs));
+			return renderStatusDetailText(target, chinese, renderPhaseSegment(target, chinese, now(), stalledAfterMs));
 		},
 		getPreviewText(text) {
 			text = (text || "").replace(/\s+/g, " ").trim();
@@ -271,6 +304,25 @@ function createLoadedTranslationStatusStore({
 				if (typeof onHide == "function") onHide();
 			}, delay);
 			return hideTimer;
+		},
+		hasPendingRefresh() {
+			return refreshTimer !== null;
+		},
+		cancelRefresh() {
+			if (refreshTimer !== null) stopTimer(refreshTimer);
+			refreshTimer = null;
+		},
+		cancelTimers() {
+			this.cancelHide();
+			this.cancelRefresh();
+		},
+		scheduleRefresh(delay, onRefresh) {
+			this.cancelRefresh();
+			refreshTimer = startTimer(() => {
+				refreshTimer = null;
+				if (typeof onRefresh == "function") onRefresh();
+			}, delay);
+			return refreshTimer;
 		},
 		getSeenCount(channelId) {
 			const key = normalizeChannelId(channelId);
@@ -321,6 +373,8 @@ function createLoadedTranslationStatusStore({
 }
 
 module.exports = {
+	LOADED_STATUS_COMPLETION_HIDE_MS,
+	LOADED_STATUS_REFRESH_MS,
 	LOADED_STATUS_STALLED_AFTER_MS,
 	LOADED_STATUS_PREVIEW_MAX_LENGTH,
 	LOADED_STATUS_PHASES,
