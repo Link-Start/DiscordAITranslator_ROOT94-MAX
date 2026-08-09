@@ -5416,7 +5416,8 @@ var require_live_handoff_reservations = __commonJS({
       return value == null ? "" : String(value);
     }
     __name(normalizeIdentity, "normalizeIdentity");
-    function createLiveHandoffReservations() {
+    function createLiveHandoffReservations({ onRetired = /* @__PURE__ */ __name(() => {
+    }, "onRetired") } = {}) {
       let sequence = 0, reservations = /* @__PURE__ */ new Map();
       function reserve(channelId, ticket) {
         let channelKey = normalizeIdentity(channelId), ticketKey = normalizeIdentity(ticket);
@@ -5437,6 +5438,10 @@ var require_live_handoff_reservations = __commonJS({
         return !existing || existing.ticket !== normalizeIdentity(ticket) ? !1 : (reservations.delete(channelKey), !0);
       }
       __name(consume, "consume");
+      function retire(channelId, ticket, reason = "retired") {
+        return clear(channelId, ticket) ? (onRetired(channelId, normalizeIdentity(ticket), reason), !0) : !1;
+      }
+      __name(retire, "retire");
       function findNextQueueIndex(queue, getIdentity) {
         let selectedIndex = -1, selectedOrder = 1 / 0;
         for (let index = 0; index < queue.length; index++) {
@@ -5445,7 +5450,7 @@ var require_live_handoff_reservations = __commonJS({
         }
         return selectedIndex;
       }
-      return __name(findNextQueueIndex, "findNextQueueIndex"), Object.freeze({ reserve, clear, consume, findNextQueueIndex });
+      return __name(findNextQueueIndex, "findNextQueueIndex"), Object.freeze({ reserve, clear, consume, retire, findNextQueueIndex });
     }
     __name(createLiveHandoffReservations, "createLiveHandoffReservations");
     module2.exports = { createLiveHandoffReservations };
@@ -5463,7 +5468,8 @@ var require_live_request_registry = __commonJS({
       createTranslationSignature = /* @__PURE__ */ __name(() => null, "createTranslationSignature"),
       releaseDisplayPending = /* @__PURE__ */ __name(() => {
       }, "releaseDisplayPending"),
-      clearReservedLiveRequest = /* @__PURE__ */ __name(() => !1, "clearReservedLiveRequest")
+      clearReservedLiveRequest = /* @__PURE__ */ __name(() => !1, "clearReservedLiveRequest"),
+      retireReservedLiveRequest = /* @__PURE__ */ __name(() => !1, "retireReservedLiveRequest")
     } = {}) {
       let queuedMessages = {}, liveRequests = {}, requestSequence = 0, runtimeGeneration = 0;
       function getRequestKey(messageId, channelId) {
@@ -5484,9 +5490,8 @@ var require_live_request_registry = __commonJS({
       __name(forgetQueuedRequest, "forgetQueuedRequest");
       function finishRequest(request) {
         if (!request) return !1;
-        clearReservedLiveRequest(request.channelId, String(request.id));
         let key = getRequestKey(request.messageId, request.channelId);
-        return liveRequests[key] === request && delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), !0;
+        return liveRequests[key] === request && delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), retireReservedLiveRequest(request.channelId, String(request.id), "request-finished"), !0;
       }
       __name(finishRequest, "finishRequest");
       function createRequest(message, channelId, originalContentData = null, signature = null) {
@@ -5517,7 +5522,7 @@ var require_live_request_registry = __commonJS({
       function invalidateRequestForMessage(messageId, channelId, currentSignature) {
         if (!messageId || !channelId || !currentSignature) return !1;
         let key = getRequestKey(messageId, channelId), request = liveRequests[key];
-        return !request || request.signature === currentSignature ? !1 : (clearReservedLiveRequest(channelId, String(request.id)), delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), !0);
+        return !request || request.signature === currentSignature ? !1 : (delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), retireReservedLiveRequest(channelId, String(request.id), "source-invalidated"), !0);
       }
       __name(invalidateRequestForMessage, "invalidateRequestForMessage");
       function clearQueuedMessage(messageId, expectedMarker = null) {
@@ -5655,6 +5660,8 @@ var require_live_translation_queue = __commonJS({
       }, "onLiveTurnStarted"),
       onReservedLiveRequestConsumed = /* @__PURE__ */ __name(() => {
       }, "onReservedLiveRequestConsumed"),
+      onReservedLiveRequestRetired = /* @__PURE__ */ __name(() => {
+      }, "onReservedLiveRequestRetired"),
       // Translation policy. Everything below decides what a translation IS; the queue only
       // decides when it runs, in what order, and what happens to the item afterwards.
       getBatchEngineKey = /* @__PURE__ */ __name(() => null, "getBatchEngineKey"),
@@ -5666,7 +5673,7 @@ var require_live_translation_queue = __commonJS({
       commitCachedResult = /* @__PURE__ */ __name(() => null, "commitCachedResult"),
       translateSingleItem = /* @__PURE__ */ __name(() => Promise.resolve(), "translateSingleItem")
     } = {}) {
-      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), queue = [], busyTranslating = !1, liveAutoTranslating = !1, retryTimer = null, lastConsumedLiveRequests = {}, handoffReservations = createLiveHandoffReservations(), channelSession = createLiveChannelSession({
+      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), queue = [], busyTranslating = !1, liveAutoTranslating = !1, retryTimer = null, lastConsumedLiveRequests = {}, handoffReservations = createLiveHandoffReservations({ onRetired: onReservedLiveRequestRetired }), channelSession = createLiveChannelSession({
         normalizeChannelId,
         resetLoadedMessageTracking,
         clearEligibleReplyPreviewMessages,
@@ -5681,7 +5688,8 @@ var require_live_translation_queue = __commonJS({
         extractOriginalContentData,
         createTranslationSignature,
         releaseDisplayPending,
-        clearReservedLiveRequest: /* @__PURE__ */ __name((channelId, ticket) => clearReservedLiveRequest(channelId, ticket), "clearReservedLiveRequest")
+        clearReservedLiveRequest: handoffReservations.clear,
+        retireReservedLiveRequest: handoffReservations.retire
       });
       function cancelQueueRetry() {
         retryTimer && stopTimer(retryTimer), retryTimer = null;
@@ -5699,7 +5707,7 @@ var require_live_translation_queue = __commonJS({
           return;
         }
         let key = normalizeChannelId(channelId);
-        delete lastConsumedLiveRequests[key], clearReservedLiveRequest(channelId), queue = queue.filter((queueItem) => {
+        delete lastConsumedLiveRequests[key], handoffReservations.clear(channelId), queue = queue.filter((queueItem) => {
           let shouldRemove = !!(queueItem && queueItem.channel && normalizeChannelId(queueItem.channel.id) === key);
           return shouldRemove && queueItem.message && queueItem.message.id && requestRegistry.clearQueuedMessage(queueItem.message.id, queueItem.liveRequest || null), !shouldRemove;
         }), !queue.length && retryTimer && cancelQueueRetry();
@@ -5710,17 +5718,13 @@ var require_live_translation_queue = __commonJS({
         if (!key) return null;
         for (let queueItem of queue) {
           let queueChannelId = queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message);
-          if (!queueItem || queueItem.historicalLoad || normalizeChannelId(queueChannelId) !== key || !queueItem.liveRequest) continue;
+          if (!queueItem || queueItem.historicalLoad || normalizeChannelId(queueChannelId) !== key || !queueItem.liveRequest || !requestRegistry.isRequestCurrent(queueItem.liveRequest)) continue;
           let ticket = String(queueItem.liveRequest.id);
           return handoffReservations.reserve(key, ticket);
         }
         return handoffReservations.clear(key), null;
       }
       __name(reserveQueuedLiveRequest, "reserveQueuedLiveRequest");
-      function clearReservedLiveRequest(channelId = null, ticket = null) {
-        return handoffReservations.clear(channelId, ticket);
-      }
-      __name(clearReservedLiveRequest, "clearReservedLiveRequest");
       function recordLiveRequestConsumption(request, reason = "single") {
         if (!request || !request.channelId) return null;
         let key = normalizeChannelId(request.channelId), ticket = String(request.id);
@@ -5950,7 +5954,7 @@ var require_live_translation_queue = __commonJS({
           return !!key && queue.some((queueItem) => queueItem && !queueItem.historicalLoad && normalizeChannelId(queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem.message)) === key);
         },
         reserveQueuedLiveRequest,
-        clearReservedLiveRequest,
+        clearReservedLiveRequest: handoffReservations.clear,
         getLastConsumedLiveRequestTicket: /* @__PURE__ */ __name((channelId) => lastConsumedLiveRequests[normalizeChannelId(channelId)] || null, "getLastConsumedLiveRequestTicket"),
         getStartedLiveTurnCount: channelSession.getStartedLiveTurnCount,
         // A copy: a reader must not be able to reorder the queue behind this module's back.
@@ -5987,6 +5991,37 @@ var require_live_translation_queue = __commonJS({
       LIVE_AI_BATCH_ITEM_LIMIT,
       createLiveTranslationQueue
     };
+  }
+});
+
+// src/orchestrator/historical-handoff-runtime.js
+var require_historical_handoff_runtime = __commonJS({
+  "src/orchestrator/historical-handoff-runtime.js"(exports2, module2) {
+    function scheduleMicrotask(callback) {
+      typeof queueMicrotask == "function" ? queueMicrotask(callback) : Promise.resolve().then(callback);
+    }
+    __name(scheduleMicrotask, "scheduleMicrotask");
+    function resumeHistoricalHandoff(plugin, channelId = null, handoffTicket = null, { retired = !1 } = {}) {
+      let resume = /* @__PURE__ */ __name(() => {
+        let entries = channelId ? [plugin.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : plugin.ensureHistoricalJobRegistry().listQueues();
+        for (let entry of entries) {
+          let hasSealedJob = entry && entry.jobs.some((job) => job && job.state == "collecting" && job.sealed), ticketMatches = entry && (retired ? entry.pendingLiveHandoffTicket != null && handoffTicket != null && String(handoffTicket) == String(entry.pendingLiveHandoffTicket) : entry.pendingLiveHandoffTicket == null || handoffTicket != null && String(handoffTicket) == String(entry.pendingLiveHandoffTicket));
+          if (!(!entry || entry.runningPromise || !hasSealedJob || !ticketMatches)) {
+            if (entry.pendingLiveHandoffTicket = null, retired) {
+              let liveQueue = plugin.ensureLiveTranslationQueue(), replacementTicket = liveQueue.reserveQueuedLiveRequest(entry.channelId);
+              if (replacementTicket) {
+                entry.pendingLiveHandoffTicket = replacementTicket, liveQueue.processQueue();
+                continue;
+              }
+            }
+            plugin.startCollectedHistoricalTranslationJobs(entry.channelId, { sealCurrent: !1 });
+          }
+        }
+      }, "resume");
+      return retired ? scheduleMicrotask(resume) : resume();
+    }
+    __name(resumeHistoricalHandoff, "resumeHistoricalHandoff");
+    module2.exports = { resumeHistoricalHandoff };
   }
 });
 
@@ -9324,7 +9359,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a;
-        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), { parseStoredEmbedTranslations } = require_embed_translation_parser(), {
+        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { resumeHistoricalHandoff } = require_historical_handoff_runtime(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), { parseStoredEmbedTranslations } = require_embed_translation_parser(), {
           foreignLanguageDecisionRuntime,
           receivedMessageFilterRuntime,
           createReceivedTranslationRuntime
@@ -11488,9 +11523,8 @@ __________________ __________________ __________________
           processAutoTranslationQueue() {
             return this.ensureLiveTranslationQueue().processQueue();
           }
-          resumeQueuedHistoricalTranslationJobs(channelId = null, handoffTicket = null) {
-            let entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
-            for (let entry of entries) entry && !entry.runningPromise && entry.jobs.some((job) => job && job.state == "collecting" && job.sealed) && (entry.pendingLiveHandoffTicket == null || handoffTicket != null && String(handoffTicket) == String(entry.pendingLiveHandoffTicket)) && (entry.pendingLiveHandoffTicket = null, this.startCollectedHistoricalTranslationJobs(entry.channelId, { sealCurrent: !1 }));
+          resumeQueuedHistoricalTranslationJobs(channelId = null, handoffTicket = null, options = {}) {
+            return resumeHistoricalHandoff(this, channelId, handoffTicket, options);
           }
           forceUpdateAll() {
             this.ensureSettingsStore().reload(), this.ensureTranslationCacheStore().loadPersisted(), this.ensureReceivedDisplayRuntime().clearAllSuppression(), this.clearAutoTranslationQueue(), this.resetAutoTranslationTracking(), this.clearLoadedAutoTranslationStatus(), this.ensureLiveTranslationQueue().setLiveAutoTranslating(!1), this.ensureReceivedDisplayRuntime().clearPreviews(null), this.ensureReceivedDisplayRepaintScheduler().cancelFullRepaintTimers(), this.setLanguages(), BDFDB.PatchUtils.forceAllUpdates(this), BDFDB.MessageUtils.rerenderAll();
@@ -11661,6 +11695,7 @@ __________________ __________________ __________________
               // new_only hides what is already on screen, so a fresh session drops the automatic records the previous one painted.
               onChannelSessionStarted: /* @__PURE__ */ __name((channelId) => this.getReceivedAutoTranslateScope() == "new_only" && this.clearDisplayedAutoTranslations(channelId), "onChannelSessionStarted"),
               onReservedLiveRequestConsumed: /* @__PURE__ */ __name((channelId, handoffTicket) => this.resumeQueuedHistoricalTranslationJobs(channelId, handoffTicket), "onReservedLiveRequestConsumed"),
+              onReservedLiveRequestRetired: /* @__PURE__ */ __name((channelId, handoffTicket) => this.resumeQueuedHistoricalTranslationJobs(channelId, handoffTicket, { retired: !0 }), "onReservedLiveRequestRetired"),
               getBatchEngineKey: /* @__PURE__ */ __name((channelId) => this.getHistoricalAiBatchEngineKey(channelId), "getBatchEngineKey"),
               createBurstContext: /* @__PURE__ */ __name((channelId) => ({
                 engineKey: this.getHistoricalAiBatchEngineKey(channelId),
