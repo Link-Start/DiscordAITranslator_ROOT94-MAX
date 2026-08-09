@@ -33,11 +33,12 @@ test("the generated plugin keeps metadata and excludes development artifacts", a
 		encoding: "utf8"
 	});
 	const packageLock = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
+	const metadata = JSON.parse(fs.readFileSync(path.join(root, "src", "plugin", "metadata.json"), "utf8"));
 	const activeEsbuildPackage = packageLock.packages[`node_modules/@esbuild/${process.platform}-${process.arch}`];
 	const plugin = createPluginInstance({callSetLanguages: false});
 
 	assert.match(generated, /^\/\*\*[\s\S]*@name DiscordAITranslator/);
-	assert.match(generated, /@version 0\.3\.36/);
+	assert.ok(generated.includes(`@version ${metadata.version}`));
 	assert.doesNotMatch(generated, /sourceMappingURL=/);
 	assert.doesNotMatch(generated, /tests\//);
 	assert.doesNotMatch(generated, /TRANSLATOR_DISPLAY_DEBUG_JOURNAL/);

@@ -76,6 +76,7 @@ module.exports = (_ => {
 		const {createLiveTranslationQueue} = require("../orchestrator/live-translation-queue");
 		const {resumeHistoricalHandoff} = require("../orchestrator/historical-handoff-runtime");
 		const {createHistoricalJobRegistry} = require("../orchestrator/historical-job-registry");
+		const channelToggleOperations = require("../orchestrator/channel-toggle-operations").createChannelToggleOperations();
 		const {HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX} = require("../orchestrator/historical-translation-job");
 		const {createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION} = require("../protection/protection-logic");
 		const {parseStoredEmbedTranslations} = require("../received/embed-translation-parser");
@@ -319,9 +320,8 @@ module.exports = (_ => {
 				}});
 				this.forceUpdateAll();
 			}
-			
 			onStop () {
-				pluginRuntimeActive = false;
+				pluginRuntimeActive = false; channelToggleOperations.reset();
 				this.invalidateLiveTranslationRequests();
 				this.invalidateSentAutomaticTranslationRequests();
 				this.ensureSentTranslationStore().clearPendingOriginals();
@@ -3497,7 +3497,7 @@ module.exports = (_ => {
 			}
 
 			async toggleTranslation (channelId) {
-				const wasEnabled = this.isTranslationEnabled(channelId);
+				const operationVersion = channelToggleOperations.begin(channelId), wasEnabled = this.isTranslationEnabled(channelId);
 				this.setChannelEnablementStateValue(channelId, !wasEnabled);
 				if (wasEnabled) {
 					// A disabled channel session invalidates every in-flight commit before the
@@ -3506,11 +3506,11 @@ module.exports = (_ => {
 					if (displayGeneration !== undefined) this.setReceivedDisplayGeneration(channelId, displayGeneration + 1);
 					this.clearAutoTranslationQueue(channelId, {preservePreviews: true});
 					this.resetAutoTranslationTracking(channelId);
-					try {await this.restoreReceivedDisplayChannel(channelId, {clearPreviews: true});}
-					finally {
-						this.clearDisplayedAutoTranslations(channelId);
-						this.processAutoTranslationQueue();
-					}
+					try {await this.restoreReceivedDisplayChannel(channelId, {clearPreviews: true, clearSuppressions: true});}
+					finally {if (channelToggleOperations.isCurrent(channelId, operationVersion) && !this.isTranslationEnabled(channelId)) {
+							this.clearDisplayedAutoTranslations(channelId);
+							this.processAutoTranslationQueue();
+						}}
 					return;
 				}
 				this.resetAutoTranslationTracking(channelId);

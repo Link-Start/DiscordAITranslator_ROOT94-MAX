@@ -25,9 +25,9 @@ The channel popout does not contain an automatic translation switch, backup prov
 
 - Right-clicking the translator icon toggles the translation master switch only for the current channel.
 - Channels without an explicit record default to off.
-- The switch controls automatic sent and received translation plus the current thread/forum title; manual message translation remains available.
-- Disabling a channel clears its pending automatic work, message/reply/embed display state, and translated thread title.
-- Manual message translations are not removed by this toggle.
+- The switch controls automatic sent and received translation plus the current thread/forum title; manual message translation remains available whether the switch is on or off.
+- Disabling a channel clears pending automatic work and restores all currently displayed received-message translations, reply previews, embeds, and translated thread title, including earlier manual displays.
+- Valid translation-cache entries and sent-message original/edit metadata are retained. A manual action made after disabling can display that single cached or newly translated message again.
 - There is no global default automatic-translation switch.
 
 ## Global BetterDiscord Settings
@@ -67,4 +67,4 @@ Stored legacy values that attempted to hide either button are ignored.
 2. Set the inherited automatic-translation default to false.
 3. Do not convert inherited enabled channels into explicit enabled records.
 4. Keep right-click changes channel-scoped.
-5. Clear only the affected channel's automatic display and pending work when disabled.
+5. Clear the affected channel's pending automatic work and restore all of its displayed received-message translations when disabled.

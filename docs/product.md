@@ -9,9 +9,9 @@ The primary user is not expected to understand provider APIs or repository inter
 ## Current Channel Interaction
 
 - Left-clicking the translator icon opens current-channel translation settings.
-- Right-clicking the translator icon toggles the automatic translation master switch only for the current channel.
-- Turning a channel off removes automatic sent/received work, automatic display state, and translated thread title for that channel.
-- Manual translations and translated sent messages are not removed by the channel toggle.
+- Right-clicking the translator icon toggles automatic translation only for the current channel.
+- Turning a channel off cancels automatic sent/received work and restores every displayed received-message translation, reply preview, embed, and translated thread title in that channel, including translations previously shown by a manual action.
+- Turning a channel off retains valid translation-cache entries and sent-message original/edit metadata. Manual message translation remains available after the channel is off.
 - Channel state never changes another channel or the global backup provider.
 
 ## Approved Channel Popout
@@ -69,7 +69,7 @@ The channel popout does not contain:
 - A completed status remains briefly and then collapses. Status updates never repaint the message list.
 - Missing, duplicate, malformed, empty, wrong-language, and placeholder-damaged batch results enter repair instead of disappearing.
 - Each pending message uses a fixed-size CSS loading indicator without timer-driven React rerenders.
-- Disabling automatic translation restores messages, reply previews, embeds, and titles through one display transaction without a second broad repaint.
+- Disabling automatic translation restores automatic and manual message displays, reply previews, embeds, and titles through one channel-scoped display transaction without a second broad repaint.
 
 ## Message Lifecycle
 
