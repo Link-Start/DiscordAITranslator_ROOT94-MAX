@@ -49,7 +49,7 @@ function createLiveTranslationQueue({
 	onChannelSessionLeft = () => {},
 	onChannelSessionStarted = () => {},
 	onLiveTurnStarted = () => {},
-	onLiveTurnProgress = () => {},
+	onReservedLiveRequestConsumed = () => {},
 	// Translation policy. Everything below decides what a translation IS; the queue only
 	// decides when it runs, in what order, and what happens to the item afterwards.
 	getBatchEngineKey = () => null,
@@ -78,7 +78,8 @@ function createLiveTranslationQueue({
 	let retryTimer = null;
 	let channelStates = {};
 	let liveTurnCounts = {};
-	let liveProgressCounts = {};
+	let lastConsumedLiveRequests = {};
+	let reservedLiveRequests = {};
 	let lastChannelId = null;
 
 	function getRequestKey(messageId, channelId) {
@@ -105,6 +106,7 @@ function createLiveTranslationQueue({
 
 	function finishRequest(request) {
 		if (!request) return false;
+		clearReservedLiveRequest(request.channelId, String(request.id));
 		const key = getRequestKey(request.messageId, request.channelId);
 		if (liveRequests[key] === request) delete liveRequests[key];
 		forgetQueuedRequest(request);
@@ -135,6 +137,7 @@ function createLiveTranslationQueue({
 	// Without a channel this bumps the generation, which retires every request that is
 	// still holding a reference to the old one even after this map is refilled.
 	function invalidateRequests(channelId = null) {
+		clearReservedLiveRequest(channelId);
 		if (!channelId) runtimeGeneration++;
 		const key = normalizeChannelId(channelId);
 		for (const requestKey of Object.keys(liveRequests)) {
@@ -151,6 +154,7 @@ function createLiveTranslationQueue({
 		const key = getRequestKey(messageId, channelId);
 		const request = liveRequests[key];
 		if (!request || request.signature === currentSignature) return false;
+		clearReservedLiveRequest(channelId, String(request.id));
 		delete liveRequests[key];
 		forgetQueuedRequest(request);
 		releaseRequestDisplayPending(request);
@@ -175,10 +179,14 @@ function createLiveTranslationQueue({
 		if (!channelId) {
 			queue = [];
 			queuedMessages = {};
+			lastConsumedLiveRequests = {};
+			reservedLiveRequests = {};
 			cancelQueueRetry();
 			return;
 		}
 		const key = normalizeChannelId(channelId);
+		delete lastConsumedLiveRequests[key];
+		clearReservedLiveRequest(channelId);
 		queue = queue.filter(queueItem => {
 			const shouldRemove = !!(queueItem && queueItem.channel && normalizeChannelId(queueItem.channel.id) === key);
 			if (shouldRemove && queueItem.message && queueItem.message.id && (!queueItem.liveRequest || queuedMessages[queueItem.message.id] === queueItem.liveRequest)) delete queuedMessages[queueItem.message.id];
@@ -208,29 +216,71 @@ function createLiveTranslationQueue({
 		return liveTurnCounts[key];
 	}
 
-	function getLiveTurnProgressCount(channelId) {
-		return liveProgressCounts[normalizeChannelId(channelId)] || 0;
+	function reserveQueuedLiveRequest(channelId) {
+		const key = normalizeChannelId(channelId);
+		if (!key) return null;
+		for (const queueItem of queue) {
+			const queueChannelId = queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message);
+			if (!queueItem || queueItem.historicalLoad || normalizeChannelId(queueChannelId) !== key || !queueItem.liveRequest) continue;
+			const ticket = String(queueItem.liveRequest.id);
+			reservedLiveRequests[key] = ticket;
+			return ticket;
+		}
+		delete reservedLiveRequests[key];
+		return null;
 	}
 
-	function noteLiveTurnProgress(channelId, reason = "started") {
+	function clearReservedLiveRequest(channelId = null, ticket = null) {
+		if (!channelId) {
+			reservedLiveRequests = {};
+			return true;
+		}
 		const key = normalizeChannelId(channelId);
-		if (!key) return 0;
-		liveProgressCounts[key] = (liveProgressCounts[key] || 0) + 1;
-		onLiveTurnProgress(channelId, liveProgressCounts[key], reason);
-		return liveProgressCounts[key];
+		if (!key || !reservedLiveRequests[key]) return false;
+		if (ticket != null && reservedLiveRequests[key] !== String(ticket)) return false;
+		delete reservedLiveRequests[key];
+		return true;
+	}
+
+	function recordLiveRequestConsumption(request, reason = "single") {
+		if (!request || !request.channelId) return null;
+		const key = normalizeChannelId(request.channelId);
+		const ticket = String(request.id);
+		if (!key) return null;
+		lastConsumedLiveRequests[key] = ticket;
+		if (reservedLiveRequests[key] === ticket) {
+			delete reservedLiveRequests[key];
+			onReservedLiveRequestConsumed(request.channelId, ticket, reason);
+		}
+		return ticket;
+	}
+
+	function takeNextQueueItem() {
+		if (!queue.length) return null;
+		for (let index = 0; index < queue.length; index++) {
+			const queueItem = queue[index];
+			const queueChannelId = queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message);
+			const ticket = queueItem && queueItem.liveRequest ? String(queueItem.liveRequest.id) : null;
+			if (!ticket || reservedLiveRequests[normalizeChannelId(queueChannelId)] !== ticket) continue;
+			queue.splice(index, 1);
+			return queueItem;
+		}
+		return queue.shift();
 	}
 
 	function resetTracking(channelId = null) {
 		if (channelId) {
 			delete channelStates[normalizeChannelId(channelId)];
 			delete liveTurnCounts[normalizeChannelId(channelId)];
-			delete liveProgressCounts[normalizeChannelId(channelId)];
+			delete lastConsumedLiveRequests[normalizeChannelId(channelId)];
+			delete reservedLiveRequests[normalizeChannelId(channelId)];
 			resetLoadedMessageTracking(channelId);
 		}
 		else {
 			channelStates = {};
 			liveTurnCounts = {};
-			liveProgressCounts = {};
+			lastConsumedLiveRequests = {};
+			reservedLiveRequests = {};
 			resetLoadedMessageTracking();
 		}
 		clearEligibleReplyPreviewMessages(channelId);
@@ -321,7 +371,7 @@ function createLiveTranslationQueue({
 		if (!queueItem || !queueItem.cachedTranslation) return false;
 		const channelId = queueItem.channel && queueItem.channel.id || "__global";
 		const commit = commitCachedResult(queueItem, channelId);
-		noteLiveTurnProgress(channelId, "cached");
+		recordLiveRequestConsumption(queueItem.liveRequest, "cached");
 		completeCommit(queueItem, channelId, commit);
 		return true;
 	}
@@ -329,7 +379,7 @@ function createLiveTranslationQueue({
 	function handleGuardFailure(queueItem) {
 		if (!queueItem) return false;
 		if (shouldAutoTranslateMessage(queueItem.message, queueItem.channel, queueItem.originalContentData, true)) return false;
-		noteLiveTurnProgress(queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem.message), "guard");
+		recordLiveRequestConsumption(queueItem.liveRequest, "guard");
 		finishRequest(queueItem.liveRequest);
 		return true;
 	}
@@ -409,9 +459,10 @@ function createLiveTranslationQueue({
 			}
 			if (!prepared.length) return;
 			noteLiveTurnStarted(channelId);
+			for (const preparedItem of prepared) if (preparedItem && preparedItem.queueItem && preparedItem.queueItem.liveRequest && recordLiveRequestConsumption(preparedItem.queueItem.liveRequest, "burst")) break;
 			let resultMap = null;
 			try {
-				resultMap = await (noteLiveTurnProgress(channelId, "burst"), requestBurstTranslation(context, prepared));
+				resultMap = await requestBurstTranslation(context, prepared);
 			}
 			catch (error) {resultMap = null;}
 			const commits = [];
@@ -457,8 +508,8 @@ function createLiveTranslationQueue({
 		const channelId = queueItem && queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem && queueItem.message);
 		noteLiveTurnStarted(channelId);
 		liveAutoTranslating = true;
+		recordLiveRequestConsumption(queueItem && queueItem.liveRequest, "single");
 		const translation = translateSingleItem(queueItem);
-		noteLiveTurnProgress(channelId, "single");
 		translation.then(_ => {
 			finishRequest(queueItem.liveRequest);
 			liveAutoTranslating = false;
@@ -473,7 +524,7 @@ function createLiveTranslationQueue({
 	function processQueue() {
 		if (!beginProcessing()) return;
 		if (!queue.length) return;
-		const nextItem = queue.shift();
+		const nextItem = takeNextQueueItem();
 		if (!nextItem || !nextItem.message) return processQueue();
 		if (nextItem.historicalLoad) {
 			collectHistoricalMessage(nextItem);
@@ -506,6 +557,8 @@ function createLiveTranslationQueue({
 		restartRequestGeneration() {
 			runtimeGeneration++;
 			liveRequests = {};
+			lastConsumedLiveRequests = {};
+			reservedLiveRequests = {};
 		},
 		getRuntimeGeneration: () => runtimeGeneration,
 		// Queued-message markers. Historical jobs park their own marker shape here so a
@@ -529,6 +582,8 @@ function createLiveTranslationQueue({
 		},
 		clearAllQueuedMessages() {
 			queuedMessages = {};
+			lastConsumedLiveRequests = {};
+			reservedLiveRequests = {};
 		},
 		// Queue contents and order.
 		createQueueItem,
@@ -543,8 +598,10 @@ function createLiveTranslationQueue({
 			const key = normalizeChannelId(channelId);
 			return !!key && queue.some(queueItem => queueItem && !queueItem.historicalLoad && normalizeChannelId(queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem.message)) === key);
 		},
+		reserveQueuedLiveRequest,
+		clearReservedLiveRequest,
+		getLastConsumedLiveRequestTicket: channelId => lastConsumedLiveRequests[normalizeChannelId(channelId)] || null,
 		getStartedLiveTurnCount,
-		getLiveTurnProgressCount,
 		// A copy: a reader must not be able to reorder the queue behind this module's back.
 		getQueueSnapshot: () => queue.slice(),
 		collectBatchItems,
