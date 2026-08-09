@@ -259,7 +259,23 @@ var require_message_state_store = __commonJS({
         let channelIds = channelMessageIds.get(record.channelId);
         return channelIds && (channelIds.delete(record.messageId), channelIds.size || channelMessageIds.delete(record.channelId)), !0;
       }
-      return __name(deleteRecord, "deleteRecord"), Object.freeze({
+      __name(deleteRecord, "deleteRecord");
+      function deleteMessage(messageId, channelId) {
+        let normalizedMessageId = normalizeIdentity(messageId), normalizedChannelId = normalizeIdentity(channelId);
+        if (!normalizedMessageId || !normalizedChannelId) return !1;
+        let record = records.get(normalizedMessageId);
+        if (record && record.channelId && record.channelId !== normalizedChannelId) return !1;
+        let deleted = !1, references = previewHostsByChannel.get(normalizedChannelId);
+        if (references) {
+          references.delete(normalizedMessageId) && (deleted = !0);
+          for (let [referencedMessageId, hostMessageIds] of references)
+            hostMessageIds.delete(normalizedMessageId) && (deleted = !0), hostMessageIds.size || references.delete(referencedMessageId);
+          references.size || previewHostsByChannel.delete(normalizedChannelId);
+        }
+        let eligible = previewEligibility.get(normalizedChannelId);
+        return eligible && eligible.delete(normalizedMessageId) && (deleted = !0, eligible.size || previewEligibility.delete(normalizedChannelId)), record && deleteRecord(record) && (deleted = !0), channelMessageIds.has(normalizedChannelId) || channelGenerations.delete(normalizedChannelId), deleted;
+      }
+      return __name(deleteMessage, "deleteMessage"), Object.freeze({
         captureSource(snapshot) {
           if (!snapshot || typeof snapshot != "object" || !hasGeneration(snapshot.generation)) return null;
           let messageId = normalizeIdentity(snapshot.messageId), channelId = normalizeIdentity(snapshot.channelId);
@@ -324,6 +340,7 @@ var require_message_state_store = __commonJS({
         listPreviewed() {
           return [...records.values()].filter((record) => record.preview || record.previewPending);
         },
+        deleteMessage,
         pruneChannel(channelId) {
           let normalizedChannelId = normalizeIdentity(channelId), inFlightStatuses = /* @__PURE__ */ new Set([MESSAGE_STATUSES.PENDING, MESSAGE_STATUSES.TRANSLATING]), pruned = listChannel(normalizedChannelId).filter((record) => record.origin !== MESSAGE_ORIGINS.MANUAL && !inFlightStatuses.has(record.status) && (record.status !== MESSAGE_STATUSES.CANCELLED || record.renderStatus === RENDER_STATUSES.CONFIRMED) && !record.archive && !record.suppressed && !record.previewPending).filter(deleteRecord);
           return previewEligibility.delete(normalizedChannelId), clearPreviewHostMappings(normalizedChannelId), channelMessageIds.has(normalizedChannelId) || channelGenerations.delete(normalizedChannelId), pruned;
@@ -674,6 +691,10 @@ var require_translation_display_controller = __commonJS({
           let records = [...new Set((Array.isArray(messageIds) ? messageIds : []).map(String))].map((messageId) => store.getDisplayState(messageId)).filter(Boolean);
           return refreshRecords(records, { channelId, ownerMessageIds: [...new Set((Array.isArray(ownerMessageIds) ? ownerMessageIds : []).map(String))] });
         },
+        async deleteMessage(messageId, channelId, { refresh = !0 } = {}) {
+          let ownerMessageIds = store.getPreviewHostMessageIds(channelId, [String(messageId)]);
+          return store.deleteMessage(messageId, channelId) ? !refresh || !ownerMessageIds.length ? createEmptyOutcome({ deleted: !0 }) : refreshRecords([], { channelId, ownerMessageIds }) : !1;
+        },
         async markPending(request, { refresh = !0 } = {}) {
           let record = store.markPending(request);
           return record ? refresh ? refreshRecords([record]) : createEmptyOutcome({ deferredIds: [record.messageId] }) : createEmptyOutcome({ rejectedIds: [String(request.messageId)] });
@@ -863,6 +884,7 @@ var require_display_runtime = __commonJS({
         commitHistoricalBatch: /* @__PURE__ */ __name((results) => controller.commitHistoricalBatch(results), "commitHistoricalBatch"),
         renderMessages: /* @__PURE__ */ __name((messageIds) => controller.renderMessages(messageIds), "renderMessages"),
         refreshDisplayTransaction: /* @__PURE__ */ __name((request) => controller.refreshDisplayTransaction(request), "refreshDisplayTransaction"),
+        deleteMessage: /* @__PURE__ */ __name((messageId, channelId, options) => controller.deleteMessage(messageId, channelId, options), "deleteMessage"),
         restoreMessage: /* @__PURE__ */ __name((messageId, options) => controller.restoreMessage(messageId, options), "restoreMessage"),
         restoreChannel: /* @__PURE__ */ __name((channelId, options) => controller.restoreChannel(channelId, options), "restoreChannel"),
         restoreAll: /* @__PURE__ */ __name((options) => controller.restoreAll(options), "restoreAll"),
@@ -5523,7 +5545,7 @@ var require_live_request_registry = __commonJS({
       clearReservedLiveRequest = /* @__PURE__ */ __name(() => !1, "clearReservedLiveRequest"),
       retireReservedLiveRequest = /* @__PURE__ */ __name(() => !1, "retireReservedLiveRequest")
     } = {}) {
-      let queuedMessages = {}, liveRequests = {}, requestSequence = 0, runtimeGeneration = 0;
+      let queuedMessages = {}, liveRequests = {}, requestSequence = 0, runtimeGeneration = 0, finishedRequests = /* @__PURE__ */ new WeakSet();
       function getRequestKey(messageId, channelId) {
         return `${channelId || "__global"}:${String(messageId || "")}`;
       }
@@ -5541,7 +5563,8 @@ var require_live_request_registry = __commonJS({
       }
       __name(forgetQueuedRequest, "forgetQueuedRequest");
       function finishRequest(request) {
-        if (!request) return !1;
+        if (!request || finishedRequests.has(request)) return !1;
+        finishedRequests.add(request);
         let key = getRequestKey(request.messageId, request.channelId);
         return liveRequests[key] === request && delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), retireReservedLiveRequest(request.channelId, String(request.id), "request-finished"), !0;
       }
@@ -5567,16 +5590,22 @@ var require_live_request_registry = __commonJS({
         let channelKey = normalizeChannelId(channelId);
         for (let requestKey of Object.keys(liveRequests)) {
           let request = liveRequests[requestKey];
-          channelKey && normalizeChannelId(request.channelId) !== channelKey || (delete liveRequests[requestKey], forgetQueuedRequest(request), releaseRequestDisplayPending(request));
+          channelKey && normalizeChannelId(request.channelId) !== channelKey || (delete liveRequests[requestKey], finishedRequests.add(request), forgetQueuedRequest(request), releaseRequestDisplayPending(request));
         }
       }
       __name(invalidateRequests, "invalidateRequests");
       function invalidateRequestForMessage(messageId, channelId, currentSignature) {
         if (!messageId || !channelId || !currentSignature) return !1;
         let key = getRequestKey(messageId, channelId), request = liveRequests[key];
-        return !request || request.signature === currentSignature ? !1 : (delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), retireReservedLiveRequest(channelId, String(request.id), "source-invalidated"), !0);
+        return !request || request.signature === currentSignature ? !1 : (delete liveRequests[key], finishedRequests.add(request), forgetQueuedRequest(request), releaseRequestDisplayPending(request), retireReservedLiveRequest(channelId, String(request.id), "source-invalidated"), !0);
       }
       __name(invalidateRequestForMessage, "invalidateRequestForMessage");
+      function removeMessage(messageId, channelId) {
+        if (!messageId || !channelId) return !1;
+        let key = getRequestKey(messageId, channelId), request = liveRequests[key];
+        return request ? (delete liveRequests[key], finishedRequests.add(request), forgetQueuedRequest(request), releaseRequestDisplayPending(request), retireReservedLiveRequest(channelId, String(request.id), "source-deleted"), !0) : !1;
+      }
+      __name(removeMessage, "removeMessage");
       function clearQueuedMessage(messageId, expectedMarker = null) {
         return expectedMarker && queuedMessages[messageId] !== expectedMarker || !Object.prototype.hasOwnProperty.call(queuedMessages, messageId) ? !1 : (delete queuedMessages[messageId], !0);
       }
@@ -5588,8 +5617,11 @@ var require_live_request_registry = __commonJS({
         releaseRequestDisplayPending,
         invalidateRequests,
         invalidateRequestForMessage,
+        removeMessage,
         restartRequestGeneration() {
-          runtimeGeneration++, liveRequests = {};
+          runtimeGeneration++;
+          for (let request of Object.values(liveRequests)) finishedRequests.add(request);
+          liveRequests = {};
         },
         getRuntimeGeneration: /* @__PURE__ */ __name(() => runtimeGeneration, "getRuntimeGeneration"),
         isMessageQueued: /* @__PURE__ */ __name((messageId) => !!queuedMessages[messageId], "isMessageQueued"),
@@ -5765,6 +5797,16 @@ var require_live_translation_queue = __commonJS({
         }), !queue.length && retryTimer && cancelQueueRetry();
       }
       __name(clearQueue, "clearQueue");
+      function removeMessage(messageId, channelId) {
+        let normalizedMessageId = messageId == null ? "" : String(messageId), normalizedChannelId = normalizeChannelId(channelId);
+        if (!normalizedMessageId || !normalizedChannelId) return !1;
+        let removed = requestRegistry.removeMessage(normalizedMessageId, normalizedChannelId);
+        return queue = queue.filter((queueItem) => {
+          let queueMessageId = queueItem && queueItem.message && String(queueItem.message.id || ""), queueChannelId = normalizeChannelId(queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message));
+          return queueMessageId !== normalizedMessageId || queueChannelId !== normalizedChannelId ? !0 : (removed = !0, requestRegistry.clearQueuedMessage(normalizedMessageId, queueItem.liveRequest || null), !1);
+        }), !queue.length && retryTimer && cancelQueueRetry(), removed;
+      }
+      __name(removeMessage, "removeMessage");
       function reserveQueuedLiveRequest(channelId) {
         let key = normalizeChannelId(channelId);
         if (!key) return null;
@@ -5978,6 +6020,7 @@ var require_live_translation_queue = __commonJS({
         releaseRequestDisplayPending: requestRegistry.releaseRequestDisplayPending,
         invalidateRequests: requestRegistry.invalidateRequests,
         invalidateRequestForMessage: requestRegistry.invalidateRequestForMessage,
+        removeRequestForMessage: requestRegistry.removeMessage,
         // A restart retires every in-flight request without releasing display pending
         // records, because the display runtime is reset separately on start.
         restartRequestGeneration() {
@@ -5998,6 +6041,7 @@ var require_live_translation_queue = __commonJS({
         createQueueItem,
         enqueueLiveItem,
         queueMessage,
+        removeMessage,
         clearQueue,
         processQueue,
         beginProcessing,
@@ -9794,8 +9838,29 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
               });
             });
           }
+          handleDeletedMessage(messageId, channelId) {
+            if (!messageId || !channelId) return Promise.resolve(!1);
+            let normalizedMessageId = String(messageId), normalizedChannelId = String(channelId), liveRemoved = this.ensureLiveTranslationQueue().removeMessage(normalizedMessageId, normalizedChannelId), historicalRemoved = this.removeDeletedHistoricalTranslationMessage(normalizedMessageId, normalizedChannelId), cacheRemoved = this.hasCachedTranslationEntry(normalizedMessageId);
+            return this.clearCachedTranslation(normalizedMessageId), Promise.resolve(this.ensureReceivedDisplayRuntime().deleteMessage(normalizedMessageId, normalizedChannelId)).then((displayOutcome) => ({
+              messageId: normalizedMessageId,
+              channelId: normalizedChannelId,
+              removed: !!(liveRemoved || historicalRemoved || cacheRemoved || displayOutcome),
+              displayOutcome
+            }));
+          }
+          handleMessageDeletionAction(action) {
+            if (!action || action.type != "MESSAGE_DELETE" && action.type != "MESSAGE_DELETE_BULK") return Promise.resolve(!1);
+            let channelId = action.channelId || action.channel_id, messageIds = action.type == "MESSAGE_DELETE_BULK" ? action.ids || action.messageIds || action.message_ids || [] : [action.id || action.messageId || action.message_id], uniqueMessageIds = [...new Set([].concat(messageIds || []).filter(Boolean).map(String))];
+            return !channelId || !uniqueMessageIds.length ? Promise.resolve(!1) : Promise.all(uniqueMessageIds.map((messageId) => this.handleDeletedMessage(messageId, channelId)));
+          }
           onStart() {
-            pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), this.ensureLiveTranslationQueue().restartRequestGeneration(), this.ensureSentTranslationStore().resetForStart(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), this.attachAutoTranslationInputActivityWatcher(), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
+            pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), this.ensureLiveTranslationQueue().restartRequestGeneration(), this.ensureSentTranslationStore().resetForStart(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), this.attachAutoTranslationInputActivityWatcher();
+            let dispatcher = BDFDB.LibraryModules.Dispatcher || BDFDB.LibraryModules.DispatcherUtils;
+            dispatcher && typeof dispatcher.dispatch == "function" && BDFDB.PatchUtils.patch(this, dispatcher, "dispatch", { before: /* @__PURE__ */ __name((event) => {
+              let action = event.methodArguments && event.methodArguments[0];
+              !action || action.type != "MESSAGE_DELETE" && action.type != "MESSAGE_DELETE_BULK" || this.handleMessageDeletionAction(action).catch((_2) => {
+              });
+            }, "before") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", { before: /* @__PURE__ */ __name((e) => {
               let editArchive = e.methodArguments[1] && this.ensureReceivedDisplayRuntime().peekSourceArchive(e.methodArguments[1]);
               editArchive && editArchive.message.content ? e.methodArguments[2] = editArchive.message.content : e.methodArguments[1] && (e.methodArguments[2] = this.getEditableSentMessageText(e.methodArguments[1], e.methodArguments[2]));
             }, "before") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "editMessage", { instead: /* @__PURE__ */ __name((e) => this.handleEditedMessageSubmit(e.methodArguments, (...args) => e.originalMethod(...args)), "instead") }), BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageToolbarUtils, "useMessageMenu", { after: /* @__PURE__ */ __name((e) => {
@@ -11421,6 +11486,18 @@ __________________ __________________ __________________
               }
             }
             return invalidated;
+          }
+          removeDeletedHistoricalTranslationMessage(messageId, channelId) {
+            if (!messageId || !channelId) return !1;
+            let normalizedMessageId = String(messageId), entry = this.getHistoricalTranslationJobQueue(channelId, !1), removed = !1;
+            for (let job of entry && entry.jobs || [])
+              job.invalidateMessage(normalizedMessageId, "source-deleted") && (removed = !0), this.ensureLiveTranslationQueue().clearHistoricalQueuedMessage(normalizedMessageId, job.id);
+            let failedEntry = this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
+            if (failedEntry && failedEntry.items) {
+              let nextItems = failedEntry.items.filter((item) => !item || !item.message || String(item.message.id) !== normalizedMessageId);
+              nextItems.length !== failedEntry.items.length && (removed = !0, nextItems.length ? this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, Object.assign({}, failedEntry, { items: nextItems })) : this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId));
+            }
+            return removed;
           }
           cancelHistoricalTranslationJobs(channelId = null, reason = "cancelled") {
             let entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();

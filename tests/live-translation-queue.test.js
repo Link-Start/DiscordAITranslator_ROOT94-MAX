@@ -725,6 +725,35 @@ test("clearing one channel leaves the other channel's items and markers alone", 
 	assert.deepEqual(harness.log.released.map(record => record.messageId).sort(), ["m1", "m3"]);
 });
 
+test("deleting one queued message retires only its request and pending display", () => {
+	const harness = createHarness();
+	harness.queue.setBusyTranslating(true);
+	const first = harness.addLiveItem("m1", "c1");
+	const second = harness.addLiveItem("m2", "c1");
+	const otherChannel = harness.addLiveItem("m3", "c2");
+
+	assert.equal(harness.queue.removeMessage("m1", "wrong-channel"), false);
+	assert.equal(harness.queue.removeMessage("m1", "c1"), true);
+	assert.deepEqual(harness.queueIds(), ["m3", "m2"]);
+	assert.equal(harness.queue.isMessageQueued("m1"), false);
+	assert.equal(harness.queue.isRequestCurrent(first.liveRequest), false);
+	assert.equal(harness.queue.isRequestCurrent(second.liveRequest), true);
+	assert.equal(harness.queue.isRequestCurrent(otherChannel.liveRequest), true);
+	assert.deepEqual(harness.log.released.map(record => record.messageId), ["m1"]);
+});
+
+test("deleting the final waiting message cancels its retry timer", () => {
+	const harness = createHarness();
+	harness.state.backoff = true;
+	harness.addLiveItem("m1", "c1");
+	assert.equal(harness.queue.hasPendingQueueRetry(), true);
+
+	assert.equal(harness.queue.removeMessage("m1", "c1"), true);
+	assert.equal(harness.queue.getQueueLength(), 0);
+	assert.equal(harness.queue.hasPendingQueueRetry(), false);
+	assert.equal(harness.pendingTimers().length, 0);
+});
+
 test("clearing every channel empties the queue, the markers and the retry timer", () => {
 	const harness = createHarness();
 	harness.state.backoff = true;

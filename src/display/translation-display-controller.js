@@ -114,6 +114,12 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			const records = uniqueMessageIds.map(messageId => store.getDisplayState(messageId)).filter(Boolean);
 			return refreshRecords(records, {channelId, ownerMessageIds: [...new Set((Array.isArray(ownerMessageIds) ? ownerMessageIds : []).map(String))]});
 		},
+		async deleteMessage(messageId, channelId, {refresh = true} = {}) {
+			const ownerMessageIds = store.getPreviewHostMessageIds(channelId, [String(messageId)]);
+			if (!store.deleteMessage(messageId, channelId)) return false;
+			if (!refresh || !ownerMessageIds.length) return createEmptyOutcome({deleted: true});
+			return refreshRecords([], {channelId, ownerMessageIds});
+		},
 		async markPending(request, {refresh = true} = {}) {
 			const record = store.markPending(request);
 			if (!record) return createEmptyOutcome({rejectedIds: [String(request.messageId)]});

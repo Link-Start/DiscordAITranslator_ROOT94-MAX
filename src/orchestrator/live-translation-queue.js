@@ -129,6 +129,23 @@ function createLiveTranslationQueue({
 		if (!queue.length && retryTimer) cancelQueueRetry();
 	}
 
+	function removeMessage(messageId, channelId) {
+		const normalizedMessageId = messageId == null ? "" : String(messageId);
+		const normalizedChannelId = normalizeChannelId(channelId);
+		if (!normalizedMessageId || !normalizedChannelId) return false;
+		let removed = requestRegistry.removeMessage(normalizedMessageId, normalizedChannelId);
+		queue = queue.filter(queueItem => {
+			const queueMessageId = queueItem && queueItem.message && String(queueItem.message.id || "");
+			const queueChannelId = normalizeChannelId(queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message));
+			if (queueMessageId !== normalizedMessageId || queueChannelId !== normalizedChannelId) return true;
+			removed = true;
+			requestRegistry.clearQueuedMessage(normalizedMessageId, queueItem.liveRequest || null);
+			return false;
+		});
+		if (!queue.length && retryTimer) cancelQueueRetry();
+		return removed;
+	}
+
 	function reserveQueuedLiveRequest(channelId) {
 		const key = normalizeChannelId(channelId);
 		if (!key) return null;
@@ -424,6 +441,7 @@ function createLiveTranslationQueue({
 		releaseRequestDisplayPending: requestRegistry.releaseRequestDisplayPending,
 		invalidateRequests: requestRegistry.invalidateRequests,
 		invalidateRequestForMessage: requestRegistry.invalidateRequestForMessage,
+		removeRequestForMessage: requestRegistry.removeMessage,
 		// A restart retires every in-flight request without releasing display pending
 		// records, because the display runtime is reset separately on start.
 		restartRequestGeneration() {
@@ -448,6 +466,7 @@ function createLiveTranslationQueue({
 		createQueueItem,
 		enqueueLiveItem,
 		queueMessage,
+		removeMessage,
 		clearQueue,
 		processQueue,
 		beginProcessing,

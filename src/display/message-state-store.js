@@ -305,6 +305,32 @@ function createMessageStateStore({journal = null} = {}) {
 		return true;
 	}
 
+	function deleteMessage(messageId, channelId) {
+		const normalizedMessageId = normalizeIdentity(messageId);
+		const normalizedChannelId = normalizeIdentity(channelId);
+		if (!normalizedMessageId || !normalizedChannelId) return false;
+		const record = records.get(normalizedMessageId);
+		if (record && record.channelId && record.channelId !== normalizedChannelId) return false;
+		let deleted = false;
+		const references = previewHostsByChannel.get(normalizedChannelId);
+		if (references) {
+			if (references.delete(normalizedMessageId)) deleted = true;
+			for (const [referencedMessageId, hostMessageIds] of references) {
+				if (hostMessageIds.delete(normalizedMessageId)) deleted = true;
+				if (!hostMessageIds.size) references.delete(referencedMessageId);
+			}
+			if (!references.size) previewHostsByChannel.delete(normalizedChannelId);
+		}
+		const eligible = previewEligibility.get(normalizedChannelId);
+		if (eligible && eligible.delete(normalizedMessageId)) {
+			deleted = true;
+			if (!eligible.size) previewEligibility.delete(normalizedChannelId);
+		}
+		if (record && deleteRecord(record)) deleted = true;
+		if (!channelMessageIds.has(normalizedChannelId)) channelGenerations.delete(normalizedChannelId);
+		return deleted;
+	}
+
 	return Object.freeze({
 		captureSource(snapshot) {
 			if (!snapshot || typeof snapshot !== "object" || !hasGeneration(snapshot.generation)) return null;
@@ -396,6 +422,7 @@ function createMessageStateStore({journal = null} = {}) {
 		listPreviewed() {
 			return [...records.values()].filter(record => record.preview || record.previewPending);
 		},
+		deleteMessage,
 		pruneChannel(channelId) {
 			const normalizedChannelId = normalizeIdentity(channelId);
 			const inFlightStatuses = new Set([MESSAGE_STATUSES.PENDING, MESSAGE_STATUSES.TRANSLATING]);
