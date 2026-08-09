@@ -5905,6 +5905,8 @@ var require_live_translation_queue = __commonJS({
         if (!nextItem || !nextItem.message) return processQueue();
         if (nextItem.historicalLoad)
           return collectHistoricalMessage(nextItem), processQueue();
+        if (!requestRegistry.isRequestCurrent(nextItem.liveRequest, nextItem.message))
+          return requestRegistry.finishRequest(nextItem.liveRequest), processQueue();
         if (handleCachedItem(nextItem) || handleGuardFailure(nextItem)) return processQueue();
         let burst = null;
         try {

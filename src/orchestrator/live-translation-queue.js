@@ -1,10 +1,8 @@
 // Owns live queue order, translation locks and retry scheduling. Request validity,
 // channel sessions and handoff reservations live in their dedicated modules.
-//
 // The split is deliberate: this module owns queue STATE and ORDER, not translation
 // policy. Preparing an item, calling the provider, validating a result, persisting a
 // cache entry and committing to the display store all arrive as injected callbacks.
-//
 // A queue instance is per plugin instance, so a plugin restart drops all of it.
 
 const {createLiveHandoffReservations} = require("./live-handoff-reservations");
@@ -398,6 +396,10 @@ function createLiveTranslationQueue({
 		if (!nextItem || !nextItem.message) return processQueue();
 		if (nextItem.historicalLoad) {
 			collectHistoricalMessage(nextItem);
+			return processQueue();
+		}
+		if (!requestRegistry.isRequestCurrent(nextItem.liveRequest, nextItem.message)) {
+			requestRegistry.finishRequest(nextItem.liveRequest);
 			return processQueue();
 		}
 		if (handleCachedItem(nextItem)) return processQueue();
