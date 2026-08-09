@@ -12,7 +12,7 @@ const runtimePath = path.join(root, "src", "legacy", "runtime.js");
 // The size backstop that used to live in build-contract.test.js was raised the
 // moment it was breached, which made it worthless; do not repeat that here.
 const BUDGET = Object.freeze({
-	runtimeLines: 4451,
+	runtimeLines: 4447,
 	moduleLevelVarDeclarators: 2
 });
 
@@ -56,6 +56,19 @@ test("module-level shared state only ever shrinks", () => {
 		"New shared mutable state is the coupling that blocks extraction; put the state inside the " +
 		"module that owns it instead."
 	);
+});
+
+test("extracted lifecycle responsibilities do not leave dead runtime forwarding methods", () => {
+	const source = readRuntimeLines().join("\n");
+	for (const methodName of [
+		"isHistoricalMessageSourceGenerationCurrent",
+		"clearReplyPreviewRenderMessage",
+		"clearAutoTranslationScrollIntent",
+		"markAutoTranslationScrollIntent",
+		"scheduleAutoTranslationScrollIdleFinish",
+		"scheduleAutoTranslationQueueRetry",
+		"flushReceivedDisplayQueues"
+	]) assert.doesNotMatch(source, new RegExp(`\\b${methodName}\\s*\\(`), `${methodName} has no production caller`);
 });
 
 test("the recorded budget matches the current tree, so drift is visible", () => {

@@ -147,10 +147,9 @@ test("legacy historical queue runtime is absent after coordinator migration", ()
 	}
 });
 
-test("historical job commits all translated IDs atomically with one rerender", async () => {
+test("historical job commits all translated IDs atomically through one acknowledged commit", async () => {
 	const plugin = createPluginInstance({callSetLanguages: false});
 	const appliedIds = [];
-	let rerenderCount = 0;
 	let resolveBatch;
 	const job = plugin.createHistoricalTranslationJob({
 		id: "job-1",
@@ -170,9 +169,6 @@ test("historical job commits all translated IDs atomically with one rerender", a
 			isCurrent: () => true,
 			commit: summary => {
 				appliedIds.push(...summary.translated.map(item => item.message.id));
-			},
-			rerender: () => {
-				rerenderCount++;
 			}
 		}
 	});
@@ -183,7 +179,6 @@ test("historical job commits all translated IDs atomically with one rerender", a
 	await new Promise(resolve => setTimeout(resolve, 0));
 
 	assert.deepEqual(appliedIds, []);
-	assert.equal(rerenderCount, 0);
 	assert.equal(job.isMessagePending("100"), true);
 	assert.equal(job.isMessagePending("200"), true);
 
@@ -191,7 +186,6 @@ test("historical job commits all translated IDs atomically with one rerender", a
 	await running;
 
 	assert.deepEqual(appliedIds, ["100", "200"]);
-	assert.equal(rerenderCount, 1);
 	assert.equal(job.state, "committed");
 });
 
@@ -221,8 +215,7 @@ test("historical job repairs missing IDs before the atomic commit", async () => 
 			isCurrent: () => true,
 			commit: summary => {
 				committedSummary = summary;
-			},
-			rerender: () => {}
+			}
 		}
 	});
 
@@ -267,8 +260,7 @@ test("historical job retries unresolved items in a smaller batch before single r
 			isCurrent: () => true,
 			commit: summary => {
 				committedSummary = summary;
-			},
-			rerender: () => {}
+			}
 		}
 	});
 
@@ -302,8 +294,7 @@ test("historical repair requests run with bounded concurrency before one commit"
 			isCurrent: () => true,
 			commit: () => {
 				commitCount++;
-			},
-			rerender: () => {}
+			}
 		}
 	});
 
@@ -322,7 +313,6 @@ test("cancelled historical job ignores late provider results", async () => {
 	const plugin = createPluginInstance({callSetLanguages: false});
 	let resolveBatch;
 	let commitCount = 0;
-	let rerenderCount = 0;
 	const job = plugin.createHistoricalTranslationJob({
 		id: "job-cancel",
 		channelId: "channel-history-job",
@@ -338,9 +328,6 @@ test("cancelled historical job ignores late provider results", async () => {
 			isCurrent: () => true,
 			commit: () => {
 				commitCount++;
-			},
-			rerender: () => {
-				rerenderCount++;
 			}
 		}
 	});
@@ -354,7 +341,6 @@ test("cancelled historical job ignores late provider results", async () => {
 
 	assert.equal(job.state, "cancelled");
 	assert.equal(commitCount, 0);
-	assert.equal(rerenderCount, 0);
 	assert.equal(job.isMessagePending("100"), false);
 });
 
@@ -362,7 +348,6 @@ test("editing one historical item invalidates only that item before commit", asy
 	const plugin = createPluginInstance({callSetLanguages: false});
 	let resolveBatch;
 	let committedSummary = null;
-	let rerenderCount = 0;
 	const job = plugin.createHistoricalTranslationJob({
 		id: "job-edit-one",
 		channelId: "channel-history-job",
@@ -378,9 +363,6 @@ test("editing one historical item invalidates only that item before commit", asy
 			isCurrent: () => true,
 			commit: summary => {
 				committedSummary = summary;
-			},
-			rerender: () => {
-				rerenderCount++;
 			}
 		}
 	});
@@ -396,7 +378,6 @@ test("editing one historical item invalidates only that item before commit", asy
 
 	assert.deepEqual(committedSummary.translated.map(item => item.message.id), ["200"]);
 	assert.equal(job.isMessagePending("100"), false);
-	assert.equal(rerenderCount, 1);
 });
 
 test("historical commit rejects a translated item when Discord now stores edited content", async () => {
@@ -2102,7 +2083,7 @@ test("editing a source removes its retained historical failure snapshot", async 
 	assert.equal(plugin.getFailedHistoricalTranslationCount(channelId), 0);
 });
 
-test("deleting a source cancels its historical record and retained retry snapshot only in that channel", () => {
+test("deleting a source cancels its historical record and retained retry snapshot only in that channel", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
 	const firstChannelId = "channel-history-delete";
 	const secondChannelId = "channel-history-delete-other";
@@ -2115,7 +2096,7 @@ test("deleting a source cancels its historical record and retained retry snapsho
 	const deletedJob = plugin.getHistoricalTranslationJobQueue(firstChannelId, false).jobs[0];
 	const otherJob = plugin.getHistoricalTranslationJobQueue(secondChannelId, false).jobs[0];
 
-	assert.equal(plugin.removeDeletedHistoricalTranslationMessage(deletedMessage.id, firstChannelId), true);
+	assert.equal((await plugin.handleDeletedMessage(deletedMessage.id, firstChannelId)).removed, true);
 	assert.equal(deletedJob.items.get(deletedMessage.id).status, "cancelled");
 	assert.equal(deletedJob.items.get(deletedMessage.id).reason, "source-deleted");
 	assert.equal(plugin.getFailedHistoricalTranslationCount(firstChannelId), 0);
