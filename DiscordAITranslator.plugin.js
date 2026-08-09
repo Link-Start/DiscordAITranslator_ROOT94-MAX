@@ -5409,9 +5409,211 @@ var require_sent_translation_store = __commonJS({
   }
 });
 
+// src/orchestrator/live-handoff-reservations.js
+var require_live_handoff_reservations = __commonJS({
+  "src/orchestrator/live-handoff-reservations.js"(exports2, module2) {
+    function normalizeIdentity(value) {
+      return value == null ? "" : String(value);
+    }
+    __name(normalizeIdentity, "normalizeIdentity");
+    function createLiveHandoffReservations() {
+      let sequence = 0, reservations = /* @__PURE__ */ new Map();
+      function reserve(channelId, ticket) {
+        let channelKey = normalizeIdentity(channelId), ticketKey = normalizeIdentity(ticket);
+        if (!channelKey || !ticketKey) return null;
+        let existing = reservations.get(channelKey);
+        return existing && existing.ticket === ticketKey || reservations.set(channelKey, { ticket: ticketKey, order: ++sequence }), ticketKey;
+      }
+      __name(reserve, "reserve");
+      function clear(channelId = null, ticket = null) {
+        if (channelId == null)
+          return reservations.clear(), !0;
+        let channelKey = normalizeIdentity(channelId), existing = reservations.get(channelKey);
+        return !existing || ticket != null && existing.ticket !== normalizeIdentity(ticket) ? !1 : (reservations.delete(channelKey), !0);
+      }
+      __name(clear, "clear");
+      function consume(channelId, ticket) {
+        let channelKey = normalizeIdentity(channelId), existing = reservations.get(channelKey);
+        return !existing || existing.ticket !== normalizeIdentity(ticket) ? !1 : (reservations.delete(channelKey), !0);
+      }
+      __name(consume, "consume");
+      function findNextQueueIndex(queue, getIdentity) {
+        let selectedIndex = -1, selectedOrder = 1 / 0;
+        for (let index = 0; index < queue.length; index++) {
+          let identity = getIdentity(queue[index]), existing = identity && reservations.get(normalizeIdentity(identity.channelId));
+          !existing || existing.ticket !== normalizeIdentity(identity.ticket) || existing.order >= selectedOrder || (selectedIndex = index, selectedOrder = existing.order);
+        }
+        return selectedIndex;
+      }
+      return __name(findNextQueueIndex, "findNextQueueIndex"), Object.freeze({ reserve, clear, consume, findNextQueueIndex });
+    }
+    __name(createLiveHandoffReservations, "createLiveHandoffReservations");
+    module2.exports = { createLiveHandoffReservations };
+  }
+});
+
+// src/orchestrator/live-request-registry.js
+var require_live_request_registry = __commonJS({
+  "src/orchestrator/live-request-registry.js"(exports2, module2) {
+    function createLiveRequestRegistry({
+      normalizeChannelId = /* @__PURE__ */ __name((value) => value == null ? "" : String(value), "normalizeChannelId"),
+      isRuntimeActive = /* @__PURE__ */ __name(() => !0, "isRuntimeActive"),
+      isTranslationEnabled = /* @__PURE__ */ __name(() => !1, "isTranslationEnabled"),
+      extractOriginalContentData = /* @__PURE__ */ __name(() => null, "extractOriginalContentData"),
+      createTranslationSignature = /* @__PURE__ */ __name(() => null, "createTranslationSignature"),
+      releaseDisplayPending = /* @__PURE__ */ __name(() => {
+      }, "releaseDisplayPending"),
+      clearReservedLiveRequest = /* @__PURE__ */ __name(() => !1, "clearReservedLiveRequest")
+    } = {}) {
+      let queuedMessages = {}, liveRequests = {}, requestSequence = 0, runtimeGeneration = 0;
+      function getRequestKey(messageId, channelId) {
+        return `${channelId || "__global"}:${String(messageId || "")}`;
+      }
+      __name(getRequestKey, "getRequestKey");
+      function releaseRequestDisplayPending(request) {
+        return request ? (releaseDisplayPending({
+          messageId: request.messageId,
+          channelId: request.channelId,
+          requestIdentity: String(request.id)
+        }), !0) : !1;
+      }
+      __name(releaseRequestDisplayPending, "releaseRequestDisplayPending");
+      function forgetQueuedRequest(request) {
+        request && queuedMessages[request.messageId] === request && delete queuedMessages[request.messageId];
+      }
+      __name(forgetQueuedRequest, "forgetQueuedRequest");
+      function finishRequest(request) {
+        if (!request) return !1;
+        clearReservedLiveRequest(request.channelId, String(request.id));
+        let key = getRequestKey(request.messageId, request.channelId);
+        return liveRequests[key] === request && delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), !0;
+      }
+      __name(finishRequest, "finishRequest");
+      function createRequest(message, channelId, originalContentData = null, signature = null) {
+        if (!message || !message.id || !channelId) return null;
+        let request = {
+          id: ++requestSequence,
+          generation: runtimeGeneration,
+          channelId,
+          messageId: String(message.id),
+          signature: signature || createTranslationSignature(message, channelId, originalContentData || extractOriginalContentData(message))
+        };
+        return liveRequests[getRequestKey(request.messageId, channelId)] = request, request;
+      }
+      __name(createRequest, "createRequest");
+      function isRequestCurrent(request, message = null) {
+        return !request || !isRuntimeActive() || request.generation !== runtimeGeneration || !isTranslationEnabled(request.channelId) || liveRequests[getRequestKey(request.messageId, request.channelId)] !== request ? !1 : message ? createTranslationSignature(message, request.channelId, extractOriginalContentData(message)) === request.signature : !0;
+      }
+      __name(isRequestCurrent, "isRequestCurrent");
+      function invalidateRequests(channelId = null) {
+        clearReservedLiveRequest(channelId), channelId || runtimeGeneration++;
+        let channelKey = normalizeChannelId(channelId);
+        for (let requestKey of Object.keys(liveRequests)) {
+          let request = liveRequests[requestKey];
+          channelKey && normalizeChannelId(request.channelId) !== channelKey || (delete liveRequests[requestKey], forgetQueuedRequest(request), releaseRequestDisplayPending(request));
+        }
+      }
+      __name(invalidateRequests, "invalidateRequests");
+      function invalidateRequestForMessage(messageId, channelId, currentSignature) {
+        if (!messageId || !channelId || !currentSignature) return !1;
+        let key = getRequestKey(messageId, channelId), request = liveRequests[key];
+        return !request || request.signature === currentSignature ? !1 : (clearReservedLiveRequest(channelId, String(request.id)), delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), !0);
+      }
+      __name(invalidateRequestForMessage, "invalidateRequestForMessage");
+      function clearQueuedMessage(messageId, expectedMarker = null) {
+        return expectedMarker && queuedMessages[messageId] !== expectedMarker || !Object.prototype.hasOwnProperty.call(queuedMessages, messageId) ? !1 : (delete queuedMessages[messageId], !0);
+      }
+      return __name(clearQueuedMessage, "clearQueuedMessage"), Object.freeze({
+        getRequestKey,
+        createRequest,
+        isRequestCurrent,
+        finishRequest,
+        releaseRequestDisplayPending,
+        invalidateRequests,
+        invalidateRequestForMessage,
+        restartRequestGeneration() {
+          runtimeGeneration++, liveRequests = {};
+        },
+        getRuntimeGeneration: /* @__PURE__ */ __name(() => runtimeGeneration, "getRuntimeGeneration"),
+        isMessageQueued: /* @__PURE__ */ __name((messageId) => !!queuedMessages[messageId], "isMessageQueued"),
+        getQueuedMarker: /* @__PURE__ */ __name((messageId) => queuedMessages[messageId] || null, "getQueuedMarker"),
+        markMessageQueued(messageId, marker) {
+          return queuedMessages[messageId] = marker, marker;
+        },
+        clearQueuedMessage,
+        clearHistoricalQueuedMessage(messageId, jobId) {
+          let marker = messageId && queuedMessages[messageId];
+          return !marker || marker.type !== "historical" || marker.jobId !== jobId ? !1 : clearQueuedMessage(messageId, marker);
+        },
+        clearAllQueuedMessages() {
+          queuedMessages = {};
+        }
+      });
+    }
+    __name(createLiveRequestRegistry, "createLiveRequestRegistry");
+    module2.exports = { createLiveRequestRegistry };
+  }
+});
+
+// src/orchestrator/live-channel-session.js
+var require_live_channel_session = __commonJS({
+  "src/orchestrator/live-channel-session.js"(exports2, module2) {
+    function createLiveChannelSession({
+      normalizeChannelId = /* @__PURE__ */ __name((value) => value == null ? "" : String(value), "normalizeChannelId"),
+      resetLoadedMessageTracking = /* @__PURE__ */ __name(() => {
+      }, "resetLoadedMessageTracking"),
+      clearEligibleReplyPreviewMessages = /* @__PURE__ */ __name(() => {
+      }, "clearEligibleReplyPreviewMessages"),
+      clearChannelTranslationQueue = /* @__PURE__ */ __name(() => {
+      }, "clearChannelTranslationQueue"),
+      onChannelSessionLeft = /* @__PURE__ */ __name(() => {
+      }, "onChannelSessionLeft"),
+      onChannelSessionStarted = /* @__PURE__ */ __name(() => {
+      }, "onChannelSessionStarted"),
+      onLiveTurnStarted = /* @__PURE__ */ __name(() => {
+      }, "onLiveTurnStarted")
+    } = {}) {
+      let channelStates = {}, liveTurnCounts = {}, lastChannelId = null;
+      function getChannelState(channelId) {
+        if (!channelId) return null;
+        let key = normalizeChannelId(channelId);
+        return channelStates[key] || (channelStates[key] = { initialized: !1, boundaryMessageId: null }), channelStates[key];
+      }
+      __name(getChannelState, "getChannelState");
+      function noteLiveTurnStarted(channelId) {
+        let key = normalizeChannelId(channelId);
+        return key ? (liveTurnCounts[key] = (liveTurnCounts[key] || 0) + 1, onLiveTurnStarted(channelId, liveTurnCounts[key]), liveTurnCounts[key]) : 0;
+      }
+      __name(noteLiveTurnStarted, "noteLiveTurnStarted");
+      function reset(channelId = null) {
+        channelId ? (delete channelStates[normalizeChannelId(channelId)], delete liveTurnCounts[normalizeChannelId(channelId)], resetLoadedMessageTracking(channelId)) : (channelStates = {}, liveTurnCounts = {}, resetLoadedMessageTracking()), clearEligibleReplyPreviewMessages(channelId), (!channelId || normalizeChannelId(lastChannelId) === normalizeChannelId(channelId)) && (lastChannelId = null);
+      }
+      __name(reset, "reset");
+      function prepare(channelId) {
+        if (!channelId || normalizeChannelId(lastChannelId) === normalizeChannelId(channelId)) return;
+        let previousChannelId = lastChannelId;
+        previousChannelId && (clearChannelTranslationQueue(previousChannelId), resetLoadedMessageTracking(previousChannelId), onChannelSessionLeft(previousChannelId)), lastChannelId = channelId;
+        let channelState = getChannelState(channelId);
+        channelState.initialized = !1, channelState.boundaryMessageId = null, resetLoadedMessageTracking(channelId), clearEligibleReplyPreviewMessages(channelId), onChannelSessionStarted(channelId);
+      }
+      return __name(prepare, "prepare"), Object.freeze({
+        getChannelState,
+        getStartedLiveTurnCount: /* @__PURE__ */ __name((channelId) => liveTurnCounts[normalizeChannelId(channelId)] || 0, "getStartedLiveTurnCount"),
+        noteLiveTurnStarted,
+        reset,
+        prepare,
+        getLastChannelId: /* @__PURE__ */ __name(() => lastChannelId, "getLastChannelId")
+      });
+    }
+    __name(createLiveChannelSession, "createLiveChannelSession");
+    module2.exports = { createLiveChannelSession };
+  }
+});
+
 // src/orchestrator/live-translation-queue.js
 var require_live_translation_queue = __commonJS({
   "src/orchestrator/live-translation-queue.js"(exports2, module2) {
+    var { createLiveHandoffReservations } = require_live_handoff_reservations(), { createLiveRequestRegistry } = require_live_request_registry(), { createLiveChannelSession } = require_live_channel_session(), AUTO_TRANSLATION_QUEUE_RETRY_DELAY = 900, LIVE_AI_BATCH_ITEM_LIMIT = 10;
     function normalizeChannelId(channelId) {
       return channelId == null ? "" : String(channelId);
     }
@@ -5419,8 +5621,8 @@ var require_live_translation_queue = __commonJS({
     function createLiveTranslationQueue({
       setTimeout: scheduleTimer = null,
       clearTimeout: cancelTimer = null,
-      batchItemLimit = 10,
-      retryDelay = 900,
+      batchItemLimit = LIVE_AI_BATCH_ITEM_LIMIT,
+      retryDelay = AUTO_TRANSLATION_QUEUE_RETRY_DELAY,
       // Runtime facts the queue has to consult but must never own.
       isRuntimeActive = /* @__PURE__ */ __name(() => !0, "isRuntimeActive"),
       isTranslationEnabled = /* @__PURE__ */ __name(() => !1, "isTranslationEnabled"),
@@ -5464,61 +5666,23 @@ var require_live_translation_queue = __commonJS({
       commitCachedResult = /* @__PURE__ */ __name(() => null, "commitCachedResult"),
       translateSingleItem = /* @__PURE__ */ __name(() => Promise.resolve(), "translateSingleItem")
     } = {}) {
-      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), queue = [], queuedMessages = {}, liveRequests = {}, requestSequence = 0, runtimeGeneration = 0, busyTranslating = !1, liveAutoTranslating = !1, retryTimer = null, channelStates = {}, liveTurnCounts = {}, lastConsumedLiveRequests = {}, reservedLiveRequests = {}, lastChannelId = null;
-      function getRequestKey(messageId, channelId) {
-        return `${channelId || "__global"}:${String(messageId || "")}`;
-      }
-      __name(getRequestKey, "getRequestKey");
-      function releaseRequestDisplayPending(request) {
-        return request ? (releaseDisplayPending({
-          messageId: request.messageId,
-          channelId: request.channelId,
-          requestIdentity: String(request.id)
-        }), !0) : !1;
-      }
-      __name(releaseRequestDisplayPending, "releaseRequestDisplayPending");
-      function forgetQueuedRequest(request) {
-        request && queuedMessages[request.messageId] === request && delete queuedMessages[request.messageId];
-      }
-      __name(forgetQueuedRequest, "forgetQueuedRequest");
-      function finishRequest(request) {
-        if (!request) return !1;
-        clearReservedLiveRequest(request.channelId, String(request.id));
-        let key = getRequestKey(request.messageId, request.channelId);
-        return liveRequests[key] === request && delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), !0;
-      }
-      __name(finishRequest, "finishRequest");
-      function createRequest(message, channelId, originalContentData = null, signature = null) {
-        if (!message || !message.id || !channelId) return null;
-        let request = {
-          id: ++requestSequence,
-          generation: runtimeGeneration,
-          channelId,
-          messageId: String(message.id),
-          signature: signature || createTranslationSignature(message, channelId, originalContentData || extractOriginalContentData(message))
-        };
-        return liveRequests[getRequestKey(request.messageId, channelId)] = request, request;
-      }
-      __name(createRequest, "createRequest");
-      function isRequestCurrent(request, message = null) {
-        return !request || !isRuntimeActive() || request.generation !== runtimeGeneration || !isTranslationEnabled(request.channelId) || liveRequests[getRequestKey(request.messageId, request.channelId)] !== request ? !1 : message ? createTranslationSignature(message, request.channelId, extractOriginalContentData(message)) === request.signature : !0;
-      }
-      __name(isRequestCurrent, "isRequestCurrent");
-      function invalidateRequests(channelId = null) {
-        clearReservedLiveRequest(channelId), channelId || runtimeGeneration++;
-        let key = normalizeChannelId(channelId);
-        for (let requestKey of Object.keys(liveRequests)) {
-          let request = liveRequests[requestKey];
-          key && normalizeChannelId(request.channelId) !== key || (delete liveRequests[requestKey], forgetQueuedRequest(request), releaseRequestDisplayPending(request));
-        }
-      }
-      __name(invalidateRequests, "invalidateRequests");
-      function invalidateRequestForMessage(messageId, channelId, currentSignature) {
-        if (!messageId || !channelId || !currentSignature) return !1;
-        let key = getRequestKey(messageId, channelId), request = liveRequests[key];
-        return !request || request.signature === currentSignature ? !1 : (clearReservedLiveRequest(channelId, String(request.id)), delete liveRequests[key], forgetQueuedRequest(request), releaseRequestDisplayPending(request), !0);
-      }
-      __name(invalidateRequestForMessage, "invalidateRequestForMessage");
+      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), queue = [], busyTranslating = !1, liveAutoTranslating = !1, retryTimer = null, lastConsumedLiveRequests = {}, handoffReservations = createLiveHandoffReservations(), channelSession = createLiveChannelSession({
+        normalizeChannelId,
+        resetLoadedMessageTracking,
+        clearEligibleReplyPreviewMessages,
+        clearChannelTranslationQueue,
+        onChannelSessionLeft,
+        onChannelSessionStarted,
+        onLiveTurnStarted
+      }), requestRegistry = createLiveRequestRegistry({
+        normalizeChannelId,
+        isRuntimeActive,
+        isTranslationEnabled,
+        extractOriginalContentData,
+        createTranslationSignature,
+        releaseDisplayPending,
+        clearReservedLiveRequest: /* @__PURE__ */ __name((channelId, ticket) => clearReservedLiveRequest(channelId, ticket), "clearReservedLiveRequest")
+      });
       function cancelQueueRetry() {
         retryTimer && stopTimer(retryTimer), retryTimer = null;
       }
@@ -5530,32 +5694,17 @@ var require_live_translation_queue = __commonJS({
       }
       __name(scheduleQueueRetry, "scheduleQueueRetry");
       function clearQueue(channelId = null) {
-        if (invalidateRequests(channelId), !channelId) {
-          queue = [], queuedMessages = {}, lastConsumedLiveRequests = {}, reservedLiveRequests = {}, cancelQueueRetry();
+        if (requestRegistry.invalidateRequests(channelId), !channelId) {
+          queue = [], requestRegistry.clearAllQueuedMessages(), lastConsumedLiveRequests = {}, handoffReservations.clear(), cancelQueueRetry();
           return;
         }
         let key = normalizeChannelId(channelId);
         delete lastConsumedLiveRequests[key], clearReservedLiveRequest(channelId), queue = queue.filter((queueItem) => {
           let shouldRemove = !!(queueItem && queueItem.channel && normalizeChannelId(queueItem.channel.id) === key);
-          return shouldRemove && queueItem.message && queueItem.message.id && (!queueItem.liveRequest || queuedMessages[queueItem.message.id] === queueItem.liveRequest) && delete queuedMessages[queueItem.message.id], !shouldRemove;
+          return shouldRemove && queueItem.message && queueItem.message.id && requestRegistry.clearQueuedMessage(queueItem.message.id, queueItem.liveRequest || null), !shouldRemove;
         }), !queue.length && retryTimer && cancelQueueRetry();
       }
       __name(clearQueue, "clearQueue");
-      function getChannelState(channelId) {
-        if (!channelId) return null;
-        let key = normalizeChannelId(channelId);
-        return channelStates[key] || (channelStates[key] = { initialized: !1, boundaryMessageId: null }), channelStates[key];
-      }
-      __name(getChannelState, "getChannelState");
-      function getStartedLiveTurnCount(channelId) {
-        return liveTurnCounts[normalizeChannelId(channelId)] || 0;
-      }
-      __name(getStartedLiveTurnCount, "getStartedLiveTurnCount");
-      function noteLiveTurnStarted(channelId) {
-        let key = normalizeChannelId(channelId);
-        return key ? (liveTurnCounts[key] = (liveTurnCounts[key] || 0) + 1, onLiveTurnStarted(channelId, liveTurnCounts[key]), liveTurnCounts[key]) : 0;
-      }
-      __name(noteLiveTurnStarted, "noteLiveTurnStarted");
       function reserveQueuedLiveRequest(channelId) {
         let key = normalizeChannelId(channelId);
         if (!key) return null;
@@ -5563,46 +5712,34 @@ var require_live_translation_queue = __commonJS({
           let queueChannelId = queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message);
           if (!queueItem || queueItem.historicalLoad || normalizeChannelId(queueChannelId) !== key || !queueItem.liveRequest) continue;
           let ticket = String(queueItem.liveRequest.id);
-          return reservedLiveRequests[key] = ticket, ticket;
+          return handoffReservations.reserve(key, ticket);
         }
-        return delete reservedLiveRequests[key], null;
+        return handoffReservations.clear(key), null;
       }
       __name(reserveQueuedLiveRequest, "reserveQueuedLiveRequest");
       function clearReservedLiveRequest(channelId = null, ticket = null) {
-        if (!channelId)
-          return reservedLiveRequests = {}, !0;
-        let key = normalizeChannelId(channelId);
-        return !key || !reservedLiveRequests[key] || ticket != null && reservedLiveRequests[key] !== String(ticket) ? !1 : (delete reservedLiveRequests[key], !0);
+        return handoffReservations.clear(channelId, ticket);
       }
       __name(clearReservedLiveRequest, "clearReservedLiveRequest");
       function recordLiveRequestConsumption(request, reason = "single") {
         if (!request || !request.channelId) return null;
         let key = normalizeChannelId(request.channelId), ticket = String(request.id);
-        return key ? (lastConsumedLiveRequests[key] = ticket, reservedLiveRequests[key] === ticket && (delete reservedLiveRequests[key], onReservedLiveRequestConsumed(request.channelId, ticket, reason)), ticket) : null;
+        return key ? (lastConsumedLiveRequests[key] = ticket, handoffReservations.consume(request.channelId, ticket) && onReservedLiveRequestConsumed(request.channelId, ticket, reason), ticket) : null;
       }
       __name(recordLiveRequestConsumption, "recordLiveRequestConsumption");
       function takeNextQueueItem() {
         if (!queue.length) return null;
-        for (let index = 0; index < queue.length; index++) {
-          let queueItem = queue[index], queueChannelId = queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message), ticket = queueItem && queueItem.liveRequest ? String(queueItem.liveRequest.id) : null;
-          if (!(!ticket || reservedLiveRequests[normalizeChannelId(queueChannelId)] !== ticket))
-            return queue.splice(index, 1), queueItem;
-        }
-        return queue.shift();
+        let reservedIndex = handoffReservations.findNextQueueIndex(queue, (queueItem) => ({
+          channelId: queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message),
+          ticket: queueItem && queueItem.liveRequest ? queueItem.liveRequest.id : null
+        }));
+        return reservedIndex >= 0 ? queue.splice(reservedIndex, 1)[0] : queue.shift();
       }
       __name(takeNextQueueItem, "takeNextQueueItem");
       function resetTracking(channelId = null) {
-        channelId ? (delete channelStates[normalizeChannelId(channelId)], delete liveTurnCounts[normalizeChannelId(channelId)], delete lastConsumedLiveRequests[normalizeChannelId(channelId)], delete reservedLiveRequests[normalizeChannelId(channelId)], resetLoadedMessageTracking(channelId)) : (channelStates = {}, liveTurnCounts = {}, lastConsumedLiveRequests = {}, reservedLiveRequests = {}, resetLoadedMessageTracking()), clearEligibleReplyPreviewMessages(channelId), (!channelId || normalizeChannelId(lastChannelId) === normalizeChannelId(channelId)) && (lastChannelId = null);
+        channelId ? (delete lastConsumedLiveRequests[normalizeChannelId(channelId)], handoffReservations.clear(channelId)) : (lastConsumedLiveRequests = {}, handoffReservations.clear()), channelSession.reset(channelId);
       }
       __name(resetTracking, "resetTracking");
-      function prepareChannelSession(channelId) {
-        if (!channelId || normalizeChannelId(lastChannelId) === normalizeChannelId(channelId)) return;
-        let previousChannelId = lastChannelId;
-        previousChannelId && (clearChannelTranslationQueue(previousChannelId), resetLoadedMessageTracking(previousChannelId), onChannelSessionLeft(previousChannelId)), lastChannelId = channelId;
-        let channelState = getChannelState(channelId);
-        channelState.initialized = !1, channelState.boundaryMessageId = null, resetLoadedMessageTracking(channelId), clearEligibleReplyPreviewMessages(channelId), onChannelSessionStarted(channelId);
-      }
-      __name(prepareChannelSession, "prepareChannelSession");
       function createQueueItem(message, channel, originalContentData = null, queueOptions = {}) {
         let normalizedOriginalContentData = originalContentData || extractOriginalContentData(message);
         return {
@@ -5626,8 +5763,8 @@ var require_live_translation_queue = __commonJS({
         let queueItem = createQueueItem(message, channel, originalContentData, queueOptions);
         if (queueItem.historicalLoad) return collectHistoricalMessage(queueItem);
         let channelId = channel && channel.id || getMessageChannelId(message);
-        if (queueItem.liveRequest = createRequest(message, channelId, queueItem.originalContentData), !queueItem.liveRequest) return !1;
-        queuedMessages[message.id] = queueItem.liveRequest;
+        if (queueItem.liveRequest = requestRegistry.createRequest(message, channelId, queueItem.originalContentData), !queueItem.liveRequest) return !1;
+        requestRegistry.markMessageQueued(message.id, queueItem.liveRequest);
         let pendingMark = markDisplayPending({
           messageId: message.id,
           channelId,
@@ -5645,7 +5782,7 @@ var require_live_translation_queue = __commonJS({
       __name(beginProcessing, "beginProcessing");
       function completeCommit(queueItem, channelId, commit) {
         let finish = /* @__PURE__ */ __name((outcome) => {
-          outcome && outcome.deferredIds && outcome.deferredIds.length && scheduleDisplayFlush(channelId, queueItem.message.id), finishRequest(queueItem.liveRequest);
+          outcome && outcome.deferredIds && outcome.deferredIds.length && scheduleDisplayFlush(channelId, queueItem.message.id), requestRegistry.finishRequest(queueItem.liveRequest);
         }, "finish");
         return Promise.resolve(commit).then(finish, (_) => finish(null));
       }
@@ -5657,7 +5794,7 @@ var require_live_translation_queue = __commonJS({
       }
       __name(handleCachedItem, "handleCachedItem");
       function handleGuardFailure(queueItem) {
-        return !queueItem || shouldAutoTranslateMessage(queueItem.message, queueItem.channel, queueItem.originalContentData, !0) ? !1 : (recordLiveRequestConsumption(queueItem.liveRequest, "guard"), finishRequest(queueItem.liveRequest), !0);
+        return !queueItem || shouldAutoTranslateMessage(queueItem.message, queueItem.channel, queueItem.originalContentData, !0) ? !1 : (recordLiveRequestConsumption(queueItem.liveRequest, "guard"), requestRegistry.finishRequest(queueItem.liveRequest), !0);
       }
       __name(handleGuardFailure, "handleGuardFailure");
       function collectBatchItems(firstItem) {
@@ -5683,8 +5820,8 @@ var require_live_translation_queue = __commonJS({
       }
       __name(commitBurstItem, "commitBurstItem");
       function requeueBurstItem(queueItem, settled) {
-        if (settled.add(queueItem), queueItem.skipLiveBatch = !0, !isRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-          finishRequest(queueItem.liveRequest);
+        if (settled.add(queueItem), queueItem.skipLiveBatch = !0, !requestRegistry.isRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+          requestRegistry.finishRequest(queueItem.liveRequest);
           return;
         }
         queue.unshift(queueItem);
@@ -5697,8 +5834,8 @@ var require_live_translation_queue = __commonJS({
           let context = createBurstContext(channelId), prepared = [];
           for (let queueItem of items)
             try {
-              if (!isRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-                settled.add(queueItem), finishRequest(queueItem.liveRequest);
+              if (!requestRegistry.isRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+                settled.add(queueItem), requestRegistry.finishRequest(queueItem.liveRequest);
                 continue;
               }
               let preparedItem = prepareBurstItem(queueItem, channelId, context);
@@ -5711,7 +5848,7 @@ var require_live_translation_queue = __commonJS({
               requeueBurstItem(queueItem, settled);
             }
           if (!prepared.length) return;
-          noteLiveTurnStarted(channelId);
+          channelSession.noteLiveTurnStarted(channelId);
           for (let preparedItem of prepared) if (preparedItem && preparedItem.queueItem && preparedItem.queueItem.liveRequest && recordLiveRequestConsumption(preparedItem.queueItem.liveRequest, "burst")) break;
           let resultMap = null;
           try {
@@ -5728,8 +5865,8 @@ var require_live_translation_queue = __commonJS({
                 requeueBurstItem(queueItem, settled);
                 continue;
               }
-              if (resolved.status !== "skipped" && !isRequestCurrent(queueItem.liveRequest, queueItem.message)) {
-                settled.add(queueItem), finishRequest(queueItem.liveRequest);
+              if (resolved.status !== "skipped" && !requestRegistry.isRequestCurrent(queueItem.liveRequest, queueItem.message)) {
+                settled.add(queueItem), requestRegistry.finishRequest(queueItem.liveRequest);
                 continue;
               }
               settled.add(queueItem), commits.push(commitBurstItem(queueItem, channelId, resolved.result));
@@ -5742,7 +5879,7 @@ var require_live_translation_queue = __commonJS({
           for (let queueItem of items)
             if (!settled.has(queueItem))
               try {
-                finishRequest(queueItem.liveRequest);
+                requestRegistry.finishRequest(queueItem.liveRequest);
               } catch {
               }
           liveAutoTranslating = !1, processQueue();
@@ -5751,10 +5888,10 @@ var require_live_translation_queue = __commonJS({
       __name(translateBurst, "translateBurst");
       function translateSingle(queueItem) {
         let channelId = queueItem && queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem && queueItem.message);
-        noteLiveTurnStarted(channelId), liveAutoTranslating = !0, recordLiveRequestConsumption(queueItem && queueItem.liveRequest, "single"), translateSingleItem(queueItem).then((_) => {
-          finishRequest(queueItem.liveRequest), liveAutoTranslating = !1, processQueue();
+        channelSession.noteLiveTurnStarted(channelId), liveAutoTranslating = !0, recordLiveRequestConsumption(queueItem && queueItem.liveRequest, "single"), translateSingleItem(queueItem).then((_) => {
+          requestRegistry.finishRequest(queueItem.liveRequest), liveAutoTranslating = !1, processQueue();
         }).catch((_) => {
-          finishRequest(queueItem.liveRequest), liveAutoTranslating = !1, processQueue();
+          requestRegistry.finishRequest(queueItem.liveRequest), liveAutoTranslating = !1, processQueue();
         });
       }
       __name(translateSingle, "translateSingle");
@@ -5776,37 +5913,28 @@ var require_live_translation_queue = __commonJS({
       }
       return __name(processQueue, "processQueue"), Object.freeze({
         // Live request registry.
-        getRequestKey,
-        createRequest,
-        isRequestCurrent,
-        finishRequest,
-        releaseRequestDisplayPending,
-        invalidateRequests,
-        invalidateRequestForMessage,
+        getRequestKey: requestRegistry.getRequestKey,
+        createRequest: requestRegistry.createRequest,
+        isRequestCurrent: requestRegistry.isRequestCurrent,
+        finishRequest: requestRegistry.finishRequest,
+        releaseRequestDisplayPending: requestRegistry.releaseRequestDisplayPending,
+        invalidateRequests: requestRegistry.invalidateRequests,
+        invalidateRequestForMessage: requestRegistry.invalidateRequestForMessage,
         // A restart retires every in-flight request without releasing display pending
         // records, because the display runtime is reset separately on start.
         restartRequestGeneration() {
-          runtimeGeneration++, liveRequests = {}, lastConsumedLiveRequests = {}, reservedLiveRequests = {};
+          requestRegistry.restartRequestGeneration(), lastConsumedLiveRequests = {}, handoffReservations.clear();
         },
-        getRuntimeGeneration: /* @__PURE__ */ __name(() => runtimeGeneration, "getRuntimeGeneration"),
+        getRuntimeGeneration: requestRegistry.getRuntimeGeneration,
         // Queued-message markers. Historical jobs park their own marker shape here so a
         // single lookup answers "is this message already spoken for".
-        isMessageQueued: /* @__PURE__ */ __name((messageId) => !!queuedMessages[messageId], "isMessageQueued"),
-        getQueuedMarker: /* @__PURE__ */ __name((messageId) => queuedMessages[messageId] || null, "getQueuedMarker"),
-        markMessageQueued(messageId, marker) {
-          return queuedMessages[messageId] = marker, marker;
-        },
-        clearQueuedMessage(messageId) {
-          delete queuedMessages[messageId];
-        },
-        // Only the job that placed the marker may remove it; a later job has already
-        // claimed the message and still needs it to read as pending.
-        clearHistoricalQueuedMessage(messageId, jobId) {
-          let marker = messageId && queuedMessages[messageId];
-          return !marker || marker.type !== "historical" || marker.jobId !== jobId ? !1 : (delete queuedMessages[messageId], !0);
-        },
+        isMessageQueued: requestRegistry.isMessageQueued,
+        getQueuedMarker: requestRegistry.getQueuedMarker,
+        markMessageQueued: requestRegistry.markMessageQueued,
+        clearQueuedMessage: requestRegistry.clearQueuedMessage,
+        clearHistoricalQueuedMessage: requestRegistry.clearHistoricalQueuedMessage,
         clearAllQueuedMessages() {
-          queuedMessages = {}, lastConsumedLiveRequests = {}, reservedLiveRequests = {};
+          requestRegistry.clearAllQueuedMessages(), lastConsumedLiveRequests = {}, handoffReservations.clear();
         },
         // Queue contents and order.
         createQueueItem,
@@ -5824,7 +5952,7 @@ var require_live_translation_queue = __commonJS({
         reserveQueuedLiveRequest,
         clearReservedLiveRequest,
         getLastConsumedLiveRequestTicket: /* @__PURE__ */ __name((channelId) => lastConsumedLiveRequests[normalizeChannelId(channelId)] || null, "getLastConsumedLiveRequestTicket"),
-        getStartedLiveTurnCount,
+        getStartedLiveTurnCount: channelSession.getStartedLiveTurnCount,
         // A copy: a reader must not be able to reorder the queue behind this module's back.
         getQueueSnapshot: /* @__PURE__ */ __name(() => queue.slice(), "getQueueSnapshot"),
         collectBatchItems,
@@ -5847,16 +5975,16 @@ var require_live_translation_queue = __commonJS({
         cancelQueueRetry,
         hasPendingQueueRetry: /* @__PURE__ */ __name(() => !!retryTimer, "hasPendingQueueRetry"),
         // Per-channel session bookkeeping.
-        getChannelState,
-        prepareChannelSession,
+        getChannelState: channelSession.getChannelState,
+        prepareChannelSession: channelSession.prepare,
         resetTracking,
-        getLastChannelId: /* @__PURE__ */ __name(() => lastChannelId, "getLastChannelId")
+        getLastChannelId: channelSession.getLastChannelId
       });
     }
     __name(createLiveTranslationQueue, "createLiveTranslationQueue");
     module2.exports = {
-      AUTO_TRANSLATION_QUEUE_RETRY_DELAY: 900,
-      LIVE_AI_BATCH_ITEM_LIMIT: 10,
+      AUTO_TRANSLATION_QUEUE_RETRY_DELAY,
+      LIVE_AI_BATCH_ITEM_LIMIT,
       createLiveTranslationQueue
     };
   }
@@ -11140,13 +11268,13 @@ __________________ __________________ __________________
             let entry = this.getHistoricalTranslationJobQueue(channelId, !1);
             if (!entry) return !1;
             let job = [...entry.jobs].reverse().find((candidate) => candidate && candidate.state == "collecting" && !candidate.sealed);
-            return job ? (job.seal(), entry.runningPromise || this.startCollectedHistoricalTranslationJobs(channelId, { sealCurrent: !1 }), !0) : !1;
+            return job ? (job.seal(), !entry.runningPromise && !entry.pendingLiveHandoffTicket && this.startCollectedHistoricalTranslationJobs(channelId, { sealCurrent: !1 }), !0) : !1;
           }
           startCollectedHistoricalTranslationJobs(channelId, options = {}) {
             let entry = this.getHistoricalTranslationJobQueue(channelId, !1);
             if (!entry) return Promise.resolve(null);
             let config = Object.assign({ sealCurrent: !0 }, options);
-            if (entry.startToken = null, entry.runningPromise) return entry.runningPromise;
+            if (entry.startToken = null, entry.runningPromise || entry.pendingLiveHandoffTicket) return entry.runningPromise || Promise.resolve(null);
             let job = entry.jobs.find((candidate) => candidate && candidate.state == "collecting" && candidate.sealed);
             if (!job && config.sealCurrent && (job = entry.jobs.find((candidate) => candidate && candidate.state == "collecting"), job && job.seal()), !job) return Promise.resolve(null);
             job.lastConsumedLiveRequestTicketAtStart = this.ensureLiveTranslationQueue().getLastConsumedLiveRequestTicket(channelId);
@@ -11170,7 +11298,7 @@ __________________ __________________ __________________
           async waitForHistoricalTranslationJobs(channelId) {
             for (; ; ) {
               let entry = this.getHistoricalTranslationJobQueue(channelId, !1);
-              if (!entry || (!entry.runningPromise && entry.jobs.length && this.startCollectedHistoricalTranslationJobs(channelId), !entry.runningPromise)) return;
+              if (!entry || (!entry.runningPromise && entry.jobs.length && !entry.pendingLiveHandoffTicket && this.startCollectedHistoricalTranslationJobs(channelId), !entry.runningPromise)) return;
               await entry.runningPromise;
             }
           }
@@ -11204,7 +11332,7 @@ __________________ __________________ __________________
           cancelHistoricalTranslationJobs(channelId = null, reason = "cancelled") {
             let entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
             for (let entry of entries) {
-              entry.generation++, entry.startToken = null, entry.pendingLiveHandoffTicket = null;
+              entry.generation++, this.ensureLiveTranslationQueue().clearReservedLiveRequest(entry.channelId, entry.pendingLiveHandoffTicket), entry.startToken = null, entry.pendingLiveHandoffTicket = null;
               for (let job of entry.jobs) {
                 job.cancel(reason);
                 for (let record of job.items.values()) record.source && record.source.message && this.ensureLiveTranslationQueue().clearQueuedMessage(record.source.message.id);

@@ -195,6 +195,21 @@ test("the queue is newest-first: enqueue unshifts and processing shifts the head
 	assert.deepEqual(harness.log.single, ["m3", "m2"], "the queue resumes itself after each item");
 });
 
+test("the oldest reservation wins even when another channel reserves a newer queue item", async () => {
+	const harness = createHarness();
+	harness.queue.setBusyTranslating(true);
+	const firstReserved = harness.addLiveItem("m1", "c1");
+	assert.equal(harness.queue.reserveQueuedLiveRequest("c1"), String(firstReserved.liveRequest.id));
+	const laterReserved = harness.addLiveItem("m2", "c2");
+	assert.equal(harness.queue.reserveQueuedLiveRequest("c2"), String(laterReserved.liveRequest.id));
+
+	harness.queue.setBusyTranslating(false);
+	harness.queue.processQueue();
+
+	assert.deepEqual(harness.log.single, ["m1"], "a later unrelated reservation must not delay the first parked handoff");
+	await harness.resolveSingle(0);
+});
+
 test("only one live translation runs at a time and the lock is released on failure", async () => {
 	const harness = createHarness();
 	harness.addLiveItem("m1", "c1");
