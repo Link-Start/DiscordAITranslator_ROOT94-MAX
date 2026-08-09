@@ -2112,6 +2112,7 @@ test("a reply preview translation is committed when the provider answers", () =>
 	const message = {id: "preview-msg-1", channel_id: "channel-preview", content: "Good morning", embeds: [], author: {id: "other-user"}};
 	let capturedCallback = null;
 	plugin.translateText = (text, place, callback) => {capturedCallback = callback;};
+	plugin.scheduleTranslationRerender = () => {throw new Error("reply preview commits must not use the broad repaint scheduler");};
 
 	plugin.queueReplyPreviewTranslation(message, "channel-preview", message);
 	assert.ok(capturedCallback, "the preview should have asked the provider");
