@@ -5,7 +5,8 @@ function createLiveRequestRegistry({
 	extractOriginalContentData = () => null,
 	createTranslationSignature = () => null,
 	releaseDisplayPending = () => {},
-	clearReservedLiveRequest = () => false
+	clearReservedLiveRequest = () => false,
+	retireReservedLiveRequest = () => false
 } = {}) {
 	let queuedMessages = {};
 	let liveRequests = {};
@@ -32,11 +33,11 @@ function createLiveRequestRegistry({
 
 	function finishRequest(request) {
 		if (!request) return false;
-		clearReservedLiveRequest(request.channelId, String(request.id));
 		const key = getRequestKey(request.messageId, request.channelId);
 		if (liveRequests[key] === request) delete liveRequests[key];
 		forgetQueuedRequest(request);
 		releaseRequestDisplayPending(request);
+		retireReservedLiveRequest(request.channelId, String(request.id), "request-finished");
 		return true;
 	}
 
@@ -78,10 +79,10 @@ function createLiveRequestRegistry({
 		const key = getRequestKey(messageId, channelId);
 		const request = liveRequests[key];
 		if (!request || request.signature === currentSignature) return false;
-		clearReservedLiveRequest(channelId, String(request.id));
 		delete liveRequests[key];
 		forgetQueuedRequest(request);
 		releaseRequestDisplayPending(request);
+		retireReservedLiveRequest(channelId, String(request.id), "source-invalidated");
 		return true;
 	}
 

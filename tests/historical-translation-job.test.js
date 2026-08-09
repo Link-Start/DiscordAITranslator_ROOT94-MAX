@@ -1853,6 +1853,56 @@ test("direct historical cancellation retires the parked live reservation", async
 	}
 });
 
+test("invalidating a reserved live request reassigns or releases its historical handoff", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const requests = [];
+	const providerOrder = [];
+	const channelId = "channel-history-job";
+	try {
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			const ids = preparedItems.map(item => String(item.message.id));
+			const type = ids.some(id => Number(id) >= 300) ? "live-burst" : "historical";
+			providerOrder.push(`${type}:${ids.join(",")}`);
+			const deferred = createDeferred();
+			requests.push({ids, deferred});
+			return deferred.promise;
+		};
+		plugin.applyStoredTranslationToMessage = () => ({});
+		plugin.rerenderMessagesWithScrollPreserved = () => {};
+
+		plugin.queueAutoTranslateMessage(createMessage("100", "first historical"), {id: channelId}, {content: "first historical"}, {historicalLoad: true});
+		const firstRunning = plugin.startCollectedHistoricalTranslationJobs(channelId);
+		await new Promise(resolve => setImmediate(resolve));
+		plugin.queueAutoTranslateMessage(createMessage("200", "follow-up historical"), {id: channelId}, {content: "follow-up historical"}, {historicalLoad: true});
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(true);
+		plugin.queueAutoTranslateMessage(createMessage("300", "reserved live"), {id: channelId}, {content: "reserved live"});
+
+		requests[0].deferred.resolve({"100": "第一条"});
+		await firstRunning;
+		await new Promise(resolve => setImmediate(resolve));
+		const edited = createMessage("300", "edited live source");
+		const editedSignature = plugin.createReceivedTranslationSignature(edited, channelId, {content: edited.content});
+		assert.equal(plugin.invalidateLiveTranslationMessage("300", channelId, editedSignature), true);
+		plugin.queueAutoTranslateMessage(createMessage("400", "replacement live"), {id: channelId}, {content: "replacement live"});
+
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
+		plugin.processAutoTranslationQueue();
+		await new Promise(resolve => setImmediate(resolve));
+		const liveRequest = requests.find(request => request.ids.includes("400"));
+		assert.ok(liveRequest, "the replacement live request still receives the next provider turn");
+		liveRequest.deferred.resolve({"400": "第四条"});
+		await new Promise(resolve => setImmediate(resolve));
+		await new Promise(resolve => setImmediate(resolve));
+
+		assert.ok(providerOrder.includes("historical:200"), "retiring the old ticket must not leave the sealed historical job parked forever");
+	}
+	finally {
+		for (const request of requests) request.deferred.resolve({});
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
+		plugin.cancelHistoricalTranslationJobs(channelId, "test-cleanup");
+	}
+});
+
 test("cached historical translations commit without a provider request", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin();
 	let providerRequests = 0;

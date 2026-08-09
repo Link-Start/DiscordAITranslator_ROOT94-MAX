@@ -2,7 +2,7 @@ function normalizeIdentity(value) {
 	return value == null ? "" : String(value);
 }
 
-function createLiveHandoffReservations() {
+function createLiveHandoffReservations({onRetired = () => {}} = {}) {
 	let sequence = 0;
 	const reservations = new Map();
 
@@ -37,6 +37,12 @@ function createLiveHandoffReservations() {
 		return true;
 	}
 
+	function retire(channelId, ticket, reason = "retired") {
+		if (!clear(channelId, ticket)) return false;
+		onRetired(channelId, normalizeIdentity(ticket), reason);
+		return true;
+	}
+
 	function findNextQueueIndex(queue, getIdentity) {
 		let selectedIndex = -1;
 		let selectedOrder = Infinity;
@@ -50,7 +56,7 @@ function createLiveHandoffReservations() {
 		return selectedIndex;
 	}
 
-	return Object.freeze({reserve, clear, consume, findNextQueueIndex});
+	return Object.freeze({reserve, clear, consume, retire, findNextQueueIndex});
 }
 
 module.exports = {createLiveHandoffReservations};

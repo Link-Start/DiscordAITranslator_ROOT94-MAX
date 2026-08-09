@@ -50,6 +50,7 @@ function createLiveTranslationQueue({
 	onChannelSessionStarted = () => {},
 	onLiveTurnStarted = () => {},
 	onReservedLiveRequestConsumed = () => {},
+	onReservedLiveRequestRetired = () => {},
 	// Translation policy. Everything below decides what a translation IS; the queue only
 	// decides when it runs, in what order, and what happens to the item afterwards.
 	getBatchEngineKey = () => null,
@@ -73,7 +74,7 @@ function createLiveTranslationQueue({
 	let liveAutoTranslating = false;
 	let retryTimer = null;
 	let lastConsumedLiveRequests = {};
-	const handoffReservations = createLiveHandoffReservations();
+	const handoffReservations = createLiveHandoffReservations({onRetired: onReservedLiveRequestRetired});
 	const channelSession = createLiveChannelSession({
 		normalizeChannelId,
 		resetLoadedMessageTracking,
@@ -90,7 +91,8 @@ function createLiveTranslationQueue({
 		extractOriginalContentData,
 		createTranslationSignature,
 		releaseDisplayPending,
-		clearReservedLiveRequest: (channelId, ticket) => clearReservedLiveRequest(channelId, ticket)
+		clearReservedLiveRequest: handoffReservations.clear,
+		retireReservedLiveRequest: handoffReservations.retire
 	});
 
 	function cancelQueueRetry() {
@@ -118,7 +120,7 @@ function createLiveTranslationQueue({
 		}
 		const key = normalizeChannelId(channelId);
 		delete lastConsumedLiveRequests[key];
-		clearReservedLiveRequest(channelId);
+		handoffReservations.clear(channelId);
 		queue = queue.filter(queueItem => {
 			const shouldRemove = !!(queueItem && queueItem.channel && normalizeChannelId(queueItem.channel.id) === key);
 			if (shouldRemove && queueItem.message && queueItem.message.id) requestRegistry.clearQueuedMessage(queueItem.message.id, queueItem.liveRequest || null);
@@ -134,16 +136,12 @@ function createLiveTranslationQueue({
 		if (!key) return null;
 		for (const queueItem of queue) {
 			const queueChannelId = queueItem && queueItem.channel && queueItem.channel.id || queueItem && getMessageChannelId(queueItem.message);
-			if (!queueItem || queueItem.historicalLoad || normalizeChannelId(queueChannelId) !== key || !queueItem.liveRequest) continue;
+			if (!queueItem || queueItem.historicalLoad || normalizeChannelId(queueChannelId) !== key || !queueItem.liveRequest || !requestRegistry.isRequestCurrent(queueItem.liveRequest)) continue;
 			const ticket = String(queueItem.liveRequest.id);
 			return handoffReservations.reserve(key, ticket);
 		}
 		handoffReservations.clear(key);
 		return null;
-	}
-
-	function clearReservedLiveRequest(channelId = null, ticket = null) {
-		return handoffReservations.clear(channelId, ticket);
 	}
 
 	function recordLiveRequestConsumption(request, reason = "single") {
@@ -458,7 +456,7 @@ function createLiveTranslationQueue({
 			return !!key && queue.some(queueItem => queueItem && !queueItem.historicalLoad && normalizeChannelId(queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem.message)) === key);
 		},
 		reserveQueuedLiveRequest,
-		clearReservedLiveRequest,
+		clearReservedLiveRequest: handoffReservations.clear,
 		getLastConsumedLiveRequestTicket: channelId => lastConsumedLiveRequests[normalizeChannelId(channelId)] || null,
 		getStartedLiveTurnCount: channelSession.getStartedLiveTurnCount,
 		// A copy: a reader must not be able to reorder the queue behind this module's back.

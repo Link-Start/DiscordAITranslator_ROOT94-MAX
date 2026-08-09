@@ -73,6 +73,7 @@ module.exports = (_ => {
 		const {createProviderClient, translationEngines, enginePortals} = require("../providers/provider-client");
 		const {createSentTranslationStore} = require("../sent/sent-translation-store");
 		const {createLiveTranslationQueue} = require("../orchestrator/live-translation-queue");
+		const {resumeHistoricalHandoff} = require("../orchestrator/historical-handoff-runtime");
 		const {createHistoricalJobRegistry} = require("../orchestrator/historical-job-registry");
 		const {HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX} = require("../orchestrator/historical-translation-job");
 		const {createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION} = require("../protection/protection-logic");
@@ -2685,10 +2686,7 @@ module.exports = (_ => {
 			processAutoTranslationQueue () {
 				return this.ensureLiveTranslationQueue().processQueue();
 			}
-			resumeQueuedHistoricalTranslationJobs (channelId = null, handoffTicket = null) {
-				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
-				for (const entry of entries) if (entry && !entry.runningPromise && entry.jobs.some(job => job && job.state == "collecting" && job.sealed) && (entry.pendingLiveHandoffTicket == null || handoffTicket != null && String(handoffTicket) == String(entry.pendingLiveHandoffTicket))) { entry.pendingLiveHandoffTicket = null; this.startCollectedHistoricalTranslationJobs(entry.channelId, {sealCurrent: false}); }
-			}
+			resumeQueuedHistoricalTranslationJobs (channelId = null, handoffTicket = null, options = {}) {return resumeHistoricalHandoff(this, channelId, handoffTicket, options);}
 			forceUpdateAll () {
 				this.ensureSettingsStore().reload();
 				this.ensureTranslationCacheStore().loadPersisted();
@@ -2945,6 +2943,7 @@ module.exports = (_ => {
 					// new_only hides what is already on screen, so a fresh session drops the automatic records the previous one painted.
 					onChannelSessionStarted: channelId => this.getReceivedAutoTranslateScope() == "new_only" && this.clearDisplayedAutoTranslations(channelId),
 					onReservedLiveRequestConsumed: (channelId, handoffTicket) => this.resumeQueuedHistoricalTranslationJobs(channelId, handoffTicket),
+					onReservedLiveRequestRetired: (channelId, handoffTicket) => this.resumeQueuedHistoricalTranslationJobs(channelId, handoffTicket, {retired: true}),
 					getBatchEngineKey: channelId => this.getHistoricalAiBatchEngineKey(channelId),
 					createBurstContext: channelId => ({
 					engineKey: this.getHistoricalAiBatchEngineKey(channelId),
