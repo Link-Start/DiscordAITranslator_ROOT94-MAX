@@ -107,6 +107,7 @@ function createBaseRecord(messageId, channelId) {
 		status: MESSAGE_STATUSES.IDLE,
 		translation: null,
 		restoredTranslation: null,
+		restoredPreview: null,
 		reason: null,
 		origin: null,
 		manualOptions: null,
@@ -273,7 +274,15 @@ function createMessageStateStore({journal = null} = {}) {
 	function clearPreviewState(messageId) {
 		const record = records.get(normalizeIdentity(messageId));
 		if (record) clearPreviewHostMappings(previewChannelIdOf(record), [record.messageId]);
-		return updateProjection(messageId, {preview: null, previewSignature: null, previewPending: null});
+		return updateProjection(messageId, {
+			// The reply component may still hold the translated preview object until its
+			// host row repaints. Retain proof of that paint so the stable-original resolver
+			// can recover originalContent without exposing it as an active projection.
+			restoredPreview: record && record.preview ? freezeValue(record.preview) : record && record.restoredPreview || null,
+			preview: null,
+			previewSignature: null,
+			previewPending: null
+		});
 	}
 
 	function getPreviewHostMessageIds(channelId, referencedMessageIds = null) {
@@ -399,7 +408,10 @@ function createMessageStateStore({journal = null} = {}) {
 		pruneChannel(channelId) {
 			const normalizedChannelId = normalizeIdentity(channelId);
 			const inFlightStatuses = new Set([MESSAGE_STATUSES.PENDING, MESSAGE_STATUSES.TRANSLATING]);
-			const pruned = listChannel(normalizedChannelId).filter(record => record.origin !== MESSAGE_ORIGINS.MANUAL && !inFlightStatuses.has(record.status) && (record.status !== MESSAGE_STATUSES.CANCELLED || record.renderStatus === RENDER_STATUSES.CONFIRMED) && !record.archive && !record.suppressed && !record.previewPending).filter(deleteRecord);
+			const pruned = listChannel(normalizedChannelId).filter(record => {
+				const activeManualDisplay = record.origin === MESSAGE_ORIGINS.MANUAL && record.status === MESSAGE_STATUSES.TRANSLATED;
+				return !activeManualDisplay && !inFlightStatuses.has(record.status) && (record.status !== MESSAGE_STATUSES.CANCELLED || record.renderStatus === RENDER_STATUSES.CONFIRMED) && !record.archive && !record.suppressed && !record.previewPending;
+			}).filter(deleteRecord);
 			previewEligibility.delete(normalizedChannelId);
 			clearPreviewHostMappings(normalizedChannelId);
 			if (!channelMessageIds.has(normalizedChannelId)) {
@@ -481,9 +493,9 @@ function createMessageStateStore({journal = null} = {}) {
 			const record = records.get(normalizeIdentity(messageId));
 			return restoreRecords(record ? [record] : [], reason, origins);
 		},
-		// Disabling a channel only withdraws what the channel put there; a manual translation
-		// is an explicit per-message decision and outlives the channel switch.
-		restoreChannel(channelId, reason = "channel-disabled", {origins = [MESSAGE_ORIGINS.AUTOMATIC]} = {}) {
+		// A channel disable is the broader and newer user command: it restores one clean
+		// original-language view regardless of how each visible translation was requested.
+		restoreChannel(channelId, reason = "channel-disabled", {origins = ALL_MESSAGE_ORIGINS} = {}) {
 			return restoreRecords(listChannel(channelId), reason, origins);
 		},
 		restoreAll(reason = "plugin-stopped", {origins = ALL_MESSAGE_ORIGINS} = {}) {
@@ -581,6 +593,13 @@ function createMessageStateStore({journal = null} = {}) {
 				.filter(record => record.suppressed)
 				.map(record => updateProjection(record.messageId, {suppressed: false}));
 		},
+		clearChannelSuppression(channelId) {
+			const normalizedChannelId = normalizeIdentity(channelId);
+			if (!normalizedChannelId) return [];
+			return listChannel(normalizedChannelId)
+				.filter(record => record.suppressed)
+				.map(record => updateProjection(record.messageId, {suppressed: false}));
+		},
 		commitPreviewResult(result) {
 			if (!result || typeof result !== "object") return null;
 			const messageId = normalizeIdentity(result.messageId);
@@ -590,6 +609,7 @@ function createMessageStateStore({journal = null} = {}) {
 			const preview = freezeValue({...result.translation, channelId: result.translation.channelId || channelId || record.channelId || null});
 			return recordTransition(updateProjection(messageId, {
 				preview,
+				restoredPreview: null,
 				// Never compared against sourceSignature: the preview signature is hashed over
 				// content alone while the source signature includes embeds, so one field cannot
 				// answer both questions.
@@ -638,11 +658,12 @@ function createMessageStateStore({journal = null} = {}) {
 			return null;
 		},
 		// Preview first: the stable-original resolver walks candidates looking for the oldest
-		// surviving original, and the preview keeps one after the message translation replaced it.
+		// surviving original. The restored candidates remain only as proof that already-painted
+		// reply props came from the plugin; neither is exposed as an active reply translation.
 		getPreviewCandidates(messageId) {
 			const record = records.get(normalizeIdentity(messageId));
 			if (!record) return [];
-			return [record.preview, getDisplayedTranslation(record)].filter(Boolean);
+			return [record.preview, getDisplayedTranslation(record), record.restoredTranslation, record.restoredPreview].filter(Boolean);
 		},
 		// Message first: what the message itself displays outranks the preview-only translation
 		// when the reply header decides which text to paint.

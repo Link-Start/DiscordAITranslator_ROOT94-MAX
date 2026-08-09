@@ -137,10 +137,11 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			if (!records.length) return createEmptyOutcome();
 			return refresh ? refreshRecords(records) : createEmptyOutcome({deferredIds: records.map(record => record.messageId)});
 		},
-		async restoreChannel(channelId, {clearPreviews = false} = {}) {
+		async restoreChannel(channelId, {clearPreviews = false, clearSuppressions = false} = {}) {
 			const previewHostMessageIds = clearPreviews ? store.getPreviewHostMessageIds(channelId) : [];
 			const changed = store.restoreChannel(channelId);
 			if (clearPreviews) changed.push(...store.clearPreviews(channelId));
+			if (clearSuppressions) store.clearChannelSuppression(channelId);
 			const messageIds = [...new Set(changed.map(record => record.messageId))];
 			return refreshRecords(messageIds.map(messageId => store.getDisplayState(messageId)).filter(Boolean), {ownerMessageIds: previewHostMessageIds});
 		},

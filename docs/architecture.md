@@ -284,7 +284,7 @@ Prefetched records stay in plugin-owned job and translation state. The source do
 
 ## Display Transaction And Host Ownership
 
-Translation state and Discord component ownership are related but distinct. A display transaction contains translated message IDs plus any host-row IDs whose reply previews project those translations. The channel-isolated mapping is one referenced message ID to zero or more host reply-row IDs.
+Translation state and Discord component ownership are related but distinct. A display transaction contains translated message IDs plus any host-row IDs whose reply previews project those translations. The channel-isolated mapping is one referenced message ID to zero or more host reply-row IDs. Clearing a preview retains a non-active restore candidate until the host row repaints, so an already-painted preview cannot be mistaken for original text.
 
 The render adapter refreshes all mounted owners in one component-scoped update, performs at most one targeted retry for unconfirmed mounted owners, and never remounts the whole chat list. A row without a mounted owner remains virtualized-ready and renders from the state store when mounted.
 
@@ -300,12 +300,12 @@ The primary capsule is language-neutral: translation icon, `completed/total`, an
 
 Disabling one channel:
 
-1. Increment the channel generation.
+1. Start a versioned channel-toggle transaction and increment the channel display generation. A stale disable completion cannot clear a newer re-enabled session.
 2. Cancel pending automatic work for that channel.
-3. Mark automatic message states as hidden while retaining immutable source snapshots.
-4. Build one restore transaction for messages, replies, embeds, and thread titles.
-5. Refresh the affected channel and verify the original state is visible.
-6. Leave manual translations untouched.
+3. Restore automatic and manual message display states and clear channel-scoped manual suppression while retaining immutable source snapshots and valid translation-cache entries.
+4. Clear reply-preview and embed projections and restore the thread title as part of the same disable flow.
+5. Refresh all mounted message and reply-host owners in one channel-scoped transaction; virtualized rows read the restored state when they mount.
+6. Keep manual translation available after disable so a newer per-message action can display a cached or newly translated result.
 
 Stopping the plugin performs the same operation for every channel before unregistering patches.
 
@@ -328,7 +328,7 @@ The global primary default, global backup provider, detection strategy, and ever
 
 Runtime queues, message display state, scroll state, and active generations remain in memory and are never stored in the settings document.
 
-When the user leaves a channel, `MessageStateStore` prunes records that can be reconstructed from the bounded translation cache. It retains active requests, manual translations, manual-untranslate suppression, cancelled restore records, and source archives until their owning workflow finishes. If no records remain, the channel index, display generation, and reply-preview eligibility are released too. Revisiting the channel captures the source again and commits a matching cached translation without another provider request.
+When the user leaves a channel, `MessageStateStore` prunes records that can be reconstructed from the bounded translation cache. It retains active requests, active manual translations, manual-untranslate suppression, unconfirmed restore records, and source archives until their owning workflow finishes; a confirmed manual restore becomes prunable after its archive is consumed. If no records remain, the channel index, display generation, and reply-preview eligibility are released too. Revisiting the channel captures the source again and commits a matching cached translation without another provider request.
 
 Every persistent document has an explicit schema version and one migration entry point. Compatibility reads are removed after the corresponding migration has shipped and been verified.
 
