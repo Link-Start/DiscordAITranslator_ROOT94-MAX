@@ -9,9 +9,11 @@ const LIVE_REPAINT_DELAY_MS = 120;
 const CALM_REPAINT_DELAY_MS = 1500;
 const BUSY_RETRY_DELAY_MS = 450;
 const SETTINGS_RETRY_DELAY_MS = 1000;
+const MAX_TARGETED_REPAINT_ATTEMPTS = 3;
 
 function createDisplayRepaintScheduler({
 	renderMessages,
+	onRenderOutcome = () => {},
 	canRepaintNow,
 	isViewingHistory,
 	// The full-list repaint path needs the two predicates separately, because it may
@@ -28,7 +30,30 @@ function createDisplayRepaintScheduler({
 	clearTimeout: cancelTimer = clearTimeout
 }) {
 	const queues = new Map();
+	const activeRequests = new Map();
 	let timer = null;
+
+	function getActiveRequest(channelId, messageId) {
+		const channel = activeRequests.get(String(channelId));
+		return channel && channel.get(String(messageId)) || null;
+	}
+
+	function releaseActiveRequests(channelId, messageIds) {
+		const key = String(channelId);
+		const channel = activeRequests.get(key);
+		if (!channel) return;
+		for (const messageId of messageIds) channel.delete(String(messageId));
+		if (!channel.size) activeRequests.delete(key);
+	}
+
+	function removeQueuedRequest(channelId, messageId, maximumAttempt) {
+		const key = String(channelId);
+		const channel = queues.get(key);
+		if (!channel) return;
+		const queued = channel.get(String(messageId));
+		if (queued && queued.attempt <= maximumAttempt) channel.delete(String(messageId));
+		if (!channel.size) queues.delete(key);
+	}
 
 	function nextDelay() {
 		return LIVE_REPAINT_DELAY_MS;
@@ -51,20 +76,71 @@ function createDisplayRepaintScheduler({
 		}
 		const pending = [...queues.entries()];
 		queues.clear();
-		for (const [channelId, messageIds] of pending) {
-			const rendering = renderMessages([...messageIds]);
+		for (const [channelId, queuedRequests] of pending) {
+			const requestsByMessageId = new Map();
+			const blockedRequests = new Map();
+			for (const [messageId, request] of queuedRequests) (getActiveRequest(channelId, messageId) ? blockedRequests : requestsByMessageId).set(messageId, request);
+			if (blockedRequests.size) {
+				if (!queues.has(channelId)) queues.set(channelId, new Map());
+				const waiting = queues.get(channelId);
+				for (const [messageId, request] of blockedRequests) waiting.set(messageId, request);
+			}
+			if (!requestsByMessageId.size) continue;
+			const messageIds = [...requestsByMessageId.keys()];
+			if (!activeRequests.has(channelId)) activeRequests.set(channelId, new Map());
+			const activeChannel = activeRequests.get(channelId);
+			for (const [messageId, request] of requestsByMessageId) activeChannel.set(messageId, request);
+			const rendering = renderMessages(messageIds);
 			if (rendering && rendering.then) rendering.then(outcome => {
-				for (const messageId of outcome && outcome.retryIds || []) schedule(channelId, messageId, BUSY_RETRY_DELAY_MS);
-			}).catch(() => {});
+				const normalizedOutcome = Object.assign({}, outcome || {});
+				const exhaustedIds = [];
+				releaseActiveRequests(channelId, messageIds);
+				for (const messageId of normalizedOutcome.retryIds || []) {
+					const request = requestsByMessageId.get(String(messageId)) || {attempt: 1, trackingKeys: new Set()};
+					if (request.attempt < MAX_TARGETED_REPAINT_ATTEMPTS) {
+						const trackingKeys = [...request.trackingKeys];
+						if (!trackingKeys.length) schedule(channelId, messageId, BUSY_RETRY_DELAY_MS, request.attempt + 1);
+						else for (const trackingKey of trackingKeys) schedule(channelId, messageId, BUSY_RETRY_DELAY_MS, request.attempt + 1, trackingKey);
+					}
+					else {
+						exhaustedIds.push(String(messageId));
+						removeQueuedRequest(channelId, messageId, request.attempt);
+					}
+				}
+				for (const messageId of [].concat(normalizedOutcome.confirmedIds || [], normalizedOutcome.deferredIds || [])) {
+					const request = requestsByMessageId.get(String(messageId));
+					if (request) removeQueuedRequest(channelId, messageId, request.attempt);
+				}
+				if (exhaustedIds.length) normalizedOutcome.exhaustedIds = exhaustedIds;
+				const trackingKeysByMessageId = {};
+				for (const [messageId, request] of requestsByMessageId) if (request.trackingKeys.size) trackingKeysByMessageId[messageId] = [...request.trackingKeys];
+				const report = {channelId, messageIds, outcome: normalizedOutcome};
+				if (Object.keys(trackingKeysByMessageId).length) report.trackingKeysByMessageId = trackingKeysByMessageId;
+				try {onRenderOutcome(report);}
+				catch (error) {}
+				if (queues.size) arm(nextDelay());
+			}).catch(() => {
+				releaseActiveRequests(channelId, messageIds);
+				if (queues.size) arm(nextDelay());
+			});
 		}
 	}
 
-	function schedule(channelId, messageId, delay = null) {
+	function schedule(channelId, messageId, delay = null, attempt = 1, trackingKey = null) {
 		if (!channelId || messageId == null) return;
 		const key = String(channelId);
-		if (!queues.has(key)) queues.set(key, new Set());
-		queues.get(key).add(String(messageId));
-		arm(delay == null ? nextDelay() : delay);
+		if (!queues.has(key)) queues.set(key, new Map());
+		const requestsByMessageId = queues.get(key);
+		const messageKey = String(messageId);
+		const queued = requestsByMessageId.get(messageKey) || {attempt: 0, trackingKeys: new Set()};
+		const active = getActiveRequest(key, messageKey);
+		// Duplicate row events join the most advanced retry already queued. Moving the
+		// counter backwards here would turn a bounded retry into an endless loop.
+		queued.attempt = Math.max(queued.attempt, active && active.attempt || 0, Math.max(1, attempt || 1));
+		if (active) for (const activeTrackingKey of active.trackingKeys) queued.trackingKeys.add(activeTrackingKey);
+		if (trackingKey != null && String(trackingKey)) queued.trackingKeys.add(String(trackingKey));
+		requestsByMessageId.set(messageKey, queued);
+		if (!active) arm(delay == null ? nextDelay() : delay);
 	}
 
 	// The legacy full-list repaint, kept for the paths that still own their display
@@ -134,6 +210,7 @@ function createDisplayRepaintScheduler({
 			if (timer) cancelTimer(timer);
 			timer = null;
 			queues.clear();
+			activeRequests.clear();
 		},
 		getNextDelay: nextDelay
 	});
@@ -141,6 +218,7 @@ function createDisplayRepaintScheduler({
 
 module.exports = {
 	SETTINGS_RETRY_DELAY_MS,
+	MAX_TARGETED_REPAINT_ATTEMPTS,
 	LIVE_REPAINT_DELAY_MS,
 	CALM_REPAINT_DELAY_MS,
 	BUSY_RETRY_DELAY_MS,

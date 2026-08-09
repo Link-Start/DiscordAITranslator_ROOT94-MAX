@@ -173,6 +173,57 @@ test("a missing direct confirmation gets one targeted retry", async () => {
 	assert.deepEqual(outcome.missingIds, []);
 });
 
+test("a mounted loading row resolves its exact message owner from the patched descendant", async () => {
+	const loadingNode = {className: "translator-translation-loading"};
+	const owner = {props: {message: {id: "m1"}}};
+	let visibleRevision = null;
+	const messageNode = {
+		id: "chat-messages-m1",
+		querySelector(selector) {
+			if (selector === ".translator-translation-loading") return loadingNode;
+			if (selector === '[data-translator-revision="11"]') return visibleRevision === 11 ? {} : null;
+			return null;
+		}
+	};
+	const ownerStarts = [];
+	const adapter = createDiscordRenderAdapter({
+		BDFDB: {
+			dotCN: {messagesscroller: ".messages-scroller"},
+			ReactUtils: {
+				findOwner(node, config) {
+					ownerStarts.push(node);
+					return node === loadingNode && config.filter(owner) ? owner : null;
+				},
+				forceUpdate(...owners) {
+					assert.deepEqual(owners, [owner]);
+					visibleRevision = 11;
+				}
+			}
+		},
+		document: {
+			querySelector(selector) {
+				if (selector === ".messages-scroller") return null;
+				return selector.includes('chat-messages-m1') ? messageNode : null;
+			}
+		},
+		requestAnimationFrame: callback => callback(),
+		getUserScrollIntentSequence: () => 1,
+		captureScrollState: () => null,
+		restoreScrollState: () => {}
+	});
+
+	const outcome = await adapter.refreshMessages({
+		transactionId: 2,
+		channelId: "c1",
+		messageIds: ["m1"],
+		views: [{messageId: "m1", revision: 11}]
+	});
+
+	assert.deepEqual(ownerStarts, [messageNode, loadingNode]);
+	assert.deepEqual(outcome.confirmedIds, ["m1"]);
+	assert.deepEqual(outcome.missingIds, []);
+});
+
 test("a user scroll after capture keeps targeted display but skips anchor correction", async () => {
 	const {adapter, calls, scroller} = createHarness({confirmDirectly: false, userScrollDuringUpdate: true});
 	scroller.scrollTop = 700;
@@ -418,5 +469,6 @@ test("an unconfirmed automatic display retries exact owners without remounting t
 	assert.deepEqual(calls.forceUpdateBatches, [[...messageOwners.values()], [...messageOwners.values()]]);
 	assert.equal(calls.rerenderAll, 0);
 	assert.deepEqual(outcome.missingIds, ["m1", "m2"]);
+	assert.deepEqual(outcome.retryIds, ["m1", "m2"], "mounted rows that missed confirmation must enter the bounded repaint retry path");
 	assert.equal(outcome.fallbackUsed, false);
 });

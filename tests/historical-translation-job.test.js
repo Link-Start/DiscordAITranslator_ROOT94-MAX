@@ -2219,7 +2219,11 @@ test("failed historical status exposes a visible retry action", () => {
 		retryButton.onclick({stopPropagation: () => {}});
 		assert.equal(retriedChannelId, "channel-history-retry-ui");
 
-		plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, total: 2, processed: 2, displayed: 2, failed: 0, retryable: 0, phase: "done"});
+		plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, total: 2, processed: 2, displayed: 1, displayPending: 1, failed: 0, retryable: 0, phase: "done"});
+		assert.equal(text.textContent, "1/2 · 1↻");
+		assert.equal(timers.size, 0, "a completed request with an unpainted mounted row remains visible");
+
+		plugin.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, total: 2, processed: 2, displayed: 2, displayPending: 0, failed: 0, retryable: 0, phase: "done"});
 		assert.equal(text.textContent, "2/2");
 		assert.equal(timers.size, 1);
 		const completionTimer = [...timers.values()][0];

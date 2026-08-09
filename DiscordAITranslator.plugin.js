@@ -765,14 +765,22 @@ var require_discord_render_adapter = __commonJS({
       }
       __name(findMessageElement, "findMessageElement");
       function findMessageOwner(element, messageId) {
-        return BDFDB.ReactUtils.findOwner(element, {
+        let ownerConfig = {
           up: !0,
           unlimited: !0,
           filter: /* @__PURE__ */ __name((instance) => {
             let props = instance && (instance.stateNode && instance.stateNode.props || instance.props || instance.memoizedProps);
             return !!(props && props.message && String(props.message.id) === String(messageId));
           }, "filter")
-        });
+        }, directOwner = BDFDB.ReactUtils.findOwner(element, ownerConfig);
+        if (directOwner) return directOwner;
+        let loadingElement = null;
+        try {
+          loadingElement = element && element.querySelector && element.querySelector(".translator-translation-loading");
+        } catch {
+          loadingElement = null;
+        }
+        return loadingElement ? BDFDB.ReactUtils.findOwner(loadingElement, ownerConfig) : null;
       }
       __name(findMessageOwner, "findMessageOwner");
       function waitForPaint() {
@@ -844,7 +852,7 @@ var require_discord_render_adapter = __commonJS({
               confirmedIds,
               missingIds: unconfirmedIds,
               deferredIds,
-              retryIds: [],
+              retryIds: unconfirmedIds.slice(),
               fallbackUsed: !1
             };
           } catch (err) {
@@ -1229,6 +1237,8 @@ var require_repaint_scheduler = __commonJS({
   "src/display/repaint-scheduler.js"(exports2, module2) {
     function createDisplayRepaintScheduler({
       renderMessages,
+      onRenderOutcome = /* @__PURE__ */ __name(() => {
+      }, "onRenderOutcome"),
       canRepaintNow,
       isViewingHistory,
       // The full-list repaint path needs the two predicates separately, because it may
@@ -1245,7 +1255,27 @@ var require_repaint_scheduler = __commonJS({
       setTimeout: scheduleTimer = setTimeout,
       clearTimeout: cancelTimer = clearTimeout
     }) {
-      let queues = /* @__PURE__ */ new Map(), timer = null;
+      let queues = /* @__PURE__ */ new Map(), activeRequests = /* @__PURE__ */ new Map(), timer = null;
+      function getActiveRequest(channelId, messageId) {
+        let channel = activeRequests.get(String(channelId));
+        return channel && channel.get(String(messageId)) || null;
+      }
+      __name(getActiveRequest, "getActiveRequest");
+      function releaseActiveRequests(channelId, messageIds) {
+        let key = String(channelId), channel = activeRequests.get(key);
+        if (channel) {
+          for (let messageId of messageIds) channel.delete(String(messageId));
+          channel.size || activeRequests.delete(key);
+        }
+      }
+      __name(releaseActiveRequests, "releaseActiveRequests");
+      function removeQueuedRequest(channelId, messageId, maximumAttempt) {
+        let key = String(channelId), channel = queues.get(key);
+        if (!channel) return;
+        let queued = channel.get(String(messageId));
+        queued && queued.attempt <= maximumAttempt && channel.delete(String(messageId)), channel.size || queues.delete(key);
+      }
+      __name(removeQueuedRequest, "removeQueuedRequest");
       function nextDelay() {
         return 120;
       }
@@ -1264,19 +1294,59 @@ var require_repaint_scheduler = __commonJS({
         }
         let pending = [...queues.entries()];
         queues.clear();
-        for (let [channelId, messageIds] of pending) {
-          let rendering = renderMessages([...messageIds]);
+        for (let [channelId, queuedRequests] of pending) {
+          let requestsByMessageId = /* @__PURE__ */ new Map(), blockedRequests = /* @__PURE__ */ new Map();
+          for (let [messageId, request] of queuedRequests) (getActiveRequest(channelId, messageId) ? blockedRequests : requestsByMessageId).set(messageId, request);
+          if (blockedRequests.size) {
+            queues.has(channelId) || queues.set(channelId, /* @__PURE__ */ new Map());
+            let waiting = queues.get(channelId);
+            for (let [messageId, request] of blockedRequests) waiting.set(messageId, request);
+          }
+          if (!requestsByMessageId.size) continue;
+          let messageIds = [...requestsByMessageId.keys()];
+          activeRequests.has(channelId) || activeRequests.set(channelId, /* @__PURE__ */ new Map());
+          let activeChannel = activeRequests.get(channelId);
+          for (let [messageId, request] of requestsByMessageId) activeChannel.set(messageId, request);
+          let rendering = renderMessages(messageIds);
           rendering && rendering.then && rendering.then((outcome) => {
-            for (let messageId of outcome && outcome.retryIds || []) schedule(channelId, messageId, 450);
+            let normalizedOutcome = Object.assign({}, outcome || {}), exhaustedIds = [];
+            releaseActiveRequests(channelId, messageIds);
+            for (let messageId of normalizedOutcome.retryIds || []) {
+              let request = requestsByMessageId.get(String(messageId)) || { attempt: 1, trackingKeys: /* @__PURE__ */ new Set() };
+              if (request.attempt < 3) {
+                let trackingKeys = [...request.trackingKeys];
+                if (!trackingKeys.length) schedule(channelId, messageId, 450, request.attempt + 1);
+                else for (let trackingKey of trackingKeys) schedule(channelId, messageId, 450, request.attempt + 1, trackingKey);
+              } else
+                exhaustedIds.push(String(messageId)), removeQueuedRequest(channelId, messageId, request.attempt);
+            }
+            for (let messageId of [].concat(normalizedOutcome.confirmedIds || [], normalizedOutcome.deferredIds || [])) {
+              let request = requestsByMessageId.get(String(messageId));
+              request && removeQueuedRequest(channelId, messageId, request.attempt);
+            }
+            exhaustedIds.length && (normalizedOutcome.exhaustedIds = exhaustedIds);
+            let trackingKeysByMessageId = {};
+            for (let [messageId, request] of requestsByMessageId) request.trackingKeys.size && (trackingKeysByMessageId[messageId] = [...request.trackingKeys]);
+            let report = { channelId, messageIds, outcome: normalizedOutcome };
+            Object.keys(trackingKeysByMessageId).length && (report.trackingKeysByMessageId = trackingKeysByMessageId);
+            try {
+              onRenderOutcome(report);
+            } catch {
+            }
+            queues.size && arm(nextDelay());
           }).catch(() => {
+            releaseActiveRequests(channelId, messageIds), queues.size && arm(nextDelay());
           });
         }
       }
       __name(flush, "flush");
-      function schedule(channelId, messageId, delay = null) {
+      function schedule(channelId, messageId, delay = null, attempt = 1, trackingKey = null) {
         if (!channelId || messageId == null) return;
         let key = String(channelId);
-        queues.has(key) || queues.set(key, /* @__PURE__ */ new Set()), queues.get(key).add(String(messageId)), arm(delay ?? nextDelay());
+        queues.has(key) || queues.set(key, /* @__PURE__ */ new Map());
+        let requestsByMessageId = queues.get(key), messageKey = String(messageId), queued = requestsByMessageId.get(messageKey) || { attempt: 0, trackingKeys: /* @__PURE__ */ new Set() }, active = getActiveRequest(key, messageKey);
+        if (queued.attempt = Math.max(queued.attempt, active && active.attempt || 0, Math.max(1, attempt || 1)), active) for (let activeTrackingKey of active.trackingKeys) queued.trackingKeys.add(activeTrackingKey);
+        trackingKey != null && String(trackingKey) && queued.trackingKeys.add(String(trackingKey)), requestsByMessageId.set(messageKey, queued), active || arm(delay ?? nextDelay());
       }
       __name(schedule, "schedule");
       let fullRepaintTimer = null, settingsRetryTimer = null, textAreaRetryTimer = null, deferredFullRepaintPending = !1;
@@ -1317,7 +1387,7 @@ var require_repaint_scheduler = __commonJS({
         schedule,
         flush,
         clear() {
-          timer && cancelTimer(timer), timer = null, queues.clear();
+          timer && cancelTimer(timer), timer = null, queues.clear(), activeRequests.clear();
         },
         getNextDelay: nextDelay
       });
@@ -1325,11 +1395,57 @@ var require_repaint_scheduler = __commonJS({
     __name(createDisplayRepaintScheduler, "createDisplayRepaintScheduler");
     module2.exports = {
       SETTINGS_RETRY_DELAY_MS: 1e3,
+      MAX_TARGETED_REPAINT_ATTEMPTS: 3,
       LIVE_REPAINT_DELAY_MS: 120,
       CALM_REPAINT_DELAY_MS: 1500,
       BUSY_RETRY_DELAY_MS: 450,
       createDisplayRepaintScheduler
     };
+  }
+});
+
+// src/display/historical-display-tracker.js
+var require_historical_display_tracker = __commonJS({
+  "src/display/historical-display-tracker.js"(exports2, module2) {
+    function createHistoricalDisplayTracker({ isStatusForChannel = /* @__PURE__ */ __name(() => !1, "isStatusForChannel"), getRevision = /* @__PURE__ */ __name(() => null, "getRevision"), updateStatus = /* @__PURE__ */ __name(() => {
+    }, "updateStatus") } = {}) {
+      let batches = /* @__PURE__ */ new Map(), batchSequence = 0;
+      function normalizeId(value) {
+        return value == null ? "" : String(value);
+      }
+      return __name(normalizeId, "normalizeId"), Object.freeze({
+        begin({ channelId, batchKey = null, outcome = {}, displayed = 0, displayableIds = null, schedule = /* @__PURE__ */ __name(() => {
+        }, "schedule") } = {}) {
+          outcome = outcome || {};
+          let key = normalizeId(channelId);
+          if (!key) return 0;
+          let ids = new Set([].concat(outcome.missingIds || [], outcome.retryIds || []).map(normalizeId).filter(Boolean));
+          if (!ids.size)
+            return batches.delete(key), 0;
+          let displayable = new Set((Array.isArray(displayableIds) ? displayableIds : [...ids]).map(normalizeId)), identity = normalizeId(batchKey) || `${key}:display:${++batchSequence}`, revisions = new Map([...ids].map((messageId) => [messageId, getRevision(key, messageId)]));
+          batches.set(key, { identity, ids, displayable, revisions, displayed: Math.max(0, displayed || 0) });
+          for (let messageId of ids) schedule(messageId, identity);
+          return ids.size;
+        },
+        handle({ channelId, messageIds = [], trackingKeysByMessageId = {}, outcome = {} } = {}) {
+          outcome = outcome || {};
+          let key = normalizeId(channelId), pending = batches.get(key);
+          if (!pending) return !1;
+          let requestedIds = new Set([].concat(messageIds || []).map(normalizeId).filter(Boolean)), displayedIds = new Set([].concat(outcome.confirmedIds || [], outcome.deferredIds || []).map(normalizeId)), retryIds = new Set([].concat(outcome.retryIds || []).map(normalizeId)), terminalIds = new Set([].concat(outcome.exhaustedIds || [], outcome.rejectedIds || [], outcome.staleIds || []).map(normalizeId)), resolved = 0, displayableResolved = 0;
+          for (let messageId of requestedIds) {
+            if (!pending.ids.has(messageId) || ![].concat(trackingKeysByMessageId && trackingKeysByMessageId[messageId] || []).map(normalizeId).includes(pending.identity)) continue;
+            let revisionMatches = getRevision(key, messageId) === pending.revisions.get(messageId), shown = revisionMatches && displayedIds.has(messageId), terminal = terminalIds.has(messageId) || !revisionMatches || !retryIds.has(messageId);
+            !shown && !terminal || (pending.ids.delete(messageId), resolved++, shown && pending.displayable.has(messageId) && displayableResolved++);
+          }
+          return !resolved || (pending.displayed += displayableResolved, pending.ids.size || batches.delete(key), !isStatusForChannel(key)) ? !1 : (updateStatus({ channelId: key, displayed: pending.displayed, displayPending: pending.ids.size }), !0);
+        },
+        clear() {
+          batches.clear();
+        }
+      });
+    }
+    __name(createHistoricalDisplayTracker, "createHistoricalDisplayTracker");
+    module2.exports = { createHistoricalDisplayTracker };
   }
 });
 
@@ -5028,7 +5144,7 @@ var require_loaded_translation_status_store = __commonJS({
       ready: "committing",
       committed: "done",
       cancelled: null
-    }), LOADED_STATUS_PROGRESS_FIELDS = Object.freeze(["total", "processed", "displayed", "skipped", "failed"]);
+    }), LOADED_STATUS_PROGRESS_FIELDS = Object.freeze(["total", "processed", "displayed", "displayPending", "skipped", "failed"]);
     function createEmptyStatus() {
       return {
         active: !1,
@@ -5039,6 +5155,7 @@ var require_loaded_translation_status_store = __commonJS({
         processed: 0,
         batch: 0,
         displayed: 0,
+        displayPending: 0,
         skipped: 0,
         failed: 0,
         retryable: 0,
@@ -5095,21 +5212,22 @@ var require_loaded_translation_status_store = __commonJS({
     }
     __name(renderPhaseSegment, "renderPhaseSegment");
     function getStatusCounters(status) {
-      let total = Math.max(0, status && status.total || 0), processed = Math.max(0, Math.min(total || 0, status && status.processed || 0)), displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0)), skipped = Math.max(0, Math.min(total || 0, status && status.skipped || 0)), failedValue = status && status.failed != null ? status.failed : status && status.aiDropped, failed = Math.max(0, failedValue || 0), retryable = Math.max(0, status && status.retryable || 0), batch = Math.max(1, status && status.batch || 1);
-      return { total, processed, displayed, skipped, failed, retryable, batch };
+      let total = Math.max(0, status && status.total || 0), processed = Math.max(0, Math.min(total || 0, status && status.processed || 0)), displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0)), displayPending = Math.max(0, Math.min(total || 0, status && status.displayPending || 0)), skipped = Math.max(0, Math.min(total || 0, status && status.skipped || 0)), failedValue = status && status.failed != null ? status.failed : status && status.aiDropped, failed = Math.max(0, failedValue || 0), retryable = Math.max(0, status && status.retryable || 0), batch = Math.max(1, status && status.batch || 1);
+      return { total, processed, displayed, displayPending, skipped, failed, retryable, batch };
     }
     __name(getStatusCounters, "getStatusCounters");
     function renderCompactStatusText(status, currentTime) {
-      let { total, processed, displayed, skipped, failed, retryable } = getStatusCounters(status), ratio = `${status && status.done ? displayed : processed}/${total}`, repairReady = Math.max(displayed, total - skipped - (retryable || failed));
+      let { total, processed, displayed, displayPending, skipped, failed, retryable } = getStatusCounters(status), ratio = `${status && status.done ? displayed : processed}/${total}`, repairReady = Math.max(displayed, total - skipped - (retryable || failed));
       if (status && status.phase === "repairing") return `${repairReady}/${total}${retryable || failed ? ` · ${retryable || failed}↻` : ""}`;
       if (status && (status.phase === "failed" || status.done && (failed || retryable))) return `${displayed}/${total} · ${failed || retryable}!`;
+      if (status && status.done && displayPending) return `${displayed}/${total} · ${displayPending}↻`;
       if (status && status.done) return `${displayed}/${total}`;
       let phaseStartedAt = status && status.phaseStartedAt || 0;
       return phaseStartedAt ? `${ratio} · ${formatSeconds(currentTime - phaseStartedAt)}` : ratio;
     }
     __name(renderCompactStatusText, "renderCompactStatusText");
     function renderStatusDetailText(status, chinese, phaseSegment) {
-      let { total, processed, displayed, skipped, failed, retryable, batch } = getStatusCounters(status), extraText = `${skipped ? chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}` : ""}${failed ? chinese ? `，失败 ${failed}` : `, failed ${failed}` : ""}${retryable && retryable != failed ? chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}` : ""}`;
+      let { total, processed, displayed, displayPending, skipped, failed, retryable, batch } = getStatusCounters(status), extraText = `${displayPending ? chinese ? `，待显示 ${displayPending}` : `, ${displayPending} awaiting display` : ""}${skipped ? chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}` : ""}${failed ? chinese ? `，失败 ${failed}` : `, failed ${failed}` : ""}${retryable && retryable != failed ? chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}` : ""}`;
       return status && status.done ? total ? chinese ? `已加载翻译：第 ${batch} 批完成，显示 ${displayed}/${total}${extraText}` : `Loaded translation: batch ${batch} done, shown ${displayed}/${total}${extraText}` : failed || retryable ? chinese ? `已加载翻译：失败 ${failed}，待重试 ${retryable}` : `Loaded translation: ${failed} failed, ${retryable} retry pending` : chinese ? "已加载翻译：开启，暂无待翻译" : "Loaded translation: on, no pending messages" : status && status.collecting ? chinese ? `收集已加载：第 ${batch} 批 ${processed}/${total}${extraText}${phaseSegment}` : `Collecting loaded: batch ${batch} ${processed}/${total}${extraText}${phaseSegment}` : total ? chinese ? `翻译已加载：第 ${batch} 批 ${processed}/${total}，显示 ${displayed}${extraText}${phaseSegment}` : `Translating loaded: batch ${batch} ${processed}/${total}, shown ${displayed}${extraText}${phaseSegment}` : chinese ? "已加载翻译：开启，等待消息" : "Loaded translation: on, waiting";
     }
     __name(renderStatusDetailText, "renderStatusDetailText");
@@ -5166,7 +5284,7 @@ var require_loaded_translation_status_store = __commonJS({
         },
         update(updates = {}) {
           let previous = status, next = Object.assign({}, previous, updates), nextJobKey = `${normalizeChannelId(next.channelId)}:${Math.max(0, next.batch || 0)}`;
-          return nextJobKey !== sealedJobKey && (sealedJobKey = nextJobKey, sealedTotal = null), next.phase = resolvePhase(previous, next, updates), sealedTotal === null && !next.collecting && (next.active || next.done) && next.total > 0 && (sealedTotal = Math.max(0, next.total || 0)), sealedTotal !== null && !next.collecting && (next.total = sealedTotal), next.phase !== previous.phase ? (next.phaseStartedAt = now(), next.progressAt = next.phaseStartedAt) : (next.phaseStartedAt = previous.phaseStartedAt, next.progressAt = hasCounterMoved(previous, next) ? now() : previous.progressAt), status = next, this.getStatus();
+          return nextJobKey !== sealedJobKey && (sealedJobKey = nextJobKey, sealedTotal = null, Object.prototype.hasOwnProperty.call(updates, "displayPending") || (next.displayPending = 0)), next.phase = resolvePhase(previous, next, updates), sealedTotal === null && !next.collecting && (next.active || next.done) && next.total > 0 && (sealedTotal = Math.max(0, next.total || 0)), sealedTotal !== null && !next.collecting && (next.total = sealedTotal), next.phase !== previous.phase ? (next.phaseStartedAt = now(), next.progressAt = next.phaseStartedAt) : (next.phaseStartedAt = previous.phaseStartedAt, next.progressAt = hasCounterMoved(previous, next) ? now() : previous.progressAt), status = next, this.getStatus();
         },
         clear() {
           return this.cancelTimers(), status = createEmptyStatus(), sealedTotal = null, sealedJobKey = "", this.getStatus();
@@ -9616,7 +9734,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a;
-        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { LOADED_STATUS_COMPLETION_HIDE_MS, LOADED_STATUS_REFRESH_MS, createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { resumeHistoricalHandoff } = require_historical_handoff_runtime(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), { parseStoredEmbedTranslations } = require_embed_translation_parser(), {
+        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createHistoricalDisplayTracker } = require_historical_display_tracker(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { LOADED_STATUS_COMPLETION_HIDE_MS, LOADED_STATUS_REFRESH_MS, createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { resumeHistoricalHandoff } = require_historical_handoff_runtime(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), { parseStoredEmbedTranslations } = require_embed_translation_parser(), {
           foreignLanguageDecisionRuntime,
           receivedMessageFilterRuntime,
           createReceivedTranslationRuntime
@@ -9879,9 +9997,12 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           "−−−−·": "9",
           "−−−−−": "0",
           _: "··−−·−"
-        }, channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") });
+        }, channelTitleStore = createChannelTitleStore(), loadedTranslationStatusStore = createLoadedTranslationStatusStore({ isChineseUiLanguage: /* @__PURE__ */ __name(() => _this && _this.isChineseUiLanguage(), "isChineseUiLanguage") }), historicalDisplayTracker = createHistoricalDisplayTracker({ isStatusForChannel: /* @__PURE__ */ __name((channelId) => loadedTranslationStatusStore.isForChannel(channelId), "isStatusForChannel"), getRevision: /* @__PURE__ */ __name((_channelId, messageId) => {
+          let view = _this && _this.getReceivedDisplayRuntimeView(messageId);
+          return view ? view.revision : null;
+        }, "getRevision"), updateStatus: /* @__PURE__ */ __name((updates) => _this && _this.updateLoadedAutoTranslationStatus(updates), "updateStatus") });
         var pluginRuntimeActive = !0;
-        let AUTO_TRANSLATION_RERENDER_DELAY = 120, AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500, AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450, DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
+        let DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50, LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1, LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100, TRANSLATION_MESSAGE_PATCH_TYPES = ["Messages", "MessageReply", "MessageButtons", "MessageContent", "Embed"], DISCORD_EPOCH = 14200704e5, defaultLanguages = {
           INPUT: "auto",
           OUTPUT: "$discord"
         }, languageTypes = {
@@ -10914,7 +11035,7 @@ __________________ __________________ __________________
           }
           positionLoadedAutoTranslationStatusElement(element) {
             if (!element || typeof document > "u") return;
-            let selectors = [BDFDB.dotCN && BDFDB.dotCN.channeltextarea, '[class*="channelTextArea"]', 'form [role="textbox"]'], anchors = [];
+            let selectors = ['[class*="channelTextArea"]', 'form [role="textbox"]'], anchors = [];
             for (let selector of selectors)
               if (selector)
                 try {
@@ -11010,10 +11131,10 @@ __________________ __________________ __________________
               let retryResult = this.retryFailedHistoricalTranslations(currentStatus.channelId);
               retryResult && typeof retryResult.catch == "function" && retryResult.catch((_2) => {
               });
-            }) : retryButton && retryButton.remove(), element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus), this.updateInlineLoadedAutoTranslationStatusElements(), loadedTranslationStatusStore.schedulePosition((_2) => this.positionLoadedAutoTranslationStatusElement(element)), currentStatus.active ? loadedTranslationStatusStore.scheduleRefresh(LOADED_STATUS_REFRESH_MS, () => this.updateLoadedAutoTranslationStatus({})) : currentStatus.done && !retryableCount && !Math.max(0, currentStatus.failed || currentStatus.aiDropped || 0) && loadedTranslationStatusStore.scheduleHide(LOADED_STATUS_COMPLETION_HIDE_MS, () => this.removeLoadedAutoTranslationStatusElement());
+            }) : retryButton && retryButton.remove(), element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus), this.updateInlineLoadedAutoTranslationStatusElements(), loadedTranslationStatusStore.schedulePosition((_2) => this.positionLoadedAutoTranslationStatusElement(element)), currentStatus.active ? loadedTranslationStatusStore.scheduleRefresh(LOADED_STATUS_REFRESH_MS, () => this.updateLoadedAutoTranslationStatus({})) : currentStatus.done && !Math.max(0, currentStatus.displayPending || 0) && !retryableCount && !Math.max(0, currentStatus.failed || currentStatus.aiDropped || 0) && loadedTranslationStatusStore.scheduleHide(LOADED_STATUS_COMPLETION_HIDE_MS, () => this.removeLoadedAutoTranslationStatusElement());
           }
           clearLoadedAutoTranslationStatus() {
-            loadedTranslationStatusStore.clear();
+            historicalDisplayTracker.clear(), loadedTranslationStatusStore.clear();
             let element = typeof document < "u" && document.getElementById("DiscordAITranslator-loaded-status");
             element && element.remove(), this.detachLoadedAutoTranslationStatusPositionWatcher(), this.updateInlineLoadedAutoTranslationStatusElements();
           }
@@ -11726,8 +11847,8 @@ __________________ __________________ __________________
               } catch {
                 batchOutcome = null;
               }
-            let failedCount = this.updateFailedHistoricalTranslationSnapshots(summary, job.channelId), blockedIds = new Set([].concat(batchOutcome && batchOutcome.missingIds || [], batchOutcome && batchOutcome.retryIds || [], batchOutcome && batchOutcome.rejectedIds || [], batchOutcome && batchOutcome.staleIds || []).map(String)), displayReadyIds = new Set([].concat(batchOutcome && batchOutcome.confirmedIds || [], batchOutcome && batchOutcome.deferredIds || []).map(String).filter((messageId) => !blockedIds.has(messageId))), displayed = summary.translated.filter((item) => item && item.message && displayReadyIds.has(String(item.message.id))).length;
-            this.updateLoadedAutoTranslationStatus({ active: !1, collecting: !1, done: !0, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length });
+            let failedCount = this.updateFailedHistoricalTranslationSnapshots(summary, job.channelId), blockedIds = new Set([].concat(batchOutcome && batchOutcome.missingIds || [], batchOutcome && batchOutcome.retryIds || [], batchOutcome && batchOutcome.rejectedIds || [], batchOutcome && batchOutcome.staleIds || []).map(String)), displayReadyIds = new Set([].concat(batchOutcome && batchOutcome.confirmedIds || [], batchOutcome && batchOutcome.deferredIds || []).map(String).filter((messageId) => !blockedIds.has(messageId))), displayed = summary.translated.filter((item) => item && item.message && displayReadyIds.has(String(item.message.id))).length, displayPending = historicalDisplayTracker.begin({ channelId: job.channelId, batchKey: job.id, outcome: batchOutcome, displayed, displayableIds: summary.translated.map((item) => item && item.message && String(item.message.id)).filter(Boolean), schedule: /* @__PURE__ */ __name((messageId, trackingKey) => this.scheduleReceivedDisplayFlush(job.channelId, messageId, null, trackingKey), "schedule") });
+            this.updateLoadedAutoTranslationStatus({ active: !1, collecting: !1, done: !0, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed, displayPending, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length });
           }
           updateHistoricalTranslationJobStatus(job) {
             if (!job || !job.channelId || job.state == "committed") return;
@@ -12092,7 +12213,6 @@ __________________ __________________ __________________
               now: /* @__PURE__ */ __name(() => Date.now(), "now"),
               getSelectedChannelId: /* @__PURE__ */ __name(() => BDFDB.LibraryStores.SelectedChannelStore.getChannelId(), "getSelectedChannelId"),
               getMessagesScrollerSelector: /* @__PURE__ */ __name(() => BDFDB.dotCN && BDFDB.dotCN.messagesscroller, "getMessagesScrollerSelector"),
-              getChannelTextAreaSelector: /* @__PURE__ */ __name(() => BDFDB.dotCN && BDFDB.dotCN.channeltextarea, "getChannelTextAreaSelector"),
               escapeSelectorValue: /* @__PURE__ */ __name((value) => typeof CSS < "u" && CSS.escape ? CSS.escape(value) : String(value).replace(/(["\\])/g, "\\$1"), "escapeSelectorValue"),
               // Closing the user-scroll window is the moment a historical snapshot may commit.
               onScrollActivityFinished: /* @__PURE__ */ __name((channelId) => this.finishHistoricalTranslationSnapshot(channelId), "onScrollActivityFinished")
@@ -12178,6 +12298,7 @@ __________________ __________________ __________________
           ensureReceivedDisplayRepaintScheduler() {
             return this.receivedDisplayRepaintSchedulerInstance || (this.receivedDisplayRepaintSchedulerInstance = createDisplayRepaintScheduler({
               renderMessages: /* @__PURE__ */ __name((messageIds) => this.ensureReceivedDisplayRuntime().renderMessages(messageIds), "renderMessages"),
+              onRenderOutcome: /* @__PURE__ */ __name((report) => historicalDisplayTracker.handle(report), "onRenderOutcome"),
               canRepaintNow: /* @__PURE__ */ __name(() => this.canRepaintReceivedDisplayNow(), "canRepaintNow"),
               isViewingHistory: /* @__PURE__ */ __name(() => this.isViewingMessageHistory(), "isViewingHistory"),
               isSettingsSurfaceOpen: /* @__PURE__ */ __name(() => this.isTranslatorSettingsSurfaceOpen(), "isSettingsSurfaceOpen"),
@@ -12187,8 +12308,8 @@ __________________ __________________ __________________
               clearTimeout: /* @__PURE__ */ __name((timer) => BDFDB.TimeUtils.clear(timer), "clearTimeout")
             })), this.receivedDisplayRepaintSchedulerInstance;
           }
-          scheduleReceivedDisplayFlush(channelId, messageId, delay = null) {
-            this.ensureReceivedDisplayRepaintScheduler().schedule(channelId, messageId, delay);
+          scheduleReceivedDisplayFlush(channelId, messageId, delay = null, trackingKey = null) {
+            this.ensureReceivedDisplayRepaintScheduler().schedule(channelId, messageId, delay, 1, trackingKey);
           }
           clearReceivedDisplayFlushQueue() {
             this.ensureReceivedDisplayRepaintScheduler().clear();
