@@ -49,6 +49,7 @@ function createLiveTranslationQueue({
 	onChannelSessionLeft = () => {},
 	onChannelSessionStarted = () => {},
 	onLiveTurnStarted = () => {},
+	onLiveTurnProgress = () => {},
 	// Translation policy. Everything below decides what a translation IS; the queue only
 	// decides when it runs, in what order, and what happens to the item afterwards.
 	getBatchEngineKey = () => null,
@@ -77,6 +78,7 @@ function createLiveTranslationQueue({
 	let retryTimer = null;
 	let channelStates = {};
 	let liveTurnCounts = {};
+	let liveProgressCounts = {};
 	let lastChannelId = null;
 
 	function getRequestKey(messageId, channelId) {
@@ -206,15 +208,29 @@ function createLiveTranslationQueue({
 		return liveTurnCounts[key];
 	}
 
+	function getLiveTurnProgressCount(channelId) {
+		return liveProgressCounts[normalizeChannelId(channelId)] || 0;
+	}
+
+	function noteLiveTurnProgress(channelId, reason = "started") {
+		const key = normalizeChannelId(channelId);
+		if (!key) return 0;
+		liveProgressCounts[key] = (liveProgressCounts[key] || 0) + 1;
+		onLiveTurnProgress(channelId, liveProgressCounts[key], reason);
+		return liveProgressCounts[key];
+	}
+
 	function resetTracking(channelId = null) {
 		if (channelId) {
 			delete channelStates[normalizeChannelId(channelId)];
 			delete liveTurnCounts[normalizeChannelId(channelId)];
+			delete liveProgressCounts[normalizeChannelId(channelId)];
 			resetLoadedMessageTracking(channelId);
 		}
 		else {
 			channelStates = {};
 			liveTurnCounts = {};
+			liveProgressCounts = {};
 			resetLoadedMessageTracking();
 		}
 		clearEligibleReplyPreviewMessages(channelId);
@@ -304,13 +320,16 @@ function createLiveTranslationQueue({
 	function handleCachedItem(queueItem) {
 		if (!queueItem || !queueItem.cachedTranslation) return false;
 		const channelId = queueItem.channel && queueItem.channel.id || "__global";
-		completeCommit(queueItem, channelId, commitCachedResult(queueItem, channelId));
+		const commit = commitCachedResult(queueItem, channelId);
+		noteLiveTurnProgress(channelId, "cached");
+		completeCommit(queueItem, channelId, commit);
 		return true;
 	}
 
 	function handleGuardFailure(queueItem) {
 		if (!queueItem) return false;
 		if (shouldAutoTranslateMessage(queueItem.message, queueItem.channel, queueItem.originalContentData, true)) return false;
+		noteLiveTurnProgress(queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem.message), "guard");
 		finishRequest(queueItem.liveRequest);
 		return true;
 	}
@@ -391,7 +410,9 @@ function createLiveTranslationQueue({
 			if (!prepared.length) return;
 			noteLiveTurnStarted(channelId);
 			let resultMap = null;
-			try {resultMap = await requestBurstTranslation(context, prepared);}
+			try {
+				resultMap = await (noteLiveTurnProgress(channelId, "burst"), requestBurstTranslation(context, prepared));
+			}
 			catch (error) {resultMap = null;}
 			const commits = [];
 			for (const preparedItem of prepared) {
@@ -433,9 +454,12 @@ function createLiveTranslationQueue({
 	}
 
 	function translateSingle(queueItem) {
-		noteLiveTurnStarted(queueItem && queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem && queueItem.message));
+		const channelId = queueItem && queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem && queueItem.message);
+		noteLiveTurnStarted(channelId);
 		liveAutoTranslating = true;
-		translateSingleItem(queueItem).then(_ => {
+		const translation = translateSingleItem(queueItem);
+		noteLiveTurnProgress(channelId, "single");
+		translation.then(_ => {
 			finishRequest(queueItem.liveRequest);
 			liveAutoTranslating = false;
 			processQueue();
@@ -520,6 +544,7 @@ function createLiveTranslationQueue({
 			return !!key && queue.some(queueItem => queueItem && !queueItem.historicalLoad && normalizeChannelId(queueItem.channel && queueItem.channel.id || getMessageChannelId(queueItem.message)) === key);
 		},
 		getStartedLiveTurnCount,
+		getLiveTurnProgressCount,
 		// A copy: a reader must not be able to reorder the queue behind this module's back.
 		getQueueSnapshot: () => queue.slice(),
 		collectBatchItems,

@@ -2401,7 +2401,7 @@ module.exports = (_ => {
 				let job = entry.jobs.find(candidate => candidate && candidate.state == "collecting" && candidate.sealed);
 				if (!job && config.sealCurrent) { job = entry.jobs.find(candidate => candidate && candidate.state == "collecting"); if (job) job.seal(); }
 				if (!job) return Promise.resolve(null);
-				job.liveTurnStartedAtStart = this.ensureLiveTranslationQueue().getStartedLiveTurnCount(channelId);
+				job.liveTurnProgressAtStart = this.ensureLiveTranslationQueue().getLiveTurnProgressCount(channelId);
 				const runningPromise = Promise.resolve(job.start()).finally(_ => {
 					for (const record of job.items.values()) {
 						const messageId = record && record.source && record.source.message && record.source.message.id;
@@ -2410,8 +2410,8 @@ module.exports = (_ => {
 					}
 					if (entry.runningPromise == runningPromise) entry.runningPromise = null;
 					entry.jobs = entry.jobs.filter(candidate => candidate != job);
-					if (entry.jobs.some(candidate => candidate && candidate.state == "collecting" && candidate.sealed)) { const liveQueue = this.ensureLiveTranslationQueue(), pendingTurn = (job.liveTurnStartedAtStart || 0) + 1;
-						if (!liveQueue.hasQueuedLiveForChannel(channelId) || liveQueue.getStartedLiveTurnCount(channelId) >= pendingTurn) { entry.pendingLiveHandoffTurn = null; this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false}); } else entry.pendingLiveHandoffTurn = pendingTurn; }
+					if (entry.jobs.some(candidate => candidate && candidate.state == "collecting" && candidate.sealed)) { const liveQueue = this.ensureLiveTranslationQueue(), pendingProgress = (job.liveTurnProgressAtStart || 0) + 1;
+						if (!liveQueue.hasQueuedLiveForChannel(channelId) || liveQueue.getLiveTurnProgressCount(channelId) >= pendingProgress) { entry.pendingLiveHandoffProgress = null; this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false}); } else entry.pendingLiveHandoffProgress = pendingProgress; }
 					else if (!entry.jobs.length && !entry.startToken && this.ensureHistoricalJobRegistry().isCurrentQueue(channelId, entry)) this.ensureHistoricalJobRegistry().deleteQueue(channelId);
 				});
 				entry.runningPromise = runningPromise;
@@ -2474,7 +2474,7 @@ module.exports = (_ => {
 				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
 				for (const entry of entries) {
 					entry.generation++;
-					entry.startToken = null;
+					entry.startToken = null; entry.pendingLiveHandoffProgress = null;
 					for (const job of entry.jobs) {
 						job.cancel(reason);
 						for (const record of job.items.values()) if (record.source && record.source.message) this.ensureLiveTranslationQueue().clearQueuedMessage(record.source.message.id);
@@ -2685,9 +2685,9 @@ module.exports = (_ => {
 			processAutoTranslationQueue () {
 				return this.ensureLiveTranslationQueue().processQueue();
 			}
-			resumeQueuedHistoricalTranslationJobs (channelId = null, startedTurnCount = null) {
+			resumeQueuedHistoricalTranslationJobs (channelId = null, progressTurnCount = null) {
 				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
-				for (const entry of entries) if (entry && !entry.runningPromise && entry.jobs.some(job => job && job.state == "collecting" && job.sealed) && (entry.pendingLiveHandoffTurn == null || startedTurnCount != null && startedTurnCount >= entry.pendingLiveHandoffTurn)) { entry.pendingLiveHandoffTurn = null; this.startCollectedHistoricalTranslationJobs(entry.channelId, {sealCurrent: false}); }
+				for (const entry of entries) if (entry && !entry.runningPromise && entry.jobs.some(job => job && job.state == "collecting" && job.sealed) && (entry.pendingLiveHandoffProgress == null || progressTurnCount != null && progressTurnCount >= entry.pendingLiveHandoffProgress)) { entry.pendingLiveHandoffProgress = null; this.startCollectedHistoricalTranslationJobs(entry.channelId, {sealCurrent: false}); }
 			}
 			forceUpdateAll () {
 				this.ensureSettingsStore().reload();
@@ -2944,7 +2944,7 @@ module.exports = (_ => {
 					onChannelSessionLeft: channelId => this.ensureReceivedDisplayRuntime().pruneChannel(channelId),
 					// new_only hides what is already on screen, so a fresh session drops the automatic records the previous one painted.
 					onChannelSessionStarted: channelId => this.getReceivedAutoTranslateScope() == "new_only" && this.clearDisplayedAutoTranslations(channelId),
-					onLiveTurnStarted: (channelId, startedTurnCount) => this.resumeQueuedHistoricalTranslationJobs(channelId, startedTurnCount),
+					onLiveTurnProgress: (channelId, progressTurnCount) => this.resumeQueuedHistoricalTranslationJobs(channelId, progressTurnCount),
 					getBatchEngineKey: channelId => this.getHistoricalAiBatchEngineKey(channelId),
 					createBurstContext: channelId => ({
 					engineKey: this.getHistoricalAiBatchEngineKey(channelId),
