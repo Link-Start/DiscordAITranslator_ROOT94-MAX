@@ -3398,8 +3398,16 @@ ${JSON.stringify(payloadItems)}`, finishResponse = /* @__PURE__ */ __name((error
 var require_settings_panel = __commonJS({
   "src/ui/settings-panel.js"(exports2, module2) {
     var { translationEngines, enginePortals } = require_provider_client(), languageTypes = Object.freeze({ INPUT: "input", OUTPUT: "output" }), messageTypes = Object.freeze({ RECEIVED: "received", SENT: "sent" });
+    function renderBdfdbLoadingPanel() {
+      let panel = document.createElement("div");
+      return panel.style.color = "var(--text-normal)", panel.style.fontSize = "16px", panel.style.lineHeight = "22px", panel.style.whiteSpace = "pre-wrap", panel.textContent = `BDFDB 正在加载，请稍后重新打开设置。
+BDFDB is loading. Please reopen settings in a few seconds.`, panel;
+    }
+    __name(renderBdfdbLoadingPanel, "renderBdfdbLoadingPanel");
     function renderSettingsPanel(plugin, collapseStates = {}, dependencies = {}) {
-      let { BDFDB } = dependencies, settingsPanel;
+      let { BDFDB } = dependencies;
+      if (typeof window > "u" || !window.BDFDB_Global || !window.BDFDB_Global.loaded) return renderBdfdbLoadingPanel();
+      let settingsPanel;
       return settingsPanel = BDFDB.PluginUtils.createSettingsPanel(plugin, {
         collapseStates,
         children: /* @__PURE__ */ __name((_) => {

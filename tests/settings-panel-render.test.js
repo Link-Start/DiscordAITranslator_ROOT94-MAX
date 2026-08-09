@@ -70,3 +70,35 @@ test("the settings panel builds its whole tree without throwing", () => {
 	const panel = plugin.getSettingsPanel({});
 	assert.ok(panel, "the panel tree must be constructible");
 });
+
+test("the settings panel returns a waiting view while BDFDB is still loading", () => {
+	const originalDocument = global.document;
+	let createSettingsPanelCalls = 0;
+	global.document = {
+		createElement: tagName => ({tagName, style: {}, textContent: ""})
+	};
+
+	try {
+		const plugin = createPluginInstance({
+			callSetLanguages: false,
+			bdfdb: {
+				PluginUtils: {
+					createSettingsPanel: () => {
+						createSettingsPanelCalls++;
+						throw new TypeError("Cannot read properties of undefined (reading 'ColorsCSS')");
+					}
+				}
+			}
+		});
+		global.window.BDFDB_Global.loaded = false;
+
+		const panel = plugin.getSettingsPanel({});
+
+		assert.ok(panel, "the early settings click must still receive a panel");
+		assert.equal(createSettingsPanelCalls, 0, "the incomplete BDFDB settings API must not be called");
+		assert.match(panel.textContent, /BDFDB/);
+	}
+	finally {
+		global.document = originalDocument;
+	}
+});
