@@ -1364,6 +1364,124 @@ test("a queued live item receives the next slot before a sealed follow-up histor
 	}
 });
 
+test("a queued same-channel cached live hit consumes the handoff and resumes follow-up history", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const batchResolvers = [];
+	const providerOrder = [];
+	try {
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			const channelId = preparedItems[0] && preparedItems[0].channelId || "unknown";
+			const ids = preparedItems.map(item => String(item.message.id));
+			providerOrder.push(`historical:${channelId}:${ids.join(",")}`);
+			const deferred = createDeferred();
+			batchResolvers.push(deferred);
+			return deferred.promise;
+		};
+		plugin.applyStoredTranslationToMessage = () => {throw new Error("cached automatic results must not write the legacy display map");};
+		plugin.rerenderMessagesWithScrollPreserved = () => {};
+		plugin.commitReceivedDisplayResult = async result => {
+			providerOrder.push(`cached:${result.channelId}:${result.messageId}`);
+			return {confirmedIds: [String(result.messageId)], missingIds: [], fallbackUsed: false};
+		};
+
+		plugin.queueAutoTranslateMessage(createMessage("100", "first historical"), {id: "channel-history-job"}, {content: "first historical"}, {historicalLoad: true});
+		const firstRunning = plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
+		await new Promise(resolve => setImmediate(resolve));
+
+		plugin.queueAutoTranslateMessage(createMessage("200", "follow-up historical"), {id: "channel-history-job"}, {content: "follow-up historical"}, {historicalLoad: true});
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(true);
+		plugin.queueAutoTranslateMessage(createMessage("300", "cached live"), {id: "channel-history-job"}, {content: "cached live"}, {
+			cachedTranslation: {
+				channelId: "channel-history-job",
+				auto: true,
+				content: "缓存译文",
+				translatedContent: "缓存译文",
+				originalContent: "cached live",
+				input: {id: "en"},
+				output: {id: "zh-CN"}
+			}
+		});
+
+		batchResolvers.shift().resolve({"100": "第一条"});
+		await firstRunning;
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(providerOrder, ["historical:channel-history-job:100"], "the handoff must stay parked until the queued cached live item is consumed");
+
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
+		plugin.processAutoTranslationQueue();
+		await new Promise(resolve => setImmediate(resolve));
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(
+			providerOrder.slice(0, 3),
+			["historical:channel-history-job:100", "cached:channel-history-job:300", "historical:channel-history-job:200"],
+			"consuming one queued cached live item must release the same channel's parked follow-up history"
+		);
+
+		batchResolvers.shift().resolve({"200": "第二条"});
+		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
+	}
+	finally {
+		for (const deferred of batchResolvers) deferred.resolve({});
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
+		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
+	}
+});
+
+test("a queued same-channel guard failure consumes the handoff and resumes follow-up history", async () => {
+	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
+	const batchResolvers = [];
+	const providerOrder = [];
+	try {
+		plugin.requestAiBatchTranslation = (_engineKey, preparedItems) => {
+			const channelId = preparedItems[0] && preparedItems[0].channelId || "unknown";
+			const ids = preparedItems.map(item => String(item.message.id));
+			providerOrder.push(`historical:${channelId}:${ids.join(",")}`);
+			const deferred = createDeferred();
+			batchResolvers.push(deferred);
+			return deferred.promise;
+		};
+		plugin.applyStoredTranslationToMessage = () => ({});
+		plugin.rerenderMessagesWithScrollPreserved = () => {};
+		plugin.shouldAutoTranslateReceivedMessage = (message, channel, originalContentData, ignoreQueued) => {
+			if (String(message && message.id) == "300" && ignoreQueued) {
+				providerOrder.push(`guard:${channel.id}:${message.id}`);
+				return false;
+			}
+			return true;
+		};
+
+		plugin.queueAutoTranslateMessage(createMessage("100", "first historical"), {id: "channel-history-job"}, {content: "first historical"}, {historicalLoad: true});
+		const firstRunning = plugin.startCollectedHistoricalTranslationJobs("channel-history-job");
+		await new Promise(resolve => setImmediate(resolve));
+
+		plugin.queueAutoTranslateMessage(createMessage("200", "follow-up historical"), {id: "channel-history-job"}, {content: "follow-up historical"}, {historicalLoad: true});
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(true);
+		plugin.queueAutoTranslateMessage(createMessage("300", "guarded live"), {id: "channel-history-job"}, {content: "guarded live"});
+
+		batchResolvers.shift().resolve({"100": "第一条"});
+		await firstRunning;
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(providerOrder, ["historical:channel-history-job:100"], "the handoff must stay parked until the queued guard-failed live item is consumed");
+
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
+		plugin.processAutoTranslationQueue();
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(
+			providerOrder.slice(0, 3),
+			["historical:channel-history-job:100", "guard:channel-history-job:300", "historical:channel-history-job:200"],
+			"consuming one queued guard-failed live item must release the same channel's parked follow-up history"
+		);
+
+		batchResolvers.shift().resolve({"200": "第二条"});
+		await plugin.waitForHistoricalTranslationJobs("channel-history-job");
+	}
+	finally {
+		for (const deferred of batchResolvers) deferred.resolve({});
+		plugin.ensureLiveTranslationQueue().setBusyTranslating(false);
+		plugin.cancelHistoricalTranslationJobs("channel-history-job", "test-cleanup");
+	}
+});
+
 test("a started live turn consumes the handoff so a later same-channel live arrival cannot starve follow-up history", async () => {
 	const plugin = configureHistoricalCoordinatorPlugin({scheduleAutomatically: true});
 	const batchResolvers = [];
