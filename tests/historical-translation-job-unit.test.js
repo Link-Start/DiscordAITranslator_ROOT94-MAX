@@ -362,7 +362,6 @@ test("a batch result that lands after a cancel is ignored", async () => {
 	const batch = createDeferred();
 	let validateCalls = 0;
 	let commitCalls = 0;
-	let rerenderCalls = 0;
 	const job = new HistoricalTranslationJob({
 		dependencies: {
 			prepare: source => ({status: "pending", prepared: source}),
@@ -372,8 +371,7 @@ test("a batch result that lands after a cancel is ignored", async () => {
 				return {ok: true, translation: rawTranslation};
 			},
 			repair: () => Promise.resolve({status: "failed", reason: "unresolved"}),
-			commit: () => {commitCalls++;},
-			rerender: () => {rerenderCalls++;}
+			commit: () => {commitCalls++;}
 		}
 	});
 
@@ -390,7 +388,6 @@ test("a batch result that lands after a cancel is ignored", async () => {
 
 	assert.equal(validateCalls, 0, "a cancelled job must not spend anything on a late result");
 	assert.equal(commitCalls, 0);
-	assert.equal(rerenderCalls, 0);
 	assert.equal(job.state, "cancelled");
 	assert.deepEqual(summary.translated, [], "nothing from the late result reaches the message list");
 	assert.equal(statusOf(job, "1"), "cancelled");
@@ -474,15 +471,14 @@ test("a job that lost its generation while waiting cancels instead of committing
 			},
 			// The channel moved on while this job was parked in waitForCommit.
 			isCurrent: () => false,
-			commit: () => order.push("commit"),
-			rerender: () => order.push("rerender")
+			commit: () => order.push("commit")
 		}
 	});
 
 	job.add(createMessage("1"));
 	const summary = await job.start();
 
-	assert.deepEqual(order, ["wait"], "neither commit nor rerender may run for a stale job");
+	assert.deepEqual(order, ["wait"], "a stale job may not commit");
 	assert.equal(job.state, "cancelled");
 	assert.equal(job.cancelReason, "stale_generation");
 	// The record already reached "translated", so the returned summary still describes
@@ -513,4 +509,23 @@ test("start is idempotent and hands back the same run", async () => {
 	assert.equal(runs, 1, "the pipeline runs once no matter how often start is called");
 	assert.equal(firstSummary, secondSummary);
 	assert.equal(job.seal(), false, "sealing a started job is not a state change");
+});
+
+test("the acknowledged commit is the final historical side effect", async () => {
+	const order = [];
+	const job = new HistoricalTranslationJob({
+		dependencies: {
+			prepare: source => ({status: "pending", prepared: source}),
+			translateBatch: () => Promise.resolve({m1: "translated"}),
+			validate: (_prepared, translation) => ({ok: true, translation}),
+			commit: () => order.push("commit"),
+			rerender: () => {throw new Error("the display transaction already repainted");}
+		}
+	});
+	job.add(createMessage("m1"));
+
+	await job.start();
+
+	assert.deepEqual(order, ["commit"]);
+	assert.equal(job.state, "committed");
 });

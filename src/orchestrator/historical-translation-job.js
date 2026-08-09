@@ -62,7 +62,6 @@ class HistoricalTranslationJob {
 			waitForCommit: () => Promise.resolve(),
 			isCurrent: () => true,
 			commit: () => {},
-			rerender: () => {},
 			onStateChange: () => {}
 		}, config.dependencies || {});
 		this.items = new Map();
@@ -289,7 +288,6 @@ class HistoricalTranslationJob {
 		const summary = this.createSummary();
 		await this.dependencies.commit(summary, this);
 		if (this.state == "cancelled") return this.createSummary();
-		this.dependencies.rerender(summary, this);
 		this.state = "committed";
 		this.dependencies.onStateChange(this);
 		return summary;

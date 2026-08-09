@@ -84,6 +84,7 @@ module.exports = (_ => {
 			createReceivedTranslationRuntime
 		} = require("../received/received-translation-runtime");
 		const {createHistoricalSourceRuntime} = require("../received/historical-source-runtime");
+		const {createMessageDeletionLifecycle} = require("../lifecycle/message-deletion-lifecycle");
 		const {
 			LOADED_AUTO_TRANSLATE_RANGE_MODES,
 			loadedAutoTranslatePolicy,
@@ -282,32 +283,8 @@ module.exports = (_ => {
 				});
 			}
 
-			handleDeletedMessage (messageId, channelId) {
-				if (!messageId || !channelId) return Promise.resolve(false);
-				const normalizedMessageId = String(messageId);
-				const normalizedChannelId = String(channelId);
-				const liveRemoved = this.ensureLiveTranslationQueue().removeMessage(normalizedMessageId, normalizedChannelId);
-				const historicalRemoved = this.removeDeletedHistoricalTranslationMessage(normalizedMessageId, normalizedChannelId);
-				const cacheRemoved = this.hasCachedTranslationEntry(normalizedMessageId);
-				this.clearCachedTranslation(normalizedMessageId);
-				return Promise.resolve(this.ensureReceivedDisplayRuntime().deleteMessage(normalizedMessageId, normalizedChannelId)).then(displayOutcome => ({
-					messageId: normalizedMessageId,
-					channelId: normalizedChannelId,
-					removed: !!(liveRemoved || historicalRemoved || cacheRemoved || displayOutcome),
-					displayOutcome
-				}));
-			}
-
-			handleMessageDeletionAction (action) {
-				if (!action || action.type != "MESSAGE_DELETE" && action.type != "MESSAGE_DELETE_BULK") return Promise.resolve(false);
-				const channelId = action.channelId || action.channel_id;
-				const messageIds = action.type == "MESSAGE_DELETE_BULK"
-					? action.ids || action.messageIds || action.message_ids || []
-					: [action.id || action.messageId || action.message_id];
-				const uniqueMessageIds = [...new Set([].concat(messageIds || []).filter(Boolean).map(String))];
-				if (!channelId || !uniqueMessageIds.length) return Promise.resolve(false);
-				return Promise.all(uniqueMessageIds.map(messageId => this.handleDeletedMessage(messageId, channelId)));
-			}
+			handleDeletedMessage (messageId, channelId) {return this.ensureMessageDeletionLifecycle().deleteMessage(messageId, channelId);}
+			handleMessageDeletionAction (action) {return this.ensureMessageDeletionLifecycle().handleAction(action);}
 
 			onStart () {
 				pluginRuntimeActive = true;
@@ -1258,7 +1235,6 @@ module.exports = (_ => {
 			}
 			getHistoricalMessageSourceGeneration (channelId) {return this.ensureHistoricalSourceRuntime().getGeneration(channelId);}
 			advanceHistoricalMessageSourceGeneration (channelId = null) {return this.ensureHistoricalSourceRuntime().advanceGeneration(channelId);}
-			isHistoricalMessageSourceGenerationCurrent (channelId, generation) {return this.ensureHistoricalSourceRuntime().isGenerationCurrent(channelId, generation);}
 
 			compareMessageIds (messageIdA, messageIdB) {
 				if (!messageIdA && !messageIdB) return 0;
@@ -1311,13 +1287,6 @@ module.exports = (_ => {
 
 			isRenderingReplyPreviewMessage (message) {
 				return !!(message && typeof message == "object" && message.__DiscordAITranslatorReplyPreview);
-			}
-
-			clearReplyPreviewRenderMessage (message) {
-				if (message && typeof message == "object") {
-					try {delete message.__DiscordAITranslatorReplyPreview;}
-					catch (err) {}
-				}
 			}
 
 			pauseHistoricalAutoTranslationForNavigation (duration = 1800) {
@@ -1954,20 +1923,8 @@ module.exports = (_ => {
 				return this.ensureMessageViewportStore().detachInputActivityWatcher();
 			}
 
-			clearAutoTranslationScrollIntent () {
-				return this.ensureMessageViewportStore().clearScrollIntent();
-			}
-
-			markAutoTranslationScrollIntent () {
-				return this.ensureMessageViewportStore().markScrollIntent();
-			}
-
 			finishAutoTranslationScrollActivity (channelId) {
 				return this.ensureMessageViewportStore().finishScrollActivity(channelId);
-			}
-
-			scheduleAutoTranslationScrollIdleFinish (channelId, delay = null) {
-				return this.ensureMessageViewportStore().scheduleScrollIdleFinish(channelId, delay);
 			}
 
 			attachAutoTranslationScrollWatcher () {
@@ -1984,10 +1941,6 @@ module.exports = (_ => {
 
 			isUserActivelyScrollingMessages (channelId = null) {
 				return this.ensureMessageViewportStore().isUserActivelyScrolling(channelId);
-			}
-
-			scheduleAutoTranslationQueueRetry () {
-				return this.ensureLiveTranslationQueue().scheduleQueueRetry();
 			}
 
 			// The 429/5xx backoff window belongs to the provider client, which is what
@@ -2375,7 +2328,6 @@ module.exports = (_ => {
 						waitForCommit: () => this.waitForHistoricalTranslationCommit(job),
 						isCurrent: () => this.isHistoricalTranslationJobCurrent(job),
 						commit: summary => this.commitHistoricalTranslationJob(summary, job),
-						rerender: () => this.rerenderHistoricalTranslationJob(job),
 						onStateChange: () => this.updateHistoricalTranslationJobStatus(job)
 					}
 				});
@@ -2496,27 +2448,6 @@ module.exports = (_ => {
 					}
 				}
 				return invalidated;
-			}
-
-			removeDeletedHistoricalTranslationMessage (messageId, channelId) {
-				if (!messageId || !channelId) return false;
-				const normalizedMessageId = String(messageId);
-				const entry = this.getHistoricalTranslationJobQueue(channelId, false);
-				let removed = false;
-				for (const job of entry && entry.jobs || []) {
-					if (job.invalidateMessage(normalizedMessageId, "source-deleted")) removed = true;
-					this.ensureLiveTranslationQueue().clearHistoricalQueuedMessage(normalizedMessageId, job.id);
-				}
-				const failedEntry = this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
-				if (failedEntry && failedEntry.items) {
-					const nextItems = failedEntry.items.filter(item => !item || !item.message || String(item.message.id) !== normalizedMessageId);
-					if (nextItems.length !== failedEntry.items.length) {
-						removed = true;
-						if (nextItems.length) this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, Object.assign({}, failedEntry, {items: nextItems}));
-						else this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId);
-					}
-				}
-				return removed;
 			}
 
 			cancelHistoricalTranslationJobs (channelId = null, reason = "cancelled") {
@@ -2674,11 +2605,6 @@ module.exports = (_ => {
 				const displayReadyIds = new Set([].concat(batchOutcome && batchOutcome.confirmedIds || [], batchOutcome && batchOutcome.deferredIds || []).map(String).filter(messageId => !blockedIds.has(messageId)));
 				const displayed = summary.translated.filter(item => item && item.message && displayReadyIds.has(String(item.message.id))).length;
 				this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length});
-			}
-
-			rerenderHistoricalTranslationJob (_job) {
-				// The acknowledged historical batch commit repaints exact message IDs; a full-list
-				// rerender here would reintroduce the flicker the display transaction removes.
 			}
 
 			updateHistoricalTranslationJobStatus (job) {
@@ -2976,6 +2902,19 @@ module.exports = (_ => {
 				if (!this.historicalJobRegistryInstance) this.historicalJobRegistryInstance = createHistoricalJobRegistry();
 				return this.historicalJobRegistryInstance;
 			}
+			ensureMessageDeletionLifecycle () {
+				if (!this.messageDeletionLifecycleInstance) this.messageDeletionLifecycleInstance = createMessageDeletionLifecycle({
+					removeLiveMessage: (messageId, channelId) => this.ensureLiveTranslationQueue().removeMessage(messageId, channelId),
+					getHistoricalQueue: channelId => this.getHistoricalTranslationJobQueue(channelId, false),
+					getFailedSnapshot: channelId => this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId),
+					setFailedSnapshot: (channelId, snapshot) => this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, snapshot),
+					deleteFailedSnapshot: channelId => this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId),
+					clearHistoricalMarker: (messageId, jobId) => this.ensureLiveTranslationQueue().clearHistoricalQueuedMessage(messageId, jobId),
+					hasCachedTranslation: messageId => this.hasCachedTranslationEntry(messageId), clearCachedTranslation: messageId => this.clearCachedTranslation(messageId),
+					deleteDisplayMessage: (messageId, channelId) => this.ensureReceivedDisplayRuntime().deleteMessage(messageId, channelId)
+				});
+				return this.messageDeletionLifecycleInstance;
+			}
 			ensureLiveTranslationQueue () {
 				if (!this.liveTranslationQueueInstance) this.liveTranslationQueueInstance = createLiveTranslationQueue({
 					isRuntimeActive: () => pluginRuntimeActive,
@@ -3256,10 +3195,6 @@ module.exports = (_ => {
 
 			scheduleReceivedDisplayFlush (channelId, messageId, delay = null) {
 				this.ensureReceivedDisplayRepaintScheduler().schedule(channelId, messageId, delay);
-			}
-
-			flushReceivedDisplayQueues () {
-				this.ensureReceivedDisplayRepaintScheduler().flush();
 			}
 
 			clearReceivedDisplayFlushQueue () {

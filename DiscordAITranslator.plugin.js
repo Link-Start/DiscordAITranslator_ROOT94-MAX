@@ -6232,8 +6232,6 @@ var require_historical_translation_job = __commonJS({
           isCurrent: /* @__PURE__ */ __name(() => !0, "isCurrent"),
           commit: /* @__PURE__ */ __name(() => {
           }, "commit"),
-          rerender: /* @__PURE__ */ __name(() => {
-          }, "rerender"),
           onStateChange: /* @__PURE__ */ __name(() => {
           }, "onStateChange")
         }, config.dependencies || {}), this.items = /* @__PURE__ */ new Map(), this.state = "collecting", this.sealed = !1, this.cancelReason = null, this.started = !1, this.repairConcurrency = Math.max(1, parseInt(config.repairConcurrency, 10) || 4), this.repairBatchSize = Math.max(1, parseInt(config.repairBatchSize, 10) || 10);
@@ -6363,7 +6361,7 @@ var require_historical_translation_job = __commonJS({
         if (this.state = "ready", this.dependencies.onStateChange(this), await this.dependencies.waitForCommit(this), this.state == "cancelled" || !this.dependencies.isCurrent(this))
           return this.cancel("stale_generation"), this.createSummary();
         let summary = this.createSummary();
-        return await this.dependencies.commit(summary, this), this.state == "cancelled" ? this.createSummary() : (this.dependencies.rerender(summary, this), this.state = "committed", this.dependencies.onStateChange(this), summary);
+        return await this.dependencies.commit(summary, this), this.state == "cancelled" ? this.createSummary() : (this.state = "committed", this.dependencies.onStateChange(this), summary);
       }
     };
     __name(_HistoricalTranslationJob, "HistoricalTranslationJob");
@@ -7590,6 +7588,57 @@ var require_historical_source_runtime = __commonJS({
     }
     __name(createHistoricalSourceRuntime, "createHistoricalSourceRuntime");
     module2.exports = { createHistoricalSourceRuntime };
+  }
+});
+
+// src/lifecycle/message-deletion-lifecycle.js
+var require_message_deletion_lifecycle = __commonJS({
+  "src/lifecycle/message-deletion-lifecycle.js"(exports2, module2) {
+    function createMessageDeletionLifecycle({
+      removeLiveMessage = /* @__PURE__ */ __name(() => !1, "removeLiveMessage"),
+      getHistoricalQueue = /* @__PURE__ */ __name(() => null, "getHistoricalQueue"),
+      getFailedSnapshot = /* @__PURE__ */ __name(() => null, "getFailedSnapshot"),
+      setFailedSnapshot = /* @__PURE__ */ __name(() => {
+      }, "setFailedSnapshot"),
+      deleteFailedSnapshot = /* @__PURE__ */ __name(() => {
+      }, "deleteFailedSnapshot"),
+      clearHistoricalMarker = /* @__PURE__ */ __name(() => {
+      }, "clearHistoricalMarker"),
+      hasCachedTranslation = /* @__PURE__ */ __name(() => !1, "hasCachedTranslation"),
+      clearCachedTranslation = /* @__PURE__ */ __name(() => {
+      }, "clearCachedTranslation"),
+      deleteDisplayMessage = /* @__PURE__ */ __name(() => !1, "deleteDisplayMessage")
+    } = {}) {
+      function removeHistoricalMessage(messageId, channelId) {
+        let entry = getHistoricalQueue(channelId), removed = !1;
+        for (let job of entry && entry.jobs || [])
+          job.invalidateMessage(messageId, "source-deleted") && (removed = !0), clearHistoricalMarker(messageId, job.id);
+        let failedEntry = getFailedSnapshot(channelId);
+        if (failedEntry && failedEntry.items) {
+          let items = failedEntry.items.filter((item) => !item || !item.message || String(item.message.id) !== messageId);
+          items.length !== failedEntry.items.length && (removed = !0, items.length ? setFailedSnapshot(channelId, { ...failedEntry, items }) : deleteFailedSnapshot(channelId));
+        }
+        return removed;
+      }
+      __name(removeHistoricalMessage, "removeHistoricalMessage");
+      async function deleteMessage(messageId, channelId) {
+        if (!messageId || !channelId) return !1;
+        messageId = String(messageId), channelId = String(channelId);
+        let liveRemoved = removeLiveMessage(messageId, channelId), historicalRemoved = removeHistoricalMessage(messageId, channelId), cacheRemoved = hasCachedTranslation(messageId);
+        clearCachedTranslation(messageId);
+        let displayOutcome = await deleteDisplayMessage(messageId, channelId);
+        return { messageId, channelId, removed: !!(liveRemoved || historicalRemoved || cacheRemoved || displayOutcome), displayOutcome };
+      }
+      __name(deleteMessage, "deleteMessage");
+      function handleAction(action) {
+        if (!action || action.type != "MESSAGE_DELETE" && action.type != "MESSAGE_DELETE_BULK") return Promise.resolve(!1);
+        let channelId = action.channelId || action.channel_id, messageIds = action.type == "MESSAGE_DELETE_BULK" ? action.ids || action.messageIds || action.message_ids || [] : [action.id || action.messageId || action.message_id], uniqueIds = [...new Set([].concat(messageIds || []).filter(Boolean).map(String))];
+        return !channelId || !uniqueIds.length ? Promise.resolve(!1) : Promise.all(uniqueIds.map((messageId) => deleteMessage(messageId, channelId)));
+      }
+      return __name(handleAction, "handleAction"), Object.freeze({ deleteMessage, handleAction });
+    }
+    __name(createMessageDeletionLifecycle, "createMessageDeletionLifecycle");
+    module2.exports = { createMessageDeletionLifecycle };
   }
 });
 
@@ -9502,7 +9551,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
           foreignLanguageDecisionRuntime,
           receivedMessageFilterRuntime,
           createReceivedTranslationRuntime
-        } = require_received_translation_runtime(), { createHistoricalSourceRuntime } = require_historical_source_runtime(), {
+        } = require_received_translation_runtime(), { createHistoricalSourceRuntime } = require_historical_source_runtime(), { createMessageDeletionLifecycle } = require_message_deletion_lifecycle(), {
           LOADED_AUTO_TRANSLATE_RANGE_MODES,
           loadedAutoTranslatePolicy,
           aiDecisionPolicy,
@@ -9880,19 +9929,10 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
             });
           }
           handleDeletedMessage(messageId, channelId) {
-            if (!messageId || !channelId) return Promise.resolve(!1);
-            let normalizedMessageId = String(messageId), normalizedChannelId = String(channelId), liveRemoved = this.ensureLiveTranslationQueue().removeMessage(normalizedMessageId, normalizedChannelId), historicalRemoved = this.removeDeletedHistoricalTranslationMessage(normalizedMessageId, normalizedChannelId), cacheRemoved = this.hasCachedTranslationEntry(normalizedMessageId);
-            return this.clearCachedTranslation(normalizedMessageId), Promise.resolve(this.ensureReceivedDisplayRuntime().deleteMessage(normalizedMessageId, normalizedChannelId)).then((displayOutcome) => ({
-              messageId: normalizedMessageId,
-              channelId: normalizedChannelId,
-              removed: !!(liveRemoved || historicalRemoved || cacheRemoved || displayOutcome),
-              displayOutcome
-            }));
+            return this.ensureMessageDeletionLifecycle().deleteMessage(messageId, channelId);
           }
           handleMessageDeletionAction(action) {
-            if (!action || action.type != "MESSAGE_DELETE" && action.type != "MESSAGE_DELETE_BULK") return Promise.resolve(!1);
-            let channelId = action.channelId || action.channel_id, messageIds = action.type == "MESSAGE_DELETE_BULK" ? action.ids || action.messageIds || action.message_ids || [] : [action.id || action.messageId || action.message_id], uniqueMessageIds = [...new Set([].concat(messageIds || []).filter(Boolean).map(String))];
-            return !channelId || !uniqueMessageIds.length ? Promise.resolve(!1) : Promise.all(uniqueMessageIds.map((messageId) => this.handleDeletedMessage(messageId, channelId)));
+            return this.ensureMessageDeletionLifecycle().handleAction(action);
           }
           onStart() {
             pluginRuntimeActive = !0, this.resetReceivedDisplayRuntime(), this.ensureLiveTranslationQueue().restartRequestGeneration(), this.ensureSentTranslationStore().resetForStart(), this.ensureHistoricalJobRegistry().advanceRuntimeGeneration(), this.attachAutoTranslationInputActivityWatcher();
@@ -10607,9 +10647,6 @@ __________________ __________________ __________________
           advanceHistoricalMessageSourceGeneration(channelId = null) {
             return this.ensureHistoricalSourceRuntime().advanceGeneration(channelId);
           }
-          isHistoricalMessageSourceGenerationCurrent(channelId, generation) {
-            return this.ensureHistoricalSourceRuntime().isGenerationCurrent(channelId, generation);
-          }
           compareMessageIds(messageIdA, messageIdB) {
             if (!messageIdA && !messageIdB) return 0;
             if (!messageIdA) return -1;
@@ -10646,13 +10683,6 @@ __________________ __________________ __________________
           }
           isRenderingReplyPreviewMessage(message) {
             return !!(message && typeof message == "object" && message.__DiscordAITranslatorReplyPreview);
-          }
-          clearReplyPreviewRenderMessage(message) {
-            if (message && typeof message == "object")
-              try {
-                delete message.__DiscordAITranslatorReplyPreview;
-              } catch {
-              }
           }
           pauseHistoricalAutoTranslationForNavigation(duration = 1800) {
             return this.ensureMessageViewportStore().pauseForNavigation(duration);
@@ -11089,17 +11119,8 @@ __________________ __________________ __________________
           detachAutoTranslationInputActivityWatcher() {
             return this.ensureMessageViewportStore().detachInputActivityWatcher();
           }
-          clearAutoTranslationScrollIntent() {
-            return this.ensureMessageViewportStore().clearScrollIntent();
-          }
-          markAutoTranslationScrollIntent() {
-            return this.ensureMessageViewportStore().markScrollIntent();
-          }
           finishAutoTranslationScrollActivity(channelId) {
             return this.ensureMessageViewportStore().finishScrollActivity(channelId);
-          }
-          scheduleAutoTranslationScrollIdleFinish(channelId, delay = null) {
-            return this.ensureMessageViewportStore().scheduleScrollIdleFinish(channelId, delay);
           }
           attachAutoTranslationScrollWatcher() {
             return this.ensureMessageViewportStore().attachScrollWatcher();
@@ -11112,9 +11133,6 @@ __________________ __________________ __________________
           }
           isUserActivelyScrollingMessages(channelId = null) {
             return this.ensureMessageViewportStore().isUserActivelyScrolling(channelId);
-          }
-          scheduleAutoTranslationQueueRetry() {
-            return this.ensureLiveTranslationQueue().scheduleQueueRetry();
           }
           // The 429/5xx backoff window belongs to the provider client, which is what
           // opens it. These two delegated to receivedTranslationRuntime, which never
@@ -11431,7 +11449,6 @@ __________________ __________________ __________________
                 waitForCommit: /* @__PURE__ */ __name(() => this.waitForHistoricalTranslationCommit(job), "waitForCommit"),
                 isCurrent: /* @__PURE__ */ __name(() => this.isHistoricalTranslationJobCurrent(job), "isCurrent"),
                 commit: /* @__PURE__ */ __name((summary) => this.commitHistoricalTranslationJob(summary, job), "commit"),
-                rerender: /* @__PURE__ */ __name(() => this.rerenderHistoricalTranslationJob(job), "rerender"),
                 onStateChange: /* @__PURE__ */ __name(() => this.updateHistoricalTranslationJobStatus(job), "onStateChange")
               }
             }), entry.jobs.push(job), job;
@@ -11527,18 +11544,6 @@ __________________ __________________ __________________
               }
             }
             return invalidated;
-          }
-          removeDeletedHistoricalTranslationMessage(messageId, channelId) {
-            if (!messageId || !channelId) return !1;
-            let normalizedMessageId = String(messageId), entry = this.getHistoricalTranslationJobQueue(channelId, !1), removed = !1;
-            for (let job of entry && entry.jobs || [])
-              job.invalidateMessage(normalizedMessageId, "source-deleted") && (removed = !0), this.ensureLiveTranslationQueue().clearHistoricalQueuedMessage(normalizedMessageId, job.id);
-            let failedEntry = this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
-            if (failedEntry && failedEntry.items) {
-              let nextItems = failedEntry.items.filter((item) => !item || !item.message || String(item.message.id) !== normalizedMessageId);
-              nextItems.length !== failedEntry.items.length && (removed = !0, nextItems.length ? this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, Object.assign({}, failedEntry, { items: nextItems })) : this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId));
-            }
-            return removed;
           }
           cancelHistoricalTranslationJobs(channelId = null, reason = "cancelled") {
             let entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, !1)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
@@ -11654,8 +11659,6 @@ __________________ __________________ __________________
               }
             let failedCount = this.updateFailedHistoricalTranslationSnapshots(summary, job.channelId), blockedIds = new Set([].concat(batchOutcome && batchOutcome.missingIds || [], batchOutcome && batchOutcome.retryIds || [], batchOutcome && batchOutcome.rejectedIds || [], batchOutcome && batchOutcome.staleIds || []).map(String)), displayReadyIds = new Set([].concat(batchOutcome && batchOutcome.confirmedIds || [], batchOutcome && batchOutcome.deferredIds || []).map(String).filter((messageId) => !blockedIds.has(messageId))), displayed = summary.translated.filter((item) => item && item.message && displayReadyIds.has(String(item.message.id))).length;
             this.updateLoadedAutoTranslationStatus({ active: !1, collecting: !1, done: !0, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length });
-          }
-          rerenderHistoricalTranslationJob(_job) {
           }
           updateHistoricalTranslationJobStatus(job) {
             if (!job || !job.channelId || job.state == "committed") return;
@@ -11851,6 +11854,19 @@ __________________ __________________ __________________
           }
           ensureHistoricalJobRegistry() {
             return this.historicalJobRegistryInstance || (this.historicalJobRegistryInstance = createHistoricalJobRegistry()), this.historicalJobRegistryInstance;
+          }
+          ensureMessageDeletionLifecycle() {
+            return this.messageDeletionLifecycleInstance || (this.messageDeletionLifecycleInstance = createMessageDeletionLifecycle({
+              removeLiveMessage: /* @__PURE__ */ __name((messageId, channelId) => this.ensureLiveTranslationQueue().removeMessage(messageId, channelId), "removeLiveMessage"),
+              getHistoricalQueue: /* @__PURE__ */ __name((channelId) => this.getHistoricalTranslationJobQueue(channelId, !1), "getHistoricalQueue"),
+              getFailedSnapshot: /* @__PURE__ */ __name((channelId) => this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId), "getFailedSnapshot"),
+              setFailedSnapshot: /* @__PURE__ */ __name((channelId, snapshot) => this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, snapshot), "setFailedSnapshot"),
+              deleteFailedSnapshot: /* @__PURE__ */ __name((channelId) => this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId), "deleteFailedSnapshot"),
+              clearHistoricalMarker: /* @__PURE__ */ __name((messageId, jobId) => this.ensureLiveTranslationQueue().clearHistoricalQueuedMessage(messageId, jobId), "clearHistoricalMarker"),
+              hasCachedTranslation: /* @__PURE__ */ __name((messageId) => this.hasCachedTranslationEntry(messageId), "hasCachedTranslation"),
+              clearCachedTranslation: /* @__PURE__ */ __name((messageId) => this.clearCachedTranslation(messageId), "clearCachedTranslation"),
+              deleteDisplayMessage: /* @__PURE__ */ __name((messageId, channelId) => this.ensureReceivedDisplayRuntime().deleteMessage(messageId, channelId), "deleteDisplayMessage")
+            })), this.messageDeletionLifecycleInstance;
           }
           ensureLiveTranslationQueue() {
             return this.liveTranslationQueueInstance || (this.liveTranslationQueueInstance = createLiveTranslationQueue({
@@ -12104,9 +12120,6 @@ __________________ __________________ __________________
           }
           scheduleReceivedDisplayFlush(channelId, messageId, delay = null) {
             this.ensureReceivedDisplayRepaintScheduler().schedule(channelId, messageId, delay);
-          }
-          flushReceivedDisplayQueues() {
-            this.ensureReceivedDisplayRepaintScheduler().flush();
           }
           clearReceivedDisplayFlushQueue() {
             this.ensureReceivedDisplayRepaintScheduler().clear();
