@@ -630,6 +630,44 @@ test("applyMessageContentRenderDecorations shows the loading node instead when n
 	assert.deepEqual(e.returnvalue.props.children.map(child => child.props.className), ["translator-translation-loading"]);
 });
 
+test("applyReceivedDisplayViewToStream restores painted embeds even when message text is already original", () => {
+	const logic = createLogic();
+	const plugin = createFakePlugin({normalizeExtractedMessageText: value => value == null ? "" : String(value)});
+	const sourceEmbeds = Object.freeze([Object.freeze({
+		title: "Original title",
+		description: "Original description",
+		footerText: "Original footer",
+		fields: Object.freeze([Object.freeze({name: "Original name", value: "Original value"})])
+	})]);
+	const paintedEmbed = {
+		id: "embed-1",
+		rawTitle: "Translated title",
+		rawDescription: "Translated description",
+		footer: {text: "Translated footer", iconURL: "keep-footer-metadata"},
+		fields: [{rawName: "Translated name", rawValue: "Translated value", inline: true}],
+		originalTitle: "Original title"
+	};
+	const stream = {content: {id: "message-1", content: "Original message", embeds: [paintedEmbed]}};
+	const view = {
+		translated: false,
+		status: "cancelled",
+		content: "Original message",
+		restoredTranslation: {content: "Translated message"},
+		source: {content: "Original message", embeds: sourceEmbeds}
+	};
+
+	logic.applyReceivedDisplayViewToStream(plugin, stream, view);
+
+	assert.notEqual(stream.content.embeds[0], paintedEmbed, "restoration must not mutate the painted embed object");
+	assert.equal(stream.content.embeds[0].id, "embed-1", "Discord embed identity metadata is preserved");
+	assert.equal(stream.content.embeds[0].rawTitle, "Original title");
+	assert.equal(stream.content.embeds[0].rawDescription, "Original description");
+	assert.deepEqual(stream.content.embeds[0].footer, {text: "Original footer", iconURL: "keep-footer-metadata"});
+	assert.deepEqual(stream.content.embeds[0].fields, [{rawName: "Original name", rawValue: "Original value", inline: true}]);
+	assert.equal("originalTitle" in stream.content.embeds[0], false, "obsolete restore markers are removed");
+	assert.equal(sourceEmbeds[0].title, "Original title", "the frozen source snapshot remains unchanged");
+});
+
 test("processEmbed swaps the embed fields in and remembers the originals", () => {
 	const logic = createLogic();
 	const plugin = createFakePlugin({getDisplayedTranslationChannelId: () => "c1"});
