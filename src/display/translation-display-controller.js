@@ -41,17 +41,19 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 		journal.append({channelId: view.channelId, messageId: view.messageId, revision: view.revision, transition});
 	}
 
-	async function refreshRecords(records, {ownerMessageIds = []} = {}) {
-		if (!records.length) return createEmptyOutcome();
+	async function refreshRecords(records, {channelId = null, ownerMessageIds = []} = {}) {
+		if (!records.length && !ownerMessageIds.length) return createEmptyOutcome();
 		const views = records.map(record => createDisplayView(store.getDisplayState(record.messageId)));
 		if (views.some(view => !view)) throw new Error("A display transaction requires one view per record");
 		const channelIds = new Set(views.map(view => view.channelId));
+		if (channelId != null) channelIds.add(String(channelId));
 		if (channelIds.size !== 1) throw new Error("A display transaction cannot span channels");
+		const transactionChannelId = channelIds.values().next().value;
 		const requestedViews = new Map(views.map(view => [String(view.messageId), view]));
 		for (const view of views) recordRenderTransition(view, "render-requested");
 		const outcome = await renderAdapter.refreshMessages({
 			transactionId: ++transactionSequence,
-			channelId: views[0].channelId,
+			channelId: transactionChannelId,
 			messageIds: views.map(view => view.messageId),
 			ownerMessageIds,
 			views
@@ -107,6 +109,11 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			const records = (Array.isArray(messageIds) ? messageIds : []).map(messageId => store.getDisplayState(messageId)).filter(Boolean);
 			return refreshRecords(records);
 		},
+		async refreshDisplayTransaction({channelId, messageIds = [], ownerMessageIds = []} = {}) {
+			const uniqueMessageIds = [...new Set((Array.isArray(messageIds) ? messageIds : []).map(String))];
+			const records = uniqueMessageIds.map(messageId => store.getDisplayState(messageId)).filter(Boolean);
+			return refreshRecords(records, {channelId, ownerMessageIds: [...new Set((Array.isArray(ownerMessageIds) ? ownerMessageIds : []).map(String))]});
+		},
 		async markPending(request, {refresh = true} = {}) {
 			const record = store.markPending(request);
 			if (!record) return createEmptyOutcome({rejectedIds: [String(request.messageId)]});
@@ -132,6 +139,14 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 			if (outcome.rejected.length) refreshOutcome.rejectedIds = outcome.rejected.map(result => String(result.messageId));
 			return refreshOutcome;
 		},
+		async commitPreviewResult(result, {refresh = true} = {}) {
+			const record = store.commitPreviewResult(result);
+			if (!record) return createEmptyOutcome({rejectedIds: [String(result && result.messageId)]});
+			if (!refresh) return createEmptyOutcome();
+			const channelId = record.channelId || result.channelId;
+			const ownerMessageIds = store.getPreviewHostMessageIds(channelId, [record.messageId]);
+			return refreshRecords([], {channelId, ownerMessageIds});
+		},
 		async restoreMessage(messageId, {refresh = true} = {}) {
 			const records = store.restoreMessage(messageId);
 			if (!records.length) return createEmptyOutcome();
@@ -139,10 +154,10 @@ function createTranslationDisplayController({store, renderAdapter, journal = nul
 		},
 		async restoreChannel(channelId, {clearPreviews = false} = {}) {
 			const previewHostMessageIds = clearPreviews ? store.getPreviewHostMessageIds(channelId) : [];
-			const changed = store.restoreChannel(channelId);
-			if (clearPreviews) changed.push(...store.clearPreviews(channelId));
-			const messageIds = [...new Set(changed.map(record => record.messageId))];
-			return refreshRecords(messageIds.map(messageId => store.getDisplayState(messageId)).filter(Boolean), {ownerMessageIds: previewHostMessageIds});
+			const restored = store.restoreChannel(channelId);
+			if (clearPreviews) store.clearPreviews(channelId);
+			const messageIds = [...new Set(restored.map(record => record.messageId))];
+			return refreshRecords(messageIds.map(messageId => store.getDisplayState(messageId)).filter(Boolean), {channelId, ownerMessageIds: previewHostMessageIds});
 		},
 		async restoreAll({refresh = true} = {}) {
 			const records = store.restoreAll();

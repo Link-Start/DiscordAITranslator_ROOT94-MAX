@@ -89,6 +89,48 @@ test("disabling clears a preview-only translation by refreshing its replying hos
 	finally {harness.restore();}
 });
 
+test("reply preview commit and restore refresh every host in one scoped transaction", async () => {
+	const harness = createHarness({mountedMessageIds: ["referenced", "reply-1", "reply-2", "other-channel-reply"]});
+	try {
+		const {plugin, calls} = harness;
+		const runtime = plugin.ensureReceivedDisplayRuntime();
+		runtime.capturePreviewSource({messageId: "referenced", channelId: "channel-a", sourceSignature: "preview-source", source: {content: "original preview", embeds: []}});
+		await runtime.commitPreviewResult({messageId: "referenced", channelId: "channel-a", signature: "preview-signature", translation: {translatedContent: "first preview", channelId: "channel-a", auto: true}}, {refresh: false});
+		for (const hostMessageId of ["reply-1", "reply-2"]) plugin.processMessageReply({instance: {props: {
+			referencedMessage: {message: {id: "referenced", channel_id: "channel-a", content: "original preview"}},
+			baseMessage: {id: hostMessageId, channel_id: "channel-a", content: "reply"}
+		}}});
+		runtime.capturePreviewSource({messageId: "other-reference", channelId: "channel-b", sourceSignature: "other-preview-source", source: {content: "other original", embeds: []}});
+		await runtime.commitPreviewResult({messageId: "other-reference", channelId: "channel-b", signature: "other-preview-signature", translation: {translatedContent: "other preview", channelId: "channel-b", auto: true}}, {refresh: false});
+		plugin.processMessageReply({instance: {props: {
+			referencedMessage: {message: {id: "other-reference", channel_id: "channel-b", content: "other original"}},
+			baseMessage: {id: "other-channel-reply", channel_id: "channel-b", content: "other reply"}
+		}}});
+		const beforeCommit = calls.forceUpdate;
+
+		await runtime.commitPreviewResult({
+			messageId: "referenced",
+			channelId: "channel-a",
+			signature: "preview-signature",
+			translation: {translatedContent: "translated preview", channelId: "channel-a", auto: true}
+		});
+
+		assert.equal(calls.forceUpdate, beforeCommit + 1, "one preview commit must perform one owner transaction");
+		assert.deepEqual(calls.forceUpdateBatches.at(-1), ["reply-1", "reply-2"]);
+		assert.equal(calls.forceUpdateBatches.at(-1).includes("referenced"), false, "the referenced row does not paint its reply preview");
+		assert.equal(calls.rerenderAll, 0);
+		const beforeRestore = calls.forceUpdate;
+
+		await plugin.restoreReceivedDisplayChannel("channel-a", {clearPreviews: true});
+
+		assert.equal(calls.forceUpdate, beforeRestore + 1, "preview restore must use one transaction too");
+		assert.deepEqual(calls.forceUpdateBatches.at(-1), ["reply-1", "reply-2"]);
+		assert.equal(runtime.getPreviewTranslation("referenced"), null);
+		assert.deepEqual(runtime.getPreviewHostMessageIds("channel-b"), ["other-channel-reply"], "another channel stays isolated");
+	}
+	finally {harness.restore();}
+});
+
 test("plugin stop restores automatic records before requesting the final rerender", async () => {
 	const harness = createHarness();
 	try {

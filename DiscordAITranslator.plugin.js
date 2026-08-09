@@ -622,16 +622,17 @@ var require_translation_display_controller = __commonJS({
         !journal || !view || journal.append({ channelId: view.channelId, messageId: view.messageId, revision: view.revision, transition });
       }
       __name(recordRenderTransition, "recordRenderTransition");
-      async function refreshRecords(records, { ownerMessageIds = [] } = {}) {
-        if (!records.length) return createEmptyOutcome();
+      async function refreshRecords(records, { channelId = null, ownerMessageIds = [] } = {}) {
+        if (!records.length && !ownerMessageIds.length) return createEmptyOutcome();
         let views = records.map((record) => createDisplayView(store.getDisplayState(record.messageId)));
         if (views.some((view) => !view)) throw new Error("A display transaction requires one view per record");
-        if (new Set(views.map((view) => view.channelId)).size !== 1) throw new Error("A display transaction cannot span channels");
-        let requestedViews = new Map(views.map((view) => [String(view.messageId), view]));
+        let channelIds = new Set(views.map((view) => view.channelId));
+        if (channelId != null && channelIds.add(String(channelId)), channelIds.size !== 1) throw new Error("A display transaction cannot span channels");
+        let transactionChannelId = channelIds.values().next().value, requestedViews = new Map(views.map((view) => [String(view.messageId), view]));
         for (let view of views) recordRenderTransition(view, "render-requested");
         let rawOutcome = await renderAdapter.refreshMessages({
           transactionId: ++transactionSequence,
-          channelId: views[0].channelId,
+          channelId: transactionChannelId,
           messageIds: views.map((view) => view.messageId),
           ownerMessageIds,
           views
@@ -669,6 +670,10 @@ var require_translation_display_controller = __commonJS({
           let records = (Array.isArray(messageIds) ? messageIds : []).map((messageId) => store.getDisplayState(messageId)).filter(Boolean);
           return refreshRecords(records);
         },
+        async refreshDisplayTransaction({ channelId, messageIds = [], ownerMessageIds = [] } = {}) {
+          let records = [...new Set((Array.isArray(messageIds) ? messageIds : []).map(String))].map((messageId) => store.getDisplayState(messageId)).filter(Boolean);
+          return refreshRecords(records, { channelId, ownerMessageIds: [...new Set((Array.isArray(ownerMessageIds) ? ownerMessageIds : []).map(String))] });
+        },
         async markPending(request, { refresh = !0 } = {}) {
           let record = store.markPending(request);
           return record ? refresh ? refreshRecords([record]) : createEmptyOutcome({ deferredIds: [record.messageId] }) : createEmptyOutcome({ rejectedIds: [String(request.messageId)] });
@@ -688,15 +693,22 @@ var require_translation_display_controller = __commonJS({
           let refreshOutcome = await refreshRecords(outcome.committed);
           return outcome.rejected.length && (refreshOutcome.rejectedIds = outcome.rejected.map((result) => String(result.messageId))), refreshOutcome;
         },
+        async commitPreviewResult(result, { refresh = !0 } = {}) {
+          let record = store.commitPreviewResult(result);
+          if (!record) return createEmptyOutcome({ rejectedIds: [String(result && result.messageId)] });
+          if (!refresh) return createEmptyOutcome();
+          let channelId = record.channelId || result.channelId, ownerMessageIds = store.getPreviewHostMessageIds(channelId, [record.messageId]);
+          return refreshRecords([], { channelId, ownerMessageIds });
+        },
         async restoreMessage(messageId, { refresh = !0 } = {}) {
           let records = store.restoreMessage(messageId);
           return records.length ? refresh ? refreshRecords(records) : createEmptyOutcome({ deferredIds: records.map((record) => record.messageId) }) : createEmptyOutcome();
         },
         async restoreChannel(channelId, { clearPreviews = !1 } = {}) {
-          let previewHostMessageIds = clearPreviews ? store.getPreviewHostMessageIds(channelId) : [], changed = store.restoreChannel(channelId);
-          clearPreviews && changed.push(...store.clearPreviews(channelId));
-          let messageIds = [...new Set(changed.map((record) => record.messageId))];
-          return refreshRecords(messageIds.map((messageId) => store.getDisplayState(messageId)).filter(Boolean), { ownerMessageIds: previewHostMessageIds });
+          let previewHostMessageIds = clearPreviews ? store.getPreviewHostMessageIds(channelId) : [], restored = store.restoreChannel(channelId);
+          clearPreviews && store.clearPreviews(channelId);
+          let messageIds = [...new Set(restored.map((record) => record.messageId))];
+          return refreshRecords(messageIds.map((messageId) => store.getDisplayState(messageId)).filter(Boolean), { channelId, ownerMessageIds: previewHostMessageIds });
         },
         async restoreAll({ refresh = !0 } = {}) {
           let records = store.restoreAll();
@@ -850,6 +862,7 @@ var require_display_runtime = __commonJS({
         commitMessageResult: /* @__PURE__ */ __name((result, options) => controller.commitMessageResult(result, options), "commitMessageResult"),
         commitHistoricalBatch: /* @__PURE__ */ __name((results) => controller.commitHistoricalBatch(results), "commitHistoricalBatch"),
         renderMessages: /* @__PURE__ */ __name((messageIds) => controller.renderMessages(messageIds), "renderMessages"),
+        refreshDisplayTransaction: /* @__PURE__ */ __name((request) => controller.refreshDisplayTransaction(request), "refreshDisplayTransaction"),
         restoreMessage: /* @__PURE__ */ __name((messageId, options) => controller.restoreMessage(messageId, options), "restoreMessage"),
         restoreChannel: /* @__PURE__ */ __name((channelId, options) => controller.restoreChannel(channelId, options), "restoreChannel"),
         restoreAll: /* @__PURE__ */ __name((options) => controller.restoreAll(options), "restoreAll"),
@@ -871,7 +884,7 @@ var require_display_runtime = __commonJS({
         listTranslated: /* @__PURE__ */ __name(() => store.listTranslated(), "listTranslated"),
         pruneChannel: /* @__PURE__ */ __name((channelId) => store.pruneChannel(channelId), "pruneChannel"),
         capturePreviewSource: /* @__PURE__ */ __name((snapshot) => store.capturePreviewSource(snapshot), "capturePreviewSource"),
-        commitPreviewResult: /* @__PURE__ */ __name((result) => store.commitPreviewResult(result), "commitPreviewResult"),
+        commitPreviewResult: /* @__PURE__ */ __name((result, options) => controller.commitPreviewResult(result, options), "commitPreviewResult"),
         markPreviewPending: /* @__PURE__ */ __name((request) => store.markPreviewPending(request), "markPreviewPending"),
         isPreviewPending: /* @__PURE__ */ __name((messageId) => store.isPreviewPending(messageId), "isPreviewPending"),
         getPreviewPending: /* @__PURE__ */ __name((messageId) => store.getPreviewPending(messageId), "getPreviewPending"),
@@ -10386,20 +10399,28 @@ __________________ __________________ __________________
             let cachedTranslation = this.getCachedReceivedTranslation(message, channelId);
             if (cachedTranslation) {
               let previewTranslation = this.createReplyPreviewTranslationData(message, channelId, cachedTranslation);
-              previewTranslation && this.ensureReceivedDisplayRuntime().commitPreviewResult({ messageId: message.id, channelId, signature, translation: previewTranslation });
+              if (previewTranslation) {
+                let previewCommit = this.ensureReceivedDisplayRuntime().commitPreviewResult({ messageId: message.id, channelId, signature, translation: previewTranslation });
+                previewCommit && previewCommit.catch && previewCommit.catch((_2) => {
+                });
+              }
               return;
             }
             let request = this.ensureReceivedDisplayRuntime().markPreviewPending({ messageId: message.id, channelId, signature });
             this.translateText(originalContent, messageTypes.RECEIVED, (translation, input, output) => {
-              !pluginRuntimeActive || !this.ensureReceivedDisplayRuntime().releasePreviewPending(message.id, request) || this.createReplyPreviewSignature(message, channelId, (message.content || "").trim()) == signature && (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId) || this.isTranslationEnabled(channelId) && translation && (this.ensureReceivedDisplayRuntime().commitPreviewResult({ messageId: message.id, channelId, signature, translation: {
-                signature,
-                channelId,
-                auto: !0,
-                translatedContent: (translation || "").trim(),
-                originalContent,
-                input,
-                output
-              } }), this.scheduleTranslationRerender({ batched: !0 })));
+              if (!(!pluginRuntimeActive || !this.ensureReceivedDisplayRuntime().releasePreviewPending(message.id, request)) && this.createReplyPreviewSignature(message, channelId, (message.content || "").trim()) == signature && !(baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId)) && this.isTranslationEnabled(channelId) && translation) {
+                let previewCommit = this.ensureReceivedDisplayRuntime().commitPreviewResult({ messageId: message.id, channelId, signature, translation: {
+                  signature,
+                  channelId,
+                  auto: !0,
+                  translatedContent: (translation || "").trim(),
+                  originalContent,
+                  input,
+                  output
+                } });
+                previewCommit && previewCommit.catch && previewCommit.catch((_2) => {
+                });
+              }
             }, null, {
               showToast: !1,
               showFailureToast: !1,

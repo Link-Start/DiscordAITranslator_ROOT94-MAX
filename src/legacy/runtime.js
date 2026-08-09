@@ -1176,7 +1176,7 @@ module.exports = (_ => {
 				const cachedTranslation = this.getCachedReceivedTranslation(message, channelId);
 				if (cachedTranslation) {
 					const previewTranslation = this.createReplyPreviewTranslationData(message, channelId, cachedTranslation);
-					if (previewTranslation) this.ensureReceivedDisplayRuntime().commitPreviewResult({messageId: message.id, channelId, signature, translation: previewTranslation});
+					if (previewTranslation) {const previewCommit = this.ensureReceivedDisplayRuntime().commitPreviewResult({messageId: message.id, channelId, signature, translation: previewTranslation}); if (previewCommit && previewCommit.catch) previewCommit.catch(_ => {});}
 					return;
 				}
 				const request = this.ensureReceivedDisplayRuntime().markPreviewPending({messageId: message.id, channelId, signature});
@@ -1186,7 +1186,7 @@ module.exports = (_ => {
 					if (baseMessage && !this.shouldAutoTranslateReplyPreview(baseMessage, message, channelId)) return;
 					if (!this.isTranslationEnabled(channelId)) return;
 					if (translation) {
-						this.ensureReceivedDisplayRuntime().commitPreviewResult({messageId: message.id, channelId, signature, translation: {
+						const previewCommit = this.ensureReceivedDisplayRuntime().commitPreviewResult({messageId: message.id, channelId, signature, translation: {
 							signature,
 							channelId,
 							auto: true,
@@ -1194,8 +1194,7 @@ module.exports = (_ => {
 							originalContent,
 							input,
 							output
-						}});
-						this.scheduleTranslationRerender({batched: true});
+						}}); if (previewCommit && previewCommit.catch) previewCommit.catch(_ => {});
 					}
 				}, null, {
 					showToast: false,

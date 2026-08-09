@@ -205,10 +205,27 @@ test("restoreChannel refreshes reply-preview host rows in the same transaction",
 	await controller.restoreChannel("c1", {clearPreviews: true});
 
 	assert.equal(refreshes.length, 1);
-	assert.deepEqual(refreshes[0].messageIds, ["referenced"]);
+	assert.deepEqual(refreshes[0].messageIds, []);
 	assert.deepEqual(refreshes[0].ownerMessageIds, ["reply-host"]);
-	assert.deepEqual(refreshes[0].views.map(view => view.messageId), ["referenced"], "a host-only row does not need a display-store revision");
+	assert.deepEqual(refreshes[0].views, [], "a preview-only restore does not need a display-store revision");
 	assert.deepEqual(store.getPreviewHostMessageIds("c1"), [], "clearing previews retires their host ownership");
+});
+
+test("a host-only display transaction runs without display-store records", async () => {
+	const {refreshes, controller} = createHarness();
+
+	const outcome = await controller.refreshDisplayTransaction({
+		channelId: "c1",
+		messageIds: [],
+		ownerMessageIds: ["reply-1", "reply-2"]
+	});
+
+	assert.equal(refreshes.length, 1);
+	assert.equal(refreshes[0].channelId, "c1");
+	assert.deepEqual(refreshes[0].messageIds, []);
+	assert.deepEqual(refreshes[0].ownerMessageIds, ["reply-1", "reply-2"]);
+	assert.deepEqual(refreshes[0].views, []);
+	assert.deepEqual(outcome, {confirmedIds: [], missingIds: [], fallbackUsed: false});
 });
 
 test("missing acknowledgement remains inspectable without changing the display revision", async () => {
