@@ -62,7 +62,7 @@ test("commit paths repaint the messages they touched, never the whole list", () 
 	const commitMethods = [
 		methodSlice("runtime", "commitReceivedDisplayResult", "commitHistoricalReceivedDisplayBatch"),
 		methodSlice("runtime", "commitHistoricalReceivedDisplayBatch", "getReceivedDisplayView"),
-		methodSlice("runtime", "commitHistoricalTranslationJob", "rerenderHistoricalTranslationJob")
+		methodSlice("runtime", "commitHistoricalTranslationJob", "getHistoricalAiBatchItemLimit")
 	];
 	for (const method of commitMethods) {
 		assert.doesNotMatch(method, FULL_LIST_REPAINT);
