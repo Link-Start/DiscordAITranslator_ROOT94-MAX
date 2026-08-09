@@ -210,6 +210,33 @@ test("the oldest reservation wins even when another channel reserves a newer que
 	await harness.resolveSingle(0);
 });
 
+test("a superseded reserved item cannot consume the handoff through single cached or guard paths", async () => {
+	for (const path of ["single", "cached", "guard"]) {
+		const consumed = [];
+		const retired = [];
+		const harness = createHarness({
+			onReservedLiveRequestConsumed: (_channelId, ticket, reason) => consumed.push([String(ticket), reason]),
+			onReservedLiveRequestRetired: (_channelId, ticket, reason) => retired.push([String(ticket), reason])
+		});
+		harness.queue.setBusyTranslating(true);
+		const queueOptions = path === "cached" ? {cachedTranslation: {content: "cached"}} : {};
+		const staleItem = harness.addLiveItem("m1", "c1", queueOptions);
+		const staleTicket = String(staleItem.liveRequest.id);
+		assert.equal(harness.queue.reserveQueuedLiveRequest("c1"), staleTicket);
+		harness.queue.createRequest(createMessage("m1", "replacement"), "c1");
+		if (path === "guard") harness.state.autoTranslate = false;
+
+		harness.queue.setBusyTranslating(false);
+		harness.queue.processQueue();
+		await harness.settle();
+
+		assert.deepEqual(consumed, [], `${path} must not consume a superseded ticket`);
+		assert.deepEqual(retired, [[staleTicket, "request-finished"]], `${path} must retire the stale reservation`);
+		assert.deepEqual(harness.log.single, [], `${path} must not dispatch the stale item to the single provider path`);
+		assert.deepEqual(harness.log.cachedCommits, [], `${path} must not commit a stale cached item`);
+	}
+});
+
 test("only one live translation runs at a time and the lock is released on failure", async () => {
 	const harness = createHarness();
 	harness.addLiveItem("m1", "c1");
