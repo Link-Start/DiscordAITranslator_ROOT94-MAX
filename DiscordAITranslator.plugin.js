@@ -936,8 +936,69 @@ var require_display_runtime = __commonJS({
 var require_translation_display_logic = __commonJS({
   "src/display/translation-display-logic.js"(exports2, module2) {
     var MESSAGE_DIRECTIONS = Object.freeze({ RECEIVED: "received", SENT: "sent" });
+    function hasOwn(object, key) {
+      return !!object && Object.prototype.hasOwnProperty.call(object, key);
+    }
+    __name(hasOwn, "hasOwn");
+    function normalizeEmbedText(plugin, value) {
+      return plugin && typeof plugin.normalizeExtractedMessageText == "function" ? plugin.normalizeExtractedMessageText(value ?? "") : value == null ? "" : String(value);
+    }
+    __name(normalizeEmbedText, "normalizeEmbedText");
+    function readVisibleEmbedText(plugin, object, rawKey, plainKey) {
+      return object ? normalizeEmbedText(plugin, hasOwn(object, rawKey) ? object[rawKey] : object[plainKey]) : "";
+    }
+    __name(readVisibleEmbedText, "readVisibleEmbedText");
+    function projectVisibleEmbed(plugin, embed) {
+      return {
+        title: readVisibleEmbedText(plugin, embed, "rawTitle", "title"),
+        description: readVisibleEmbedText(plugin, embed, "rawDescription", "description"),
+        footerText: normalizeEmbedText(plugin, embed && embed.footer && embed.footer.text),
+        fields: (embed && embed.fields || []).map((field) => ({
+          name: readVisibleEmbedText(plugin, field, "rawName", "name"),
+          value: readVisibleEmbedText(plugin, field, "rawValue", "value")
+        }))
+      };
+    }
+    __name(projectVisibleEmbed, "projectVisibleEmbed");
+    function embedProjectionMatches(plugin, currentEmbed, sourceEmbed) {
+      let current = projectVisibleEmbed(plugin, currentEmbed), source = sourceEmbed || {};
+      if (current.title !== normalizeEmbedText(plugin, source.title) || current.description !== normalizeEmbedText(plugin, source.description) || current.footerText !== normalizeEmbedText(plugin, source.footerText)) return !1;
+      let sourceFields = Array.isArray(source.fields) ? source.fields : [];
+      return current.fields.length !== sourceFields.length ? !1 : current.fields.every((field, index) => field.name === normalizeEmbedText(plugin, sourceFields[index] && sourceFields[index].name) && field.value === normalizeEmbedText(plugin, sourceFields[index] && sourceFields[index].value));
+    }
+    __name(embedProjectionMatches, "embedProjectionMatches");
+    function writeVisibleEmbedText(target, rawKey, plainKey, value) {
+      let wrote = !1;
+      hasOwn(target, rawKey) && (target[rawKey] = value, wrote = !0), (hasOwn(target, plainKey) || !wrote) && (target[plainKey] = value);
+    }
+    __name(writeVisibleEmbedText, "writeVisibleEmbedText");
+    function restoreEmbedFromSource(currentEmbed, sourceEmbed) {
+      let restored = Object.assign({}, currentEmbed || {}), source = sourceEmbed || {};
+      writeVisibleEmbedText(restored, "rawTitle", "title", source.title || ""), writeVisibleEmbedText(restored, "rawDescription", "description", source.description || ""), (restored.footer || source.footerText) && (restored.footer = Object.assign({}, restored.footer || {}, { text: source.footerText || "" }));
+      let currentFields = Array.isArray(restored.fields) ? restored.fields : [];
+      return restored.fields = (Array.isArray(source.fields) ? source.fields : []).map((sourceField, index) => {
+        let field = Object.assign({}, currentFields[index] || {});
+        return writeVisibleEmbedText(field, "rawName", "name", sourceField && sourceField.name || ""), writeVisibleEmbedText(field, "rawValue", "value", sourceField && sourceField.value || ""), field;
+      }), delete restored.originalTitle, delete restored.originalDescription, delete restored.originalFooter, delete restored.originalFields, restored;
+    }
+    __name(restoreEmbedFromSource, "restoreEmbedFromSource");
     function createTranslationDisplayLogic({ BDFDB } = {}) {
       let translationDisplayLogic = {
+        getReceivedDisplayViewRenderContent(_plugin, view) {
+          if (!view) return "";
+          if (view.translated && view.translation) {
+            let translatedContent = view.translation.translatedContent != null && view.translation.translatedContent !== "" ? view.translation.translatedContent : view.translation.content;
+            return translationDisplayLogic.buildReceivedDisplayContent(_plugin, String(translatedContent ?? ""), view.translation.originalContent || "");
+          }
+          return String(view.content == null ? "" : view.content);
+        },
+        applyReceivedDisplayViewToStream(plugin, stream, view) {
+          if (!stream || !stream.content || !view) return;
+          let displayContent = translationDisplayLogic.getReceivedDisplayViewRenderContent(plugin, view), sourceEmbeds = !view.translated && view.source && Array.isArray(view.source.embeds) ? view.source.embeds : null, currentEmbeds = Array.isArray(stream.content.embeds) ? stream.content.embeds : [], restoreEmbeds = !!sourceEmbeds && (currentEmbeds.length !== sourceEmbeds.length || sourceEmbeds.some((sourceEmbed, index) => !embedProjectionMatches(plugin, currentEmbeds[index], sourceEmbed)));
+          if (stream.content.content === displayContent && !restoreEmbeds) return;
+          let clonedMessage = new BDFDB.DiscordObjects.Message(stream.content);
+          clonedMessage.content = displayContent, restoreEmbeds && (clonedMessage.embeds = sourceEmbeds.map((sourceEmbed, index) => restoreEmbedFromSource(currentEmbeds[index], sourceEmbed))), stream.content = clonedMessage;
+        },
         buildReceivedDisplayContent(plugin, translatedContent, originalContent, forceInlineOriginal = !1) {
           let content = (translatedContent || "").trim();
           return originalContent && (forceInlineOriginal || plugin.settings.general.showOriginalMessage && !plugin.settings.general.showOriginalDirectly) && (content += plugin.formatOriginalTextForMessage(originalContent, plugin.shouldUseSpoilerInReceivedOriginal())), content;
@@ -1117,14 +1178,14 @@ var require_translation_display_logic = __commonJS({
         },
         processEmbed(plugin, e) {
           if (!e.instance.props.embed || !e.instance.props.embed.message_id) return;
-          let embed = e.instance.props.embed, hasOwn = /* @__PURE__ */ __name((key) => Object.prototype.hasOwnProperty.call(embed, key), "hasOwn"), translation = translationDisplayLogic.getActiveMessageTranslation(plugin, { id: embed.message_id }, plugin.getDisplayedTranslationChannelId(embed.message_id));
+          let embed = e.instance.props.embed, hasOwn2 = /* @__PURE__ */ __name((key) => Object.prototype.hasOwnProperty.call(embed, key), "hasOwn"), translation = translationDisplayLogic.getActiveMessageTranslation(plugin, { id: embed.message_id }, plugin.getDisplayedTranslationChannelId(embed.message_id));
           if (!translation) {
             let storeView = plugin.getReceivedDisplayRuntimeView(embed.message_id);
             storeView && storeView.translated && storeView.translation && storeView.translation.embeds && (translation = storeView.translation);
           }
           let embedTranslation = translation && translation.embeds && translation.embeds[embed.id];
           if (embedTranslation) {
-            let translatedOrOriginal = /* @__PURE__ */ __name((translated, original) => translated != null && String(translated).trim() ? translated : original, "translatedOrOriginal"), originalDescription = hasOwn("originalDescription") ? embed.originalDescription : embed.rawDescription, originalTitle = hasOwn("originalTitle") ? embed.originalTitle : embed.rawTitle, originalFields = hasOwn("originalFields") ? embed.originalFields : embed.fields, originalFooter = hasOwn("originalFooter") ? embed.originalFooter : Object.assign({}, embed.footer), translatedFields = Array.isArray(embedTranslation.fields) ? embedTranslation.fields : [], sourceFields = Array.isArray(originalFields) ? originalFields : [], fields = (sourceFields.length ? sourceFields : translatedFields).map((field, index) => ({
+            let translatedOrOriginal = /* @__PURE__ */ __name((translated, original) => translated != null && String(translated).trim() ? translated : original, "translatedOrOriginal"), originalDescription = hasOwn2("originalDescription") ? embed.originalDescription : embed.rawDescription, originalTitle = hasOwn2("originalTitle") ? embed.originalTitle : embed.rawTitle, originalFields = hasOwn2("originalFields") ? embed.originalFields : embed.fields, originalFooter = hasOwn2("originalFooter") ? embed.originalFooter : Object.assign({}, embed.footer), translatedFields = Array.isArray(embedTranslation.fields) ? embedTranslation.fields : [], sourceFields = Array.isArray(originalFields) ? originalFields : [], fields = (sourceFields.length ? sourceFields : translatedFields).map((field, index) => ({
               rawName: translatedOrOriginal(translatedFields[index] && translatedFields[index].name, field && (field.rawName || field.name)),
               rawValue: translatedOrOriginal(translatedFields[index] && translatedFields[index].value, field && (field.rawValue || field.value))
             }));
@@ -1148,7 +1209,7 @@ var require_translation_display_logic = __commonJS({
                 watermarkNode && children[index].props.children.push(watermarkNode);
               }
             }
-          } else !e.returnvalue && ["originalDescription", "originalTitle", "originalFields", "originalFooter"].some(hasOwn) && (e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
+          } else !e.returnvalue && ["originalDescription", "originalTitle", "originalFields", "originalFooter"].some(hasOwn2) && (e.instance.props.embed = Object.assign({}, e.instance.props.embed, {
             rawDescription: e.instance.props.embed.originalDescription,
             rawTitle: e.instance.props.embed.originalTitle,
             fields: e.instance.props.embed.originalFields,
@@ -12146,19 +12207,10 @@ __________________ __________________ __________________
           // commit still shape the painted content; the frozen store record keeps only the
           // translation facts.
           getReceivedDisplayViewRenderContent(view) {
-            if (!view) return "";
-            if (view.translated && view.translation) {
-              let translatedContent = view.translation.translatedContent != null && view.translation.translatedContent !== "" ? view.translation.translatedContent : view.translation.content;
-              return this.buildReceivedDisplayContent(String(translatedContent ?? ""), view.translation.originalContent || "");
-            }
-            return String(view.content == null ? "" : view.content);
+            return translationDisplayLogic.getReceivedDisplayViewRenderContent(this, view);
           }
           applyReceivedDisplayViewToStream(stream, view) {
-            if (!stream || !stream.content || !view) return;
-            let displayContent = this.getReceivedDisplayViewRenderContent(view);
-            if (stream.content.content === displayContent) return;
-            let clonedMessage = new BDFDB.DiscordObjects.Message(stream.content);
-            clonedMessage.content = displayContent, stream.content = clonedMessage;
+            return translationDisplayLogic.applyReceivedDisplayViewToStream(this, stream, view);
           }
           applyReceivedDisplayViewToContent(e, view) {
             if (!(!e || !e.returnvalue || !e.returnvalue.props)) {

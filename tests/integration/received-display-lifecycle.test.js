@@ -201,6 +201,59 @@ test("plugin stop restores automatic records before requesting the final rerende
 	finally {harness.restore();}
 });
 
+test("plugin stop restores message embeds reply previews and thread titles together", async () => {
+	const harness = createHarness({mountedMessageIds: ["message-stop", "reply-stop"]});
+	try {
+		const {plugin} = harness;
+		const runtime = plugin.ensureReceivedDisplayRuntime();
+		plugin.captureReceivedMessageSource({
+			messageId: "message-stop",
+			channelId: "channel-stop",
+			generation: 1,
+			sourceSignature: "stop-signature",
+			source: {content: "original message", embeds: [{title: "original embed", description: "original description"}]}
+		});
+		await plugin.commitReceivedDisplayResult({
+			messageId: "message-stop",
+			channelId: "channel-stop",
+			generation: 1,
+			sourceSignature: "stop-signature",
+			origin: "automatic",
+			status: "translated",
+			translation: {content: "translated message", embeds: [{title: "translated embed", description: "translated description"}], auto: true}
+		});
+		runtime.capturePreviewSource({messageId: "referenced-stop", channelId: "channel-stop", sourceSignature: "preview-source", source: {content: "original preview", embeds: []}});
+		await runtime.commitPreviewResult({messageId: "referenced-stop", channelId: "channel-stop", signature: "preview", translation: {translatedContent: "translated preview", channelId: "channel-stop", auto: true}}, {refresh: false});
+		runtime.markPreviewHost("channel-stop", "referenced-stop", "reply-stop");
+		const thread = {id: "thread-stop", name: "original title", isThread: () => true};
+		plugin.translateText = (_text, _place, callback) => callback("translated title", {id: "en"}, {id: "zh-CN"}, {});
+		plugin.forceUpdateChannelTitleComponents = () => {};
+		plugin.queueChannelTitleTranslation(thread);
+		assert.equal(plugin.getActiveChannelTitleTranslation(thread), "translated title");
+		let postStopProviderCalls = 0;
+		plugin.translateText = () => {postStopProviderCalls++;};
+		plugin.cancelHistoricalTranslationJobs = () => {};
+		plugin.detachAutoTranslationInputActivityWatcher = () => {};
+		plugin.detachAutoTranslationScrollWatcher = () => {};
+		plugin.clearLoadedAutoTranslationStatus = () => {};
+
+		plugin.onStop();
+
+		const view = plugin.getReceivedDisplayRuntimeView("message-stop");
+		assert.equal(view.content, "original message");
+		assert.equal(view.source.embeds[0].title, "original embed");
+		assert.equal(runtime.getPreviewTranslation("referenced-stop"), null);
+		assert.deepEqual(runtime.getPreviewHostMessageIds("channel-stop"), []);
+		assert.equal(plugin.getActiveChannelTitleTranslation(thread), null);
+		const stream = {content: {id: "message-stop", channel_id: "channel-stop", content: "translated message", embeds: [{title: "translated embed", description: "translated description"}]}};
+		plugin.applyReceivedDisplayViewToStream(stream, view);
+		assert.equal(stream.content.content, "original message");
+		assert.equal(stream.content.embeds[0].title, "original embed");
+		assert.equal(postStopProviderCalls, 0);
+	}
+	finally {harness.restore();}
+});
+
 test("a late provider callback cannot recreate a restored automatic record", async () => {
 	const harness = createHarness();
 	try {

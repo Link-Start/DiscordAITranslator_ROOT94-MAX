@@ -30,8 +30,92 @@
 // not something the display module should own on everyone else's behalf.
 const MESSAGE_DIRECTIONS = Object.freeze({RECEIVED: "received", SENT: "sent"});
 
+function hasOwn(object, key) {
+	return !!object && Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function normalizeEmbedText(plugin, value) {
+	if (plugin && typeof plugin.normalizeExtractedMessageText == "function") return plugin.normalizeExtractedMessageText(value == null ? "" : value);
+	return value == null ? "" : String(value);
+}
+
+function readVisibleEmbedText(plugin, object, rawKey, plainKey) {
+	if (!object) return "";
+	return normalizeEmbedText(plugin, hasOwn(object, rawKey) ? object[rawKey] : object[plainKey]);
+}
+
+function projectVisibleEmbed(plugin, embed) {
+	return {
+		title: readVisibleEmbedText(plugin, embed, "rawTitle", "title"),
+		description: readVisibleEmbedText(plugin, embed, "rawDescription", "description"),
+		footerText: normalizeEmbedText(plugin, embed && embed.footer && embed.footer.text),
+		fields: ((embed && embed.fields) || []).map(field => ({
+			name: readVisibleEmbedText(plugin, field, "rawName", "name"),
+			value: readVisibleEmbedText(plugin, field, "rawValue", "value")
+		}))
+	};
+}
+
+function embedProjectionMatches(plugin, currentEmbed, sourceEmbed) {
+	const current = projectVisibleEmbed(plugin, currentEmbed);
+	const source = sourceEmbed || {};
+	if (current.title !== normalizeEmbedText(plugin, source.title) || current.description !== normalizeEmbedText(plugin, source.description) || current.footerText !== normalizeEmbedText(plugin, source.footerText)) return false;
+	const sourceFields = Array.isArray(source.fields) ? source.fields : [];
+	if (current.fields.length !== sourceFields.length) return false;
+	return current.fields.every((field, index) => field.name === normalizeEmbedText(plugin, sourceFields[index] && sourceFields[index].name) && field.value === normalizeEmbedText(plugin, sourceFields[index] && sourceFields[index].value));
+}
+
+function writeVisibleEmbedText(target, rawKey, plainKey, value) {
+	let wrote = false;
+	if (hasOwn(target, rawKey)) {
+		target[rawKey] = value;
+		wrote = true;
+	}
+	if (hasOwn(target, plainKey) || !wrote) target[plainKey] = value;
+}
+
+function restoreEmbedFromSource(currentEmbed, sourceEmbed) {
+	const restored = Object.assign({}, currentEmbed || {});
+	const source = sourceEmbed || {};
+	writeVisibleEmbedText(restored, "rawTitle", "title", source.title || "");
+	writeVisibleEmbedText(restored, "rawDescription", "description", source.description || "");
+	if (restored.footer || source.footerText) restored.footer = Object.assign({}, restored.footer || {}, {text: source.footerText || ""});
+	const currentFields = Array.isArray(restored.fields) ? restored.fields : [];
+	restored.fields = (Array.isArray(source.fields) ? source.fields : []).map((sourceField, index) => {
+		const field = Object.assign({}, currentFields[index] || {});
+		writeVisibleEmbedText(field, "rawName", "name", sourceField && sourceField.name || "");
+		writeVisibleEmbedText(field, "rawValue", "value", sourceField && sourceField.value || "");
+		return field;
+	});
+	delete restored.originalTitle;
+	delete restored.originalDescription;
+	delete restored.originalFooter;
+	delete restored.originalFields;
+	return restored;
+}
+
 function createTranslationDisplayLogic({BDFDB} = {}) {
 	const translationDisplayLogic = {
+		getReceivedDisplayViewRenderContent(_plugin, view) {
+			if (!view) return "";
+			if (view.translated && view.translation) {
+				const translatedContent = view.translation.translatedContent != null && view.translation.translatedContent !== "" ? view.translation.translatedContent : view.translation.content;
+				return translationDisplayLogic.buildReceivedDisplayContent(_plugin, String(translatedContent == null ? "" : translatedContent), view.translation.originalContent || "");
+			}
+			return String(view.content == null ? "" : view.content);
+		},
+		applyReceivedDisplayViewToStream(plugin, stream, view) {
+			if (!stream || !stream.content || !view) return;
+			const displayContent = translationDisplayLogic.getReceivedDisplayViewRenderContent(plugin, view);
+			const sourceEmbeds = !view.translated && view.source && Array.isArray(view.source.embeds) ? view.source.embeds : null;
+			const currentEmbeds = Array.isArray(stream.content.embeds) ? stream.content.embeds : [];
+			const restoreEmbeds = !!sourceEmbeds && (currentEmbeds.length !== sourceEmbeds.length || sourceEmbeds.some((sourceEmbed, index) => !embedProjectionMatches(plugin, currentEmbeds[index], sourceEmbed)));
+			if (stream.content.content === displayContent && !restoreEmbeds) return;
+			const clonedMessage = new BDFDB.DiscordObjects.Message(stream.content);
+			clonedMessage.content = displayContent;
+			if (restoreEmbeds) clonedMessage.embeds = sourceEmbeds.map((sourceEmbed, index) => restoreEmbedFromSource(currentEmbeds[index], sourceEmbed));
+			stream.content = clonedMessage;
+		},
 		buildReceivedDisplayContent(plugin, translatedContent, originalContent, forceInlineOriginal = false) {
 			let content = (translatedContent || "").trim();
 			const shouldInlineOriginal = !!(originalContent && (forceInlineOriginal || plugin.settings.general.showOriginalMessage && !plugin.settings.general.showOriginalDirectly));

@@ -3225,23 +3225,9 @@ module.exports = (_ => {
 			// Display composition happens at render time so Display settings changed after a
 			// commit still shape the painted content; the frozen store record keeps only the
 			// translation facts.
-			getReceivedDisplayViewRenderContent (view) {
-				if (!view) return "";
-				if (view.translated && view.translation) {
-					const translatedContent = view.translation.translatedContent != null && view.translation.translatedContent !== "" ? view.translation.translatedContent : view.translation.content;
-					return this.buildReceivedDisplayContent(String(translatedContent == null ? "" : translatedContent), view.translation.originalContent || "");
-				}
-				return String(view.content == null ? "" : view.content);
-			}
+			getReceivedDisplayViewRenderContent (view) {return translationDisplayLogic.getReceivedDisplayViewRenderContent(this, view);}
 
-			applyReceivedDisplayViewToStream (stream, view) {
-				if (!stream || !stream.content || !view) return;
-				const displayContent = this.getReceivedDisplayViewRenderContent(view);
-				if (stream.content.content === displayContent) return;
-				const clonedMessage = new BDFDB.DiscordObjects.Message(stream.content);
-				clonedMessage.content = displayContent;
-				stream.content = clonedMessage;
-			}
+			applyReceivedDisplayViewToStream (stream, view) {return translationDisplayLogic.applyReceivedDisplayViewToStream(this, stream, view);}
 
 			applyReceivedDisplayViewToContent (e, view) {
 				if (!e || !e.returnvalue || !e.returnvalue.props) return;
