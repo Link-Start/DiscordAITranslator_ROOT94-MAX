@@ -45,10 +45,12 @@ await source.build({channelId, generation, renderedMessages, limit});
 // => {items, total, prefetched, cancelled}
 ```
 
-- [ ] Write failing tests proving rendered and cached messages merge by ID, newest-first eligibility is applied before the limit, and prefetch receives only the missing quantity.
-- [ ] Prove a failed prefetch seals the actual available total and a stale generation returns `cancelled: true` without publishing items.
-- [ ] Implement the pure source builder without provider, display, or status dependencies.
-- [ ] Run `node --test tests/historical-message-source.test.js` and commit the isolated module.
+- [x] Write failing tests proving rendered and cached messages merge by ID, newest-first eligibility is applied before the limit, and prefetch receives only the missing quantity.
+- [x] Prove a failed prefetch seals the actual available total and a stale generation returns `cancelled: true` without publishing items.
+- [x] Implement the pure source builder without provider, display, or status dependencies.
+- [x] Run `node --test tests/historical-message-source.test.js` and commit the isolated module.
+
+**Task 1 evidence:** `edb9f4a`, `f43f74f`; the source builder is provider/display independent and its channel, eligibility, limit, prefetch-failure, and stale-generation contracts pass in the final full suite.
 
 ### Task 2: Integrate cache enumeration and bounded prefetch
 
@@ -56,21 +58,25 @@ await source.build({channelId, generation, renderedMessages, limit});
 
 **Interfaces:** the runtime supplies `listCachedMessages(channelId)` and `prefetchMessages({channelId, beforeMessageId, limit, signal})`; accepted source items continue through the existing `collectHistoricalTranslationMessage(queueItem)` contract.
 
-- [ ] Write a failing integration test with 20 rendered messages, 20 cached messages, and 10 prefetched messages; assert one immutable 50-ID historical snapshot is sealed without simulated scrolling.
-- [ ] Write cancellation tests for channel switch, disable, and stale generation; assert prefetched records never mutate the Discord store fixture.
-- [ ] Add a Discord history adapter with feature-detected cache collection and bounded fetch dependencies; keep internal API shape handling out of the pure source builder.
-- [ ] Wire the first loaded-message pass to build once, deduplicate before queueing, and preserve the existing historical job batch/repair/atomic-commit pipeline.
-- [ ] Run the two focused suites and commit.
+- [x] Write a failing integration test with 20 rendered messages, 20 cached messages, and 10 prefetched messages; assert one immutable 50-ID historical snapshot is sealed without simulated scrolling.
+- [x] Write cancellation tests for channel switch, disable, and stale generation; assert prefetched records never mutate the Discord store fixture.
+- [x] Add a Discord history adapter with feature-detected cache collection and bounded fetch dependencies; keep internal API shape handling out of the pure source builder.
+- [x] Wire the first loaded-message pass to build once, deduplicate before queueing, and preserve the existing historical job batch/repair/atomic-commit pipeline.
+- [x] Run the two focused suites and commit.
+
+**Task 2 evidence:** `98b3c39`, `b8cbb02`; the configured eligible-message maximum is filled from rendered, cached, then bounded-prefetched records without simulated scrolling, and cancellation remains generation scoped.
 
 ### Task 3: Lock live-message immediacy and priority
 
 **Files:** modify `tests/live-translation-queue.test.js`, `tests/historical-translation-job.test.js`, `tests/integration/received-display-throughput.test.js`, and only the owning scheduler modules if a red test proves a gap.
 
-- [ ] Write a failing boundary test proving the first live provider call starts in the same queue turn without waiting for a batch timer.
-- [ ] Write a failing scheduling test proving a newly queued live item receives the next slot before a sealed follow-up historical job.
-- [ ] Prove the 120 ms repaint coalescing window affects only visible paint, not provider dispatch, and that the per-message loading view is available immediately.
-- [ ] Make the smallest scheduler change required by the red tests; retain current provider backoff and live burst behavior.
-- [ ] Run the three focused suites and commit.
+- [x] Write a failing boundary test proving the first live provider call starts in the same queue turn without waiting for a batch timer.
+- [x] Write a failing scheduling test proving a newly queued live item receives the next slot before a sealed follow-up historical job.
+- [x] Prove the 120 ms repaint coalescing window affects only visible paint, not provider dispatch, and that the per-message loading view is available immediately.
+- [x] Make the smallest scheduler change required by the red tests; retain current provider backoff and live burst behavior.
+- [x] Run the three focused suites and commit.
+
+**Task 3 evidence:** `a0357cd`, `dca4c1c`, `f541ecf`, `5fb09af`, `d5fb73e`, `36f7176`, `79295cb`; live work owns the next dispatch slot, stale reservations retire safely, and paint coalescing never delays provider dispatch.
 
 ### Task 4: Complete the component-scoped display transaction
 
@@ -83,11 +89,13 @@ refreshDisplayTransaction({channelId, messageIds, ownerMessageIds = []});
 // => {confirmedIds, missingIds, deferredIds, retryIds, staleIds, fallbackUsed}
 ```
 
-- [ ] Write a failing test where referenced message `m1` is previewed by host rows `m2` and `m3`; committing and restoring `m1` must refresh `m2` and `m3` in the same owner update.
-- [ ] Write a failing adapter test proving an unconfirmed mounted row returns one `retryId`, while a virtualized row returns `deferred` and never triggers a broad repaint.
-- [ ] Expose the component-scoped transaction through the display runtime and route normal reply-preview commits away from `scheduleTranslationRerender`.
-- [ ] Preserve one anchor restoration unless the user-intent sequence changes; keep composer and unrelated surfaces outside the transaction.
-- [ ] Run focused display and lifecycle suites and commit.
+- [x] Write a failing test where referenced message `m1` is previewed by host rows `m2` and `m3`; committing and restoring `m1` must refresh `m2` and `m3` in the same owner update.
+- [x] Write a failing adapter test proving an unconfirmed mounted row returns one `retryId`, while a virtualized row returns `deferred` and never triggers a broad repaint.
+- [x] Expose the component-scoped transaction through the display runtime and route normal reply-preview commits away from `scheduleTranslationRerender`.
+- [x] Preserve one anchor restoration unless the user-intent sequence changes; keep composer and unrelated surfaces outside the transaction.
+- [x] Run focused display and lifecycle suites and commit.
+
+**Task 4 evidence:** `dc643f9`; reply-preview ownership is channel-isolated and one-to-many, mounted owners share one targeted update, virtualized rows defer, and automatic display paths contain no whole-list repaint.
 
 ### Task 5: Replace the verbose loaded-status capsule
 
@@ -102,21 +110,35 @@ repairing:  48/50 · 2↻
 failed:     48/50 · 2!
 ```
 
-- [ ] Write failing tests proving total remains the sealed job size, completed includes valid virtualized-ready records, and generic progress updates cannot overwrite the final exact count.
-- [ ] Write failing render tests for the translation icon, compact text, hover-only detail, three-second completion hide, and Discord theme-variable colors.
-- [ ] Replace sentence-style primary text with the language-neutral compact contract while retaining localized hover detail and diagnostic phase data.
-- [ ] Prove status updates do not invoke any message-list repaint and commit.
+- [x] Write failing tests proving total remains the sealed job size, completed includes valid virtualized-ready records, and generic progress updates cannot overwrite the final exact count.
+- [x] Write failing render tests for the translation icon, compact text, hover-only detail, three-second completion hide, and Discord theme-variable colors.
+- [x] Replace sentence-style primary text with the language-neutral compact contract while retaining localized hover detail and diagnostic phase data.
+- [x] Prove status updates do not invoke any message-list repaint and commit.
+
+**Task 5 evidence:** `d06d620`; the compact icon status keeps the sealed total, reports exact final display readiness, uses theme variables, hides completed work after three seconds, and updates independently from message rendering.
 
 ### Task 6: Lifecycle completion, cleanup, and verification
 
 **Files:** modify only owning modules identified by red tests; update this section with evidence after verification.
 
-- [ ] Add integration tests for edited/deleted messages, stale source signatures, auth failure without repeated retries, one transient retry, channel isolation, disable restoration, plugin-stop restoration, reply previews, embeds, and thread titles.
-- [ ] Run focused suites, then `npm run build`, `npm run verify`, and `git diff --check`.
-- [ ] Run a whole-branch standards/spec review and fix every P0-P2 finding with a failing regression test first.
-- [ ] Remove only dead compatibility branches proven unreachable by tests; keep test sources in the repository and exclude them from the generated plugin.
-- [ ] Record commit hashes, exact test totals, artifact hash, and rollback command here.
-- [ ] Produce the verified repository artifact only; leave installed Discord files untouched until deployment is explicitly permitted.
+- [x] Add integration tests for edited/deleted messages, stale source signatures, auth failure without repeated retries, one transient retry, channel isolation, disable restoration, plugin-stop restoration, reply previews, embeds, and thread titles.
+- [x] Run focused suites, then `npm run build`, `npm run verify`, and `git diff --check`.
+- [x] Run a whole-branch standards/spec review and fix every P0-P2 finding with a failing regression test first.
+- [x] Remove only dead compatibility branches proven unreachable by tests; keep test sources in the repository and exclude them from the generated plugin.
+- [x] Record commit hashes, exact test totals, artifact hash, and rollback command here.
+- [x] Produce the verified repository artifact only; leave installed Discord files untouched until deployment is explicitly permitted.
+
+**Task 6 evidence (2026-08-09):**
+
+- Implementation commits: `77333ee`, `298b4fe`, `2f7b7e1`, `5b8d0ff`; stale structural-test boundary corrected in `ac5a735`.
+- TDD coverage includes exact message deletion, late-result rejection, channel-isolated reply hosts, auth/configuration/permanent terminal failures, one transient retry, disable/stop restoration, embeds, previews, and thread titles.
+- Whole-branch standards/spec review against `d06d620..ac5a735` found no remaining P0-P2 item after the runtime, provider, queue, display, lifecycle, tests, and canonical documents were checked together.
+- Final automated gate: `npm run verify` `1019/1019`; `git diff --check` clean; deterministic build and JavaScript syntax checks exit `0`.
+- Legacy runtime ratchet: `4433` split lines, reduced from the pre-cleanup budget while the extracted tests remain outside the release bundle.
+- Repository artifact: `DiscordAITranslator.plugin.js`, `891565` bytes, SHA-256 `24c644ced36046abb279c7802b95fcf7d30397c19f05d00af08d6e430c8a4c17`.
+- Preserved baseline `d06d620`: SHA-256 `7b021e982d959d446b08dd20cf375da0faed28c82cf1eb263abdb429352406fc`.
+- Verified rollback: `powershell -ExecutionPolicy Bypass -File "<WORKSPACE>" -Target "<repository-plugin-path>"`; the smoke target restored the baseline hash and preserved the modified hash as `.pre-rollback`.
+- Delivery roles live outside the repository under `<WORKSPACE>`; no installed Discord file was read, written, started, or otherwise operated during this recovery slice.
 
 ### Ownership boundaries
 
