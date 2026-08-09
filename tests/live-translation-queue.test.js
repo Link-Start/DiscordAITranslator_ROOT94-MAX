@@ -362,6 +362,61 @@ test("a rejected burst item goes back to the head and is sticky on the single pa
 	assert.equal(harness.log.burstRequests.length, 1, "the sticky flag keeps it out of any later burst");
 });
 
+test("an authentication failure ends a live burst without spending single-message retries", async () => {
+	let harness;
+	harness = createHarness({
+		requestBurstTranslation: (_context, prepared) => {
+			harness.log.burstRequests.push(prepared.map(item => String(item.message.id)));
+			harness.queue.setBusyTranslating(true);
+			return Promise.resolve({translations: null, failureKind: "auth", statusCode: 401});
+		},
+		resolveBurstItemResult: () => ({status: "retry"})
+	});
+	harness.state.batchEngine = "ai";
+	harness.queue.setBusyTranslating(true);
+	harness.addLiveItem("m1", "c1");
+	harness.addLiveItem("m2", "c1");
+	harness.queue.setBusyTranslating(false);
+
+	harness.queue.processQueue();
+	await settle();
+
+	assert.deepEqual(harness.log.burstRequests, [["m2", "m1"]]);
+	assert.deepEqual(harness.log.single, []);
+	assert.deepEqual(harness.queueIds(), []);
+	assert.deepEqual(harness.log.released.map(record => record.messageId).sort(), ["m1", "m2"]);
+});
+
+test("a transient live burst failure retries each item on the single path exactly once", async () => {
+	let harness;
+	harness = createHarness({
+		requestBurstTranslation: (_context, prepared) => {
+			harness.log.burstRequests.push(prepared.map(item => String(item.message.id)));
+			harness.queue.setBusyTranslating(true);
+			return Promise.resolve({translations: null, failureKind: "transient", statusCode: 503});
+		},
+		resolveBurstItemResult: () => ({status: "retry"})
+	});
+	harness.state.batchEngine = "ai";
+	harness.queue.setBusyTranslating(true);
+	harness.addLiveItem("m1", "c1");
+	harness.addLiveItem("m2", "c1");
+	harness.queue.setBusyTranslating(false);
+
+	harness.queue.processQueue();
+	await settle();
+	assert.equal(harness.queueIds().length, 2);
+
+	harness.queue.setBusyTranslating(false);
+	harness.queue.processQueue();
+	await harness.resolveSingle(0);
+	await harness.resolveSingle(1);
+
+	assert.equal(harness.log.burstRequests.length, 1);
+	assert.deepEqual(harness.log.single.sort(), ["m1", "m2"]);
+	assert.deepEqual(harness.queueIds(), []);
+});
+
 test("skipLiveBatch keeps an item out of a burst both as head and as candidate", () => {
 	const harness = createHarness();
 	harness.state.batchEngine = "ai";

@@ -38,6 +38,15 @@ const HISTORICAL_TERMINAL_ITEM_STATES = new Set(["translated", "skipped", "faile
 // but it is a historical-job number, so it lives with them rather than in the runtime.
 const HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX = 100;
 
+function normalizeBatchOutcome(outcome) {
+	const detailed = !!(outcome && typeof outcome == "object" && Object.prototype.hasOwnProperty.call(outcome, "translations") && Object.prototype.hasOwnProperty.call(outcome, "failureKind"));
+	return detailed ? outcome : {translations: outcome, failureKind: null, statusCode: null};
+}
+
+function isTerminalProviderFailure(failureKind) {
+	return ["auth", "configuration", "permanent"].includes(failureKind);
+}
+
 class HistoricalTranslationJob {
 	constructor(config = {}) {
 		this.id = config.id || `historical-${Date.now()}`;
@@ -168,14 +177,21 @@ class HistoricalTranslationJob {
 
 		const translatingRecords = [...this.items.values()].filter(record => record.status == "translating");
 		if (translatingRecords.length && this.state != "cancelled") {
-			let resultMap = null;
+			let batchOutcome = null;
 			try {
-				resultMap = await this.dependencies.translateBatch(translatingRecords.map(record => record.prepared), this);
+				batchOutcome = await this.dependencies.translateBatch(translatingRecords.map(record => record.prepared), this);
 			}
 			catch (error) {}
 			if (this.state == "cancelled") return this.createSummary();
+			const {translations: resultMap, failureKind} = normalizeBatchOutcome(batchOutcome);
 			for (const record of translatingRecords) {
 				if (record.status == "cancelled") continue;
+				if (isTerminalProviderFailure(failureKind)) {
+					record.status = "failed";
+					record.reason = `provider_${failureKind}`;
+					continue;
+				}
+				if (failureKind == "transient") record.transientRetry = true;
 				const messageId = String(record.source.message.id);
 				const rawTranslation = resultMap && Object.prototype.hasOwnProperty.call(resultMap, messageId) ? resultMap[messageId] : null;
 				let validation = {ok: false};
@@ -198,16 +214,26 @@ class HistoricalTranslationJob {
 		if (this.state == "cancelled") return this.createSummary();
 		const unresolvedBatchRecords = [...this.items.values()].filter(record => record.status == "repairing");
 		if (unresolvedBatchRecords.length > 1 && typeof this.dependencies.repairBatch == "function") {
-			const chunkSize = Math.min(this.repairBatchSize, Math.max(1, Math.ceil(translatingRecords.length / 2)));
+			// A transport failure retries the original request once as one request. Smaller
+			// chunks are reserved for valid responses that merely omitted or mangled items.
+			const chunkSize = unresolvedBatchRecords.some(record => record.transientRetry)
+				? unresolvedBatchRecords.length
+				: Math.min(this.repairBatchSize, Math.max(1, Math.ceil(translatingRecords.length / 2)));
 			for (let offset = 0; offset < unresolvedBatchRecords.length && this.state != "cancelled"; offset += chunkSize) {
 				const chunk = unresolvedBatchRecords.slice(offset, offset + chunkSize).filter(record => record.status == "repairing");
 				if (!chunk.length) continue;
-				let repairResultMap = null;
-				try {repairResultMap = await this.dependencies.repairBatch(chunk.map(record => record.prepared), this);}
+				let repairOutcome = null;
+				try {repairOutcome = await this.dependencies.repairBatch(chunk.map(record => record.prepared), this);}
 				catch (error) {}
 				if (this.state == "cancelled") return this.createSummary();
+				const {translations: repairResultMap, failureKind: repairFailureKind} = normalizeBatchOutcome(repairOutcome);
 				for (const record of chunk) {
 					if (record.status == "cancelled") continue;
+					if (isTerminalProviderFailure(repairFailureKind) || repairFailureKind == "transient") {
+						record.status = "failed";
+						record.reason = `provider_${repairFailureKind}`;
+						continue;
+					}
 					const messageId = String(record.source.message.id);
 					const rawTranslation = repairResultMap && Object.prototype.hasOwnProperty.call(repairResultMap, messageId) ? repairResultMap[messageId] : null;
 					let validation = {ok: false};
@@ -220,6 +246,10 @@ class HistoricalTranslationJob {
 					else if (validation.skipped) {
 						record.status = "skipped";
 						record.reason = validation.reason || "skipped";
+					}
+					else if (record.transientRetry) {
+						record.status = "failed";
+						record.reason = "provider_transient";
 					}
 				}
 			}

@@ -2551,7 +2551,7 @@ module.exports = (_ => {
 				if (!preparedItems.length || !this.isHistoricalTranslationJobCurrent(job)) return Promise.resolve(null);
 				const engineKey = this.getHistoricalAiBatchEngineKey(job.channelId);
 				if (!engineKey) return Promise.resolve(null);
-				return this.requestAiBatchTranslation(engineKey, preparedItems);
+				return this.requestAiBatchTranslationDetailed(engineKey, preparedItems);
 			}
 
 			repairHistoricalTranslationJobBatch (preparedItems, job) {
@@ -2560,7 +2560,7 @@ module.exports = (_ => {
 				if (!engineKey) return Promise.resolve(null);
 				// Repair traffic shares the provider key with live requests; honoring the
 				// 429/5xx backoff window keeps repairs from extending a rate-limit storm.
-				return this.awaitProviderBackoff().then(_ => this.isHistoricalTranslationJobCurrent(job) ? this.requestAiBatchTranslation(engineKey, preparedItems) : null);
+				return this.awaitProviderBackoff().then(_ => this.isHistoricalTranslationJobCurrent(job) ? this.requestAiBatchTranslationDetailed(engineKey, preparedItems) : null);
 			}
 
 			validateHistoricalTranslationJobResult (prepared, rawTranslation, job) {
@@ -2730,6 +2730,13 @@ module.exports = (_ => {
 			}
 			requestAiBatchTranslation (engineKey, preparedItems) {
 				return this.ensureProviderClient().requestAiBatchTranslation(engineKey, preparedItems);
+			}
+
+			requestAiBatchTranslationDetailed (engineKey, preparedItems) {
+				// Coordinator tests and third-party integrations may still override the old
+				// map-only method. Preserve that seam while production receives typed failures.
+				if (Object.prototype.hasOwnProperty.call(this, "requestAiBatchTranslation")) return this.requestAiBatchTranslation(engineKey, preparedItems);
+				return this.ensureProviderClient().requestAiBatchTranslationDetailed(engineKey, preparedItems);
 			}
 			processAutoTranslationQueue () {
 				return this.ensureLiveTranslationQueue().processQueue();
@@ -2999,7 +3006,7 @@ module.exports = (_ => {
 					output: Object.assign({}, this.ensureSettingsStore().getLanguage(this.getLanguageChoice(languageTypes.OUTPUT, messageTypes.RECEIVED, channelId)) || {})
 					}),
 					prepareBurstItem: (queueItem, channelId, context) => this.prepareHistoricalAiBatchQueueItem(queueItem, channelId, context.input, context.output),
-					requestBurstTranslation: (context, prepared) => this.requestAiBatchTranslation(context.engineKey, prepared),
+					requestBurstTranslation: (context, prepared) => this.requestAiBatchTranslationDetailed(context.engineKey, prepared),
 					// Skip detection, validation and caching are translation policy and stay here;
 					// the queue only learns whether the item is done, done-as-skipped, or must be
 					// retried alone.
