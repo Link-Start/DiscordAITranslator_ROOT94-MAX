@@ -61,6 +61,25 @@ test("the primary capsule stays compact across requesting, repair, completion an
 	assert.equal(harness.store.getStatusText(legacyStatus({done: true, total: 50, processed: 50, displayed: 48, failed: 2, retryable: 2, phase: "failed"})), "48/50 · 2!");
 });
 
+test("a completed provider batch keeps mounted-but-unpainted rows visible as display pending", () => {
+	const harness = createHarness({chinese: true});
+	harness.store.update({active: false, done: true, channelId: "c1", batch: 1, total: 50, processed: 50, displayed: 43, displayPending: 7});
+
+	assert.equal(harness.store.getStatus().displayPending, 7);
+	assert.equal(harness.store.getStatusText(), "43/50 · 7↻");
+	assert.equal(harness.store.getStatusDetailText(), "已加载翻译：第 1 批完成，显示 43/50，待显示 7");
+	harness.setChinese(false);
+	assert.equal(harness.store.getStatusDetailText(), "Loaded translation: batch 1 done, shown 43/50, 7 awaiting display");
+});
+
+test("starting a new batch resets display-pending state even when the caller omits the field", () => {
+	const {store} = createHarness();
+	store.update({active: false, done: true, channelId: "c1", batch: 1, total: 5, processed: 5, displayed: 4, displayPending: 1});
+	store.update({active: true, collecting: true, done: false, channelId: "c1", batch: 2, total: 0, processed: 0, displayed: 0});
+
+	assert.equal(store.getStatus().displayPending, 0);
+});
+
 test("the configured total seals at handoff and final display keeps the exact ready count", () => {
 	const {store} = createHarness();
 	store.update({active: true, collecting: true, channelId: "c1", batch: 1, total: 20, processed: 0});
@@ -311,7 +330,7 @@ test("the returned status is a copy, so a reader cannot corrupt the record", () 
 
 test("clearing resets the whole record and cancels pending hide and refresh timers", () => {
 	const harness = createHarness();
-	harness.store.update({active: true, collecting: true, done: false, channelId: "c1", total: 9, processed: 4, batch: 3, displayed: 2, skipped: 1, failed: 1, retryable: 1, aiDropped: 1, lastSkipReason: "link_only", lastSkipPreview: "hi"});
+	harness.store.update({active: true, collecting: true, done: false, channelId: "c1", total: 9, processed: 4, batch: 3, displayed: 2, displayPending: 1, skipped: 1, failed: 1, retryable: 1, aiDropped: 1, lastSkipReason: "link_only", lastSkipPreview: "hi"});
 	harness.store.scheduleHide(1600, () => {});
 	harness.store.scheduleRefresh(1000, () => {});
 	assert.equal(harness.store.hasPendingHide(), true);
@@ -324,7 +343,7 @@ test("clearing resets the whole record and cancels pending hide and refresh time
 	assert.equal(harness.timers.size, 0, "the hide timer handle must actually be released");
 	assert.deepEqual(cleared, {
 		active: false, collecting: false, done: false, channelId: null,
-		total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0,
+		total: 0, processed: 0, batch: 0, displayed: 0, displayPending: 0, skipped: 0,
 		failed: 0, retryable: 0, aiDropped: 0, lastSkipReason: "", lastSkipPreview: "",
 		phase: null, phaseStartedAt: 0, progressAt: 0
 	});

@@ -37,7 +37,7 @@ const LOADED_STATUS_PHASE_BY_JOB_STATE = Object.freeze({
 
 // Counters whose movement proves the job is still doing work. retryable/aiDropped are
 // excluded: they mirror snapshot bookkeeping rather than forward progress.
-const LOADED_STATUS_PROGRESS_FIELDS = Object.freeze(["total", "processed", "displayed", "skipped", "failed"]);
+const LOADED_STATUS_PROGRESS_FIELDS = Object.freeze(["total", "processed", "displayed", "displayPending", "skipped", "failed"]);
 
 function createEmptyStatus() {
 	return {
@@ -49,6 +49,7 @@ function createEmptyStatus() {
 		processed: 0,
 		batch: 0,
 		displayed: 0,
+		displayPending: 0,
 		skipped: 0,
 		failed: 0,
 		retryable: 0,
@@ -110,28 +111,30 @@ function getStatusCounters(status) {
 	const total = Math.max(0, status && status.total || 0);
 	const processed = Math.max(0, Math.min(total || 0, status && status.processed || 0));
 	const displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0));
+	const displayPending = Math.max(0, Math.min(total || 0, status && status.displayPending || 0));
 	const skipped = Math.max(0, Math.min(total || 0, status && status.skipped || 0));
 	const failedValue = status && status.failed != null ? status.failed : status && status.aiDropped;
 	const failed = Math.max(0, failedValue || 0);
 	const retryable = Math.max(0, status && status.retryable || 0);
 	const batch = Math.max(1, status && status.batch || 1);
-	return {total, processed, displayed, skipped, failed, retryable, batch};
+	return {total, processed, displayed, displayPending, skipped, failed, retryable, batch};
 }
 
 function renderCompactStatusText(status, currentTime) {
-	const {total, processed, displayed, skipped, failed, retryable} = getStatusCounters(status);
+	const {total, processed, displayed, displayPending, skipped, failed, retryable} = getStatusCounters(status);
 	const ratio = `${status && status.done ? displayed : processed}/${total}`;
 	const repairReady = Math.max(displayed, total - skipped - (retryable || failed));
 	if (status && status.phase === "repairing") return `${repairReady}/${total}${retryable || failed ? ` · ${retryable || failed}↻` : ""}`;
 	if (status && (status.phase === "failed" || status.done && (failed || retryable))) return `${displayed}/${total} · ${failed || retryable}!`;
+	if (status && status.done && displayPending) return `${displayed}/${total} · ${displayPending}↻`;
 	if (status && status.done) return `${displayed}/${total}`;
 	const phaseStartedAt = status && status.phaseStartedAt || 0;
 	return phaseStartedAt ? `${ratio} · ${formatSeconds(currentTime - phaseStartedAt)}` : ratio;
 }
 
 function renderStatusDetailText(status, chinese, phaseSegment) {
-	const {total, processed, displayed, skipped, failed, retryable, batch} = getStatusCounters(status);
-	const extraText = `${skipped ? (chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}`) : ""}${failed ? (chinese ? `，失败 ${failed}` : `, failed ${failed}`) : ""}${retryable && retryable != failed ? (chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}`) : ""}`;
+	const {total, processed, displayed, displayPending, skipped, failed, retryable, batch} = getStatusCounters(status);
+	const extraText = `${displayPending ? (chinese ? `，待显示 ${displayPending}` : `, ${displayPending} awaiting display`) : ""}${skipped ? (chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}`) : ""}${failed ? (chinese ? `，失败 ${failed}` : `, failed ${failed}`) : ""}${retryable && retryable != failed ? (chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}`) : ""}`;
 	if (status && status.done) {
 		if (!total) return failed || retryable ? (chinese ? `已加载翻译：失败 ${failed}，待重试 ${retryable}` : `Loaded translation: ${failed} failed, ${retryable} retry pending`) : (chinese ? "已加载翻译：开启，暂无待翻译" : "Loaded translation: on, no pending messages");
 		return chinese ? `已加载翻译：第 ${batch} 批完成，显示 ${displayed}/${total}${extraText}` : `Loaded translation: batch ${batch} done, shown ${displayed}/${total}${extraText}`;
@@ -219,6 +222,9 @@ function createLoadedTranslationStatusStore({
 			if (nextJobKey !== sealedJobKey) {
 				sealedJobKey = nextJobKey;
 				sealedTotal = null;
+				// Pending paints belong to one completed batch. A new batch must never
+				// inherit the previous batch's unresolved-row counter through merge semantics.
+				if (!Object.prototype.hasOwnProperty.call(updates, "displayPending")) next.displayPending = 0;
 			}
 			next.phase = resolvePhase(previous, next, updates);
 			if (sealedTotal === null && !next.collecting && (next.active || next.done) && next.total > 0) sealedTotal = Math.max(0, next.total || 0);

@@ -63,6 +63,7 @@ module.exports = (_ => {
 		const {createDisplayRuntime} = require("../display/display-runtime");
 		const {createTranslationDisplayLogic} = require("../display/translation-display-logic");
 		const {createDisplayRepaintScheduler} = require("../display/repaint-scheduler");
+		const {createHistoricalDisplayTracker} = require("../display/historical-display-tracker");
 		const {createTranslatorStyles} = require("../ui/styles");
 		const {renderSettingsPanel} = require("../ui/settings-panel");
 		const {createTranslateComponents, translateIcon, translateIconUntranslate} = require("../ui/translate-components");
@@ -127,14 +128,8 @@ module.exports = (_ => {
 		
 		const channelTitleStore = createChannelTitleStore();
 		const loadedTranslationStatusStore = createLoadedTranslationStatusStore({isChineseUiLanguage: () => _this && _this.isChineseUiLanguage()});
+		const historicalDisplayTracker = createHistoricalDisplayTracker({isStatusForChannel: channelId => loadedTranslationStatusStore.isForChannel(channelId), getRevision: (_channelId, messageId) => {const view = _this && _this.getReceivedDisplayRuntimeView(messageId); return view ? view.revision : null;}, updateStatus: updates => _this && _this.updateLoadedAutoTranslationStatus(updates)});
 		var pluginRuntimeActive = true;
-		const AUTO_TRANSLATION_RERENDER_DELAY = 120;
-		const AUTO_TRANSLATION_HISTORY_RERENDER_DELAY = 1500;
-		// A live burst drains into one AI batch request instead of one request per
-		// message; the cap keeps a single prompt within comfortable output limits.
-		// How often a deferred repaint re-checks whether the user stopped typing or closed
-		// the settings surface. Matches the legacy text-area deferral.
-		const AUTO_TRANSLATION_DEFERRED_REPAINT_RETRY = 450;
 		const DEFAULT_LOADED_AUTO_TRANSLATE_LIMIT = 50;
 		const LOADED_AUTO_TRANSLATE_LIMIT_MIN = 1;
 		const LOADED_AUTO_TRANSLATE_LIMIT_MAX = 100;
@@ -1502,7 +1497,7 @@ module.exports = (_ => {
 
 			positionLoadedAutoTranslationStatusElement (element) {
 				if (!element || typeof document == "undefined") return;
-				const selectors = [BDFDB.dotCN && BDFDB.dotCN.channeltextarea, '[class*="channelTextArea"]', 'form [role="textbox"]'];
+				const selectors = ['[class*="channelTextArea"]', 'form [role="textbox"]'];
 				let anchors = [];
 				for (const selector of selectors) {
 					if (!selector) continue;
@@ -1674,10 +1669,11 @@ module.exports = (_ => {
 				this.updateInlineLoadedAutoTranslationStatusElements();
 				loadedTranslationStatusStore.schedulePosition(_ => this.positionLoadedAutoTranslationStatusElement(element));
 				if (currentStatus.active) loadedTranslationStatusStore.scheduleRefresh(LOADED_STATUS_REFRESH_MS, () => this.updateLoadedAutoTranslationStatus({}));
-				else if (currentStatus.done && !retryableCount && !Math.max(0, currentStatus.failed || currentStatus.aiDropped || 0)) loadedTranslationStatusStore.scheduleHide(LOADED_STATUS_COMPLETION_HIDE_MS, () => this.removeLoadedAutoTranslationStatusElement());
+				else if (currentStatus.done && !Math.max(0, currentStatus.displayPending || 0) && !retryableCount && !Math.max(0, currentStatus.failed || currentStatus.aiDropped || 0)) loadedTranslationStatusStore.scheduleHide(LOADED_STATUS_COMPLETION_HIDE_MS, () => this.removeLoadedAutoTranslationStatusElement());
 			}
 
 			clearLoadedAutoTranslationStatus () {
+				historicalDisplayTracker.clear();
 				loadedTranslationStatusStore.clear();
 				const element = typeof document != "undefined" && document.getElementById("DiscordAITranslator-loaded-status");
 				if (element) element.remove();
@@ -2604,7 +2600,8 @@ module.exports = (_ => {
 				const blockedIds = new Set([].concat(batchOutcome && batchOutcome.missingIds || [], batchOutcome && batchOutcome.retryIds || [], batchOutcome && batchOutcome.rejectedIds || [], batchOutcome && batchOutcome.staleIds || []).map(String));
 				const displayReadyIds = new Set([].concat(batchOutcome && batchOutcome.confirmedIds || [], batchOutcome && batchOutcome.deferredIds || []).map(String).filter(messageId => !blockedIds.has(messageId)));
 				const displayed = summary.translated.filter(item => item && item.message && displayReadyIds.has(String(item.message.id))).length;
-				this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length});
+				const displayPending = historicalDisplayTracker.begin({channelId: job.channelId, batchKey: job.id, outcome: batchOutcome, displayed, displayableIds: summary.translated.map(item => item && item.message && String(item.message.id)).filter(Boolean), schedule: (messageId, trackingKey) => this.scheduleReceivedDisplayFlush(job.channelId, messageId, null, trackingKey)});
+				this.updateLoadedAutoTranslationStatus({active: false, collecting: false, done: true, channelId: job.channelId, total: job.items.size, processed: job.items.size, displayed, displayPending, skipped: summary.skipped.length, failed: summary.failed.length, retryable: failedCount, aiDropped: summary.failed.length});
 			}
 
 			updateHistoricalTranslationJobStatus (job) {
@@ -3084,7 +3081,6 @@ module.exports = (_ => {
 					now: () => Date.now(),
 					getSelectedChannelId: () => BDFDB.LibraryStores.SelectedChannelStore.getChannelId(),
 					getMessagesScrollerSelector: () => BDFDB.dotCN && BDFDB.dotCN.messagesscroller,
-					getChannelTextAreaSelector: () => BDFDB.dotCN && BDFDB.dotCN.channeltextarea,
 					escapeSelectorValue: value => typeof CSS != "undefined" && CSS.escape ? CSS.escape(value) : String(value).replace(/(["\\])/g, "\\$1"),
 					// Closing the user-scroll window is the moment a historical snapshot may commit.
 					onScrollActivityFinished: channelId => this.finishHistoricalTranslationSnapshot(channelId)
@@ -3182,6 +3178,7 @@ module.exports = (_ => {
 			ensureReceivedDisplayRepaintScheduler () {
 				if (!this.receivedDisplayRepaintSchedulerInstance) this.receivedDisplayRepaintSchedulerInstance = createDisplayRepaintScheduler({
 					renderMessages: messageIds => this.ensureReceivedDisplayRuntime().renderMessages(messageIds),
+					onRenderOutcome: report => historicalDisplayTracker.handle(report),
 					canRepaintNow: () => this.canRepaintReceivedDisplayNow(),
 					isViewingHistory: () => this.isViewingMessageHistory(),
 					isSettingsSurfaceOpen: () => this.isTranslatorSettingsSurfaceOpen(),
@@ -3193,9 +3190,7 @@ module.exports = (_ => {
 				return this.receivedDisplayRepaintSchedulerInstance;
 			}
 
-			scheduleReceivedDisplayFlush (channelId, messageId, delay = null) {
-				this.ensureReceivedDisplayRepaintScheduler().schedule(channelId, messageId, delay);
-			}
+			scheduleReceivedDisplayFlush (channelId, messageId, delay = null, trackingKey = null) {this.ensureReceivedDisplayRepaintScheduler().schedule(channelId, messageId, delay, 1, trackingKey);}
 
 			clearReceivedDisplayFlushQueue () {
 				this.ensureReceivedDisplayRepaintScheduler().clear();

@@ -14,14 +14,23 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, get
 	}
 
 	function findMessageOwner(element, messageId) {
-		return BDFDB.ReactUtils.findOwner(element, {
+		const ownerConfig = {
 			up: true,
 			unlimited: true,
 			filter: instance => {
 				const props = instance && (instance.stateNode && instance.stateNode.props || instance.props || instance.memoizedProps);
 				return !!(props && props.message && String(props.message.id) === String(messageId));
 			}
-		});
+		};
+		const directOwner = BDFDB.ReactUtils.findOwner(element, ownerConfig);
+		if (directOwner) return directOwner;
+		// Discord can attach the list-row DOM node above the React message owner.
+		// The loading marker is injected by this plugin inside MessageContent, so it is
+		// a reliable lower starting point for the same exact-owner walk.
+		let loadingElement = null;
+		try {loadingElement = element && element.querySelector && element.querySelector(".translator-translation-loading");}
+		catch (err) {loadingElement = null;}
+		return loadingElement ? BDFDB.ReactUtils.findOwner(loadingElement, ownerConfig) : null;
 	}
 
 	function waitForPaint() {
@@ -120,7 +129,7 @@ function createDiscordRenderAdapter({BDFDB, document, requestAnimationFrame, get
 					confirmedIds,
 					missingIds: unconfirmedIds,
 					deferredIds,
-					retryIds: [],
+					retryIds: unconfirmedIds.slice(),
 					fallbackUsed: false
 				};
 			}
