@@ -31,8 +31,19 @@ const {translationEngines, enginePortals} = require("../providers/provider-clien
 const languageTypes = Object.freeze({INPUT: "input", OUTPUT: "output"});
 const messageTypes = Object.freeze({RECEIVED: "received", SENT: "sent"});
 
+function renderBdfdbLoadingPanel() {
+	const panel = document.createElement("div");
+	panel.style.color = "var(--text-normal)";
+	panel.style.fontSize = "16px";
+	panel.style.lineHeight = "22px";
+	panel.style.whiteSpace = "pre-wrap";
+	panel.textContent = "BDFDB 正在加载，请稍后重新打开设置。\nBDFDB is loading. Please reopen settings in a few seconds.";
+	return panel;
+}
+
 function renderSettingsPanel(plugin, collapseStates = {}, dependencies = {}) {
 	const {BDFDB} = dependencies;
+	if (typeof window == "undefined" || !window.BDFDB_Global || !window.BDFDB_Global.loaded) return renderBdfdbLoadingPanel();
 	let settingsPanel;
 	return settingsPanel = BDFDB.PluginUtils.createSettingsPanel(plugin, {
 		collapseStates: collapseStates,
