@@ -2389,7 +2389,7 @@ module.exports = (_ => {
 				const job = [...entry.jobs].reverse().find(candidate => candidate && candidate.state == "collecting" && !candidate.sealed);
 				if (!job) return false;
 				job.seal();
-				if (!entry.runningPromise) this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false});
+				if (!entry.runningPromise && !entry.pendingLiveHandoffTicket) this.startCollectedHistoricalTranslationJobs(channelId, {sealCurrent: false});
 				return true;
 			}
 			startCollectedHistoricalTranslationJobs (channelId, options = {}) {
@@ -2397,7 +2397,7 @@ module.exports = (_ => {
 				if (!entry) return Promise.resolve(null);
 				const config = Object.assign({sealCurrent: true}, options);
 				entry.startToken = null;
-				if (entry.runningPromise) return entry.runningPromise;
+				if (entry.runningPromise || entry.pendingLiveHandoffTicket) return entry.runningPromise || Promise.resolve(null);
 				let job = entry.jobs.find(candidate => candidate && candidate.state == "collecting" && candidate.sealed);
 				if (!job && config.sealCurrent) { job = entry.jobs.find(candidate => candidate && candidate.state == "collecting"); if (job) job.seal(); }
 				if (!job) return Promise.resolve(null);
@@ -2421,7 +2421,7 @@ module.exports = (_ => {
 				while (true) {
 					const entry = this.getHistoricalTranslationJobQueue(channelId, false);
 					if (!entry) return;
-					if (!entry.runningPromise && entry.jobs.length) this.startCollectedHistoricalTranslationJobs(channelId);
+					if (!entry.runningPromise && entry.jobs.length && !entry.pendingLiveHandoffTicket) this.startCollectedHistoricalTranslationJobs(channelId);
 					if (!entry.runningPromise) return;
 					await entry.runningPromise;
 				}
@@ -2474,7 +2474,7 @@ module.exports = (_ => {
 				const entries = channelId ? [this.getHistoricalTranslationJobQueue(channelId, false)].filter(Boolean) : this.ensureHistoricalJobRegistry().listQueues();
 				for (const entry of entries) {
 					entry.generation++;
-					entry.startToken = null; entry.pendingLiveHandoffTicket = null;
+					this.ensureLiveTranslationQueue().clearReservedLiveRequest(entry.channelId, entry.pendingLiveHandoffTicket); entry.startToken = null; entry.pendingLiveHandoffTicket = null;
 					for (const job of entry.jobs) {
 						job.cancel(reason);
 						for (const record of job.items.values()) if (record.source && record.source.message) this.ensureLiveTranslationQueue().clearQueuedMessage(record.source.message.id);
