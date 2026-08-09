@@ -47,35 +47,65 @@ function legacyStatus(fields) {
 	return Object.assign({active: false, collecting: false, done: false, channelId: "c1", total: 0, processed: 0, batch: 0, displayed: 0, skipped: 0, failed: 0, retryable: 0, aiDropped: 0}, fields);
 }
 
-test("the Chinese capsule wording is unchanged for every branch", () => {
-	const {store} = createHarness({chinese: true});
+test("the primary capsule stays compact across requesting, repair, completion and failure", () => {
+	const harness = createHarness({chinese: true, startTime: 1000});
+	harness.store.update({active: true, collecting: false, channelId: "c1", batch: 1, total: 50, processed: 20, displayed: 20, phase: "requesting"});
+	harness.advance(8000);
 
-	assert.equal(store.getStatusText(legacyStatus({done: true})), "已加载翻译：开启，暂无待翻译");
-	assert.equal(store.getStatusText(legacyStatus({done: true, failed: 2, retryable: 3})), "已加载翻译：失败 2，待重试 3");
-	assert.equal(store.getStatusText(legacyStatus({done: true, batch: 2, total: 10, displayed: 7})), "已加载翻译：第 2 批完成，显示 7/10");
-	assert.equal(store.getStatusText(legacyStatus({active: true, collecting: true, batch: 1, total: 21, processed: 0})), "收集已加载：第 1 批 0/21");
-	assert.equal(store.getStatusText(legacyStatus({active: true})), "已加载翻译：开启，等待消息");
-	assert.equal(store.getStatusText(legacyStatus({active: true, batch: 1, total: 21, processed: 4, displayed: 3})), "翻译已加载：第 1 批 4/21，显示 3");
+	assert.equal(harness.store.getStatusText(), "20/50 · 8s");
+	harness.setChinese(false);
+	assert.equal(harness.store.getStatusText(), "20/50 · 8s", "the primary line does not grow with the UI language");
+	assert.equal(harness.store.getStatusText(legacyStatus({active: true, total: 50, processed: 50, displayed: 48, failed: 2, retryable: 2, phase: "repairing"})), "48/50 · 2↻");
+	assert.equal(harness.store.getStatusText(legacyStatus({active: true, total: 50, processed: 50, displayed: 0, failed: 2, retryable: 2, phase: "repairing"})), "48/50 · 2↻", "atomic paint does not hide how many results are already ready");
+	assert.equal(harness.store.getStatusText(legacyStatus({done: true, total: 50, processed: 50, displayed: 50, phase: "done"})), "50/50");
+	assert.equal(harness.store.getStatusText(legacyStatus({done: true, total: 50, processed: 50, displayed: 48, failed: 2, retryable: 2, phase: "failed"})), "48/50 · 2!");
 });
 
-test("the English capsule wording is unchanged for every branch", () => {
+test("the configured total seals at handoff and final display keeps the exact ready count", () => {
+	const {store} = createHarness();
+	store.update({active: true, collecting: true, channelId: "c1", batch: 1, total: 20, processed: 0});
+	store.update({total: 50});
+	store.update({collecting: false, total: 50, processed: 0, phase: "requesting"});
+	store.update({total: 20, processed: 20, displayed: 20});
+
+	assert.equal(store.getStatus().total, 50, "a mounted-window update cannot shrink the sealed configured batch");
+	store.update({active: false, done: true, total: 20, processed: 20, displayed: 50, phase: "done"});
+	assert.equal(store.getStatus().total, 50);
+	assert.equal(store.getStatusText(), "50/50", "confirmed and virtualized-ready results share the exact final count");
+
+	store.update({active: true, collecting: true, done: false, channelId: "c1", batch: 2, total: 10, processed: 0, displayed: 0});
+	assert.equal(store.getStatus().total, 10, "a new batch owns a new total");
+});
+
+test("the Chinese hover detail preserves every diagnostic branch", () => {
+	const {store} = createHarness({chinese: true});
+
+	assert.equal(store.getStatusDetailText(legacyStatus({done: true})), "已加载翻译：开启，暂无待翻译");
+	assert.equal(store.getStatusDetailText(legacyStatus({done: true, failed: 2, retryable: 3})), "已加载翻译：失败 2，待重试 3");
+	assert.equal(store.getStatusDetailText(legacyStatus({done: true, batch: 2, total: 10, displayed: 7})), "已加载翻译：第 2 批完成，显示 7/10");
+	assert.equal(store.getStatusDetailText(legacyStatus({active: true, collecting: true, batch: 1, total: 21, processed: 0})), "收集已加载：第 1 批 0/21");
+	assert.equal(store.getStatusDetailText(legacyStatus({active: true})), "已加载翻译：开启，等待消息");
+	assert.equal(store.getStatusDetailText(legacyStatus({active: true, batch: 1, total: 21, processed: 4, displayed: 3})), "翻译已加载：第 1 批 4/21，显示 3");
+});
+
+test("the English hover detail preserves every diagnostic branch", () => {
 	const {store} = createHarness({chinese: false});
 
-	assert.equal(store.getStatusText(legacyStatus({done: true})), "Loaded translation: on, no pending messages");
-	assert.equal(store.getStatusText(legacyStatus({done: true, failed: 2, retryable: 3})), "Loaded translation: 2 failed, 3 retry pending");
-	assert.equal(store.getStatusText(legacyStatus({done: true, batch: 2, total: 10, displayed: 7})), "Loaded translation: batch 2 done, shown 7/10");
-	assert.equal(store.getStatusText(legacyStatus({active: true, collecting: true, batch: 1, total: 21, processed: 0})), "Collecting loaded: batch 1 0/21");
-	assert.equal(store.getStatusText(legacyStatus({active: true})), "Loaded translation: on, waiting");
-	assert.equal(store.getStatusText(legacyStatus({active: true, batch: 1, total: 21, processed: 4, displayed: 3})), "Translating loaded: batch 1 4/21, shown 3");
+	assert.equal(store.getStatusDetailText(legacyStatus({done: true})), "Loaded translation: on, no pending messages");
+	assert.equal(store.getStatusDetailText(legacyStatus({done: true, failed: 2, retryable: 3})), "Loaded translation: 2 failed, 3 retry pending");
+	assert.equal(store.getStatusDetailText(legacyStatus({done: true, batch: 2, total: 10, displayed: 7})), "Loaded translation: batch 2 done, shown 7/10");
+	assert.equal(store.getStatusDetailText(legacyStatus({active: true, collecting: true, batch: 1, total: 21, processed: 0})), "Collecting loaded: batch 1 0/21");
+	assert.equal(store.getStatusDetailText(legacyStatus({active: true})), "Loaded translation: on, waiting");
+	assert.equal(store.getStatusDetailText(legacyStatus({active: true, batch: 1, total: 21, processed: 4, displayed: 3})), "Translating loaded: batch 1 4/21, shown 3");
 });
 
 test("the skipped/failed/retry suffixes keep their wording in both languages", () => {
 	const harness = createHarness({chinese: true});
 	const status = legacyStatus({done: true, batch: 1, total: 10, displayed: 4, skipped: 3, failed: 2, retryable: 5});
 
-	assert.equal(harness.store.getStatusText(status), "已加载翻译：第 1 批完成，显示 4/10，跳过 3，失败 2，待重试 5");
+	assert.equal(harness.store.getStatusDetailText(status), "已加载翻译：第 1 批完成，显示 4/10，跳过 3，失败 2，待重试 5");
 	harness.setChinese(false);
-	assert.equal(harness.store.getStatusText(status), "Loaded translation: batch 1 done, shown 4/10, skipped 3, failed 2, retry pending 5");
+	assert.equal(harness.store.getStatusDetailText(status), "Loaded translation: batch 1 done, shown 4/10, skipped 3, failed 2, retry pending 5");
 });
 
 test("a retry count equal to the failed count is not repeated", () => {
@@ -84,20 +114,20 @@ test("a retry count equal to the failed count is not repeated", () => {
 
 	// The historical-job suite depends on this: a fully retryable batch says "retry"
 	// once and never doubles the failure count.
-	assert.equal(store.getStatusText(status), "Loaded translation: batch 1 done, shown 3/4, failed 1");
+	assert.equal(store.getStatusDetailText(status), "Loaded translation: batch 1 done, shown 3/4, failed 1");
 });
 
 test("counters are clamped and the failure count falls back to the AI-dropped count", () => {
 	const {store} = createHarness({chinese: false});
 
 	// Processed/displayed/skipped can never exceed the total the capsule shows.
-	assert.equal(store.getStatusText(legacyStatus({active: true, total: 5, processed: 99, displayed: 99})), "Translating loaded: batch 1 5/5, shown 5");
+	assert.equal(store.getStatusDetailText(legacyStatus({active: true, total: 5, processed: 99, displayed: 99})), "Translating loaded: batch 1 5/5, shown 5");
 	// Negative values are floored at zero rather than rendered.
-	assert.equal(store.getStatusText(legacyStatus({active: true, total: 5, processed: -3, displayed: -3})), "Translating loaded: batch 1 0/5, shown 0");
+	assert.equal(store.getStatusDetailText(legacyStatus({active: true, total: 5, processed: -3, displayed: -3})), "Translating loaded: batch 1 0/5, shown 0");
 	// A record written before `failed` existed only carries aiDropped.
 	const droppedOnly = legacyStatus({done: true, total: 4, displayed: 2, aiDropped: 2});
 	delete droppedOnly.failed;
-	assert.equal(store.getStatusText(droppedOnly), "Loaded translation: batch 1 done, shown 2/4, failed 2");
+	assert.equal(store.getStatusDetailText(droppedOnly), "Loaded translation: batch 1 done, shown 2/4, failed 2");
 });
 
 test("a status without a phase renders exactly as it did before phases existed", () => {
@@ -106,7 +136,7 @@ test("a status without a phase renders exactly as it did before phases existed",
 
 	// No phase means no timestamps, so no elapsed time and no stall marker may appear
 	// no matter how long the clock has run.
-	assert.equal(harness.store.getStatusText(legacyStatus({active: true, batch: 1, total: 21, processed: 0, displayed: 0})), "翻译已加载：第 1 批 0/21，显示 0");
+	assert.equal(harness.store.getStatusDetailText(legacyStatus({active: true, batch: 1, total: 21, processed: 0, displayed: 0})), "翻译已加载：第 1 批 0/21，显示 0");
 });
 
 test("a running phase reports how long it has been working", () => {
@@ -114,9 +144,9 @@ test("a running phase reports how long it has been working", () => {
 	harness.store.update({active: true, collecting: false, channelId: "c1", batch: 1, total: 21, processed: 0, displayed: 0, phase: "requesting"});
 	harness.advance(12000);
 
-	assert.equal(harness.store.getStatusText(), "翻译已加载：第 1 批 0/21，显示 0，请求中 12s");
+	assert.equal(harness.store.getStatusDetailText(), "翻译已加载：第 1 批 0/21，显示 0，请求中 12s");
 	harness.setChinese(false);
-	assert.equal(harness.store.getStatusText(), "Translating loaded: batch 1 0/21, shown 0, requesting 12s");
+	assert.equal(harness.store.getStatusDetailText(), "Translating loaded: batch 1 0/21, shown 0, requesting 12s");
 });
 
 test("a phase with no counter movement is reported as stuck", () => {
@@ -129,12 +159,12 @@ test("a phase with no counter movement is reported as stuck", () => {
 	harness.advance(1);
 	// This is the incident text: the counters read the same as ever, and the suffix is
 	// the only thing that says the job is not moving.
-	assert.equal(harness.store.getStatusText(), "翻译已加载：第 1 批 0/21，显示 0，请求中 45s 无进展");
+	assert.equal(harness.store.getStatusDetailText(), "翻译已加载：第 1 批 0/21，显示 0，请求中 45s 无进展");
 	assert.equal(harness.store.getPhaseSnapshot().stalled, true);
 	assert.equal(harness.store.getPhaseSnapshot().working, false);
 
 	harness.setChinese(false);
-	assert.equal(harness.store.getStatusText(), "Translating loaded: batch 1 0/21, shown 0, requesting 45s no progress");
+	assert.equal(harness.store.getStatusDetailText(), "Translating loaded: batch 1 0/21, shown 0, requesting 45s no progress");
 });
 
 test("counter movement restarts the stall clock without restarting the phase clock", () => {
@@ -157,12 +187,12 @@ test("a collecting capsule reports its phase while a waiting one stays quiet", (
 	const harness = createHarness({chinese: true});
 	harness.store.update({active: true, collecting: true, channelId: "c1", batch: 1, total: 0, processed: 0});
 	harness.advance(3000);
-	assert.equal(harness.store.getStatusText(), "收集已加载：第 1 批 0/0，收集中 3s");
+	assert.equal(harness.store.getStatusDetailText(), "收集已加载：第 1 批 0/0，收集中 3s");
 
 	// Idle-with-nothing-to-do has no job behind it, so a growing timer would only alarm.
 	harness.store.update({collecting: false, active: true, total: 0});
 	harness.advance(60000);
-	assert.equal(harness.store.getStatusText(), "已加载翻译：开启，等待消息");
+	assert.equal(harness.store.getStatusDetailText(), "已加载翻译：开启，等待消息");
 });
 
 test("a terminal phase adds nothing to the finished wording", () => {
@@ -171,12 +201,12 @@ test("a terminal phase adds nothing to the finished wording", () => {
 	harness.advance(120000);
 
 	assert.equal(harness.store.getStatus().phase, "done");
-	assert.equal(harness.store.getStatusText(), "已加载翻译：第 2 批完成，显示 9/10");
+	assert.equal(harness.store.getStatusDetailText(), "已加载翻译：第 2 批完成，显示 9/10");
 
 	harness.store.update({done: false, active: false, phase: "failed"});
 	harness.advance(120000);
 	assert.equal(harness.store.getStatus().phase, "failed");
-	assert.equal(harness.store.getStatusText(), "翻译已加载：第 2 批 0/10，显示 9", "a failed phase adds no timer either");
+	assert.equal(harness.store.getStatusDetailText(), "翻译已加载：第 2 批 0/10，显示 9", "a failed phase adds no timer either");
 });
 
 test("the phase is derived from the flags when the caller states none", () => {
@@ -279,15 +309,18 @@ test("the returned status is a copy, so a reader cannot corrupt the record", () 
 	assert.equal(store.getStatus().channelId, "c1");
 });
 
-test("clearing resets the whole record and cancels a pending hide", () => {
+test("clearing resets the whole record and cancels pending hide and refresh timers", () => {
 	const harness = createHarness();
 	harness.store.update({active: true, collecting: true, done: false, channelId: "c1", total: 9, processed: 4, batch: 3, displayed: 2, skipped: 1, failed: 1, retryable: 1, aiDropped: 1, lastSkipReason: "link_only", lastSkipPreview: "hi"});
 	harness.store.scheduleHide(1600, () => {});
+	harness.store.scheduleRefresh(1000, () => {});
 	assert.equal(harness.store.hasPendingHide(), true);
+	assert.equal(harness.store.hasPendingRefresh(), true);
 
 	const cleared = harness.store.clear();
 
 	assert.equal(harness.store.hasPendingHide(), false);
+	assert.equal(harness.store.hasPendingRefresh(), false);
 	assert.equal(harness.timers.size, 0, "the hide timer handle must actually be released");
 	assert.deepEqual(cleared, {
 		active: false, collecting: false, done: false, channelId: null,
@@ -399,23 +432,23 @@ test("a full batch lifecycle keeps the counters and gains a working signal", () 
 	const jobStates = ["collecting", "translating", "repairing", "ready", "committed"];
 
 	harness.store.update({active: true, collecting: true, done: false, channelId: "c1", batch: harness.store.getNextBatchNumber(), total: 0, processed: 0, displayed: 0, phase: harness.store.getPhaseForJobState("collecting")});
-	assert.equal(harness.store.getStatusText(), "收集已加载：第 1 批 0/0，收集中 0s");
+	assert.equal(harness.store.getStatusDetailText(), "收集已加载：第 1 批 0/0，收集中 0s");
 
 	harness.advance(1000);
 	// Exactly what updateHistoricalTranslationJobStatus writes once the job leaves
 	// collecting: the flags and the phase move together.
 	harness.store.update({collecting: false, total: 21, phase: harness.store.getPhaseForJobState(jobStates[1])});
 	harness.advance(5000);
-	assert.equal(harness.store.getStatusText(), "翻译已加载：第 1 批 0/21，显示 0，请求中 5s");
+	assert.equal(harness.store.getStatusDetailText(), "翻译已加载：第 1 批 0/21，显示 0，请求中 5s");
 
 	harness.advance(LOADED_STATUS_STALLED_AFTER_MS);
-	assert.equal(harness.store.getStatusText(), "翻译已加载：第 1 批 0/21，显示 0，请求中 50s 无进展");
+	assert.equal(harness.store.getStatusDetailText(), "翻译已加载：第 1 批 0/21，显示 0，请求中 50s 无进展");
 
 	harness.store.update({processed: 21, displayed: 20, failed: 1, retryable: 1, aiDropped: 1, phase: harness.store.getPhaseForJobState("ready")});
-	assert.equal(harness.store.getStatusText(), "翻译已加载：第 1 批 21/21，显示 20，失败 1，提交中 0s");
+	assert.equal(harness.store.getStatusDetailText(), "翻译已加载：第 1 批 21/21，显示 20，失败 1，提交中 0s");
 
 	harness.store.update({active: false, collecting: false, done: true, phase: harness.store.getPhaseForJobState("committed")});
-	assert.equal(harness.store.getStatusText(), "已加载翻译：第 1 批完成，显示 20/21，失败 1");
+	assert.equal(harness.store.getStatusDetailText(), "已加载翻译：第 1 批完成，显示 20/21，失败 1");
 });
 
 test("repositioning coalesces into one frame per burst", () => {

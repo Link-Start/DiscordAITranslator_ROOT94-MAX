@@ -336,13 +336,12 @@ function createTranslatorStyles(BDFDB) {
 						gap: 6px;
 						width: auto !important;
 						min-width: 0 !important;
-						max-width: min(360px, calc(100vw - 32px));
+						max-width: min(230px, calc(100vw - 32px));
 						padding: 4px 9px;
 						border: 1px solid var(--background-modifier-accent, rgba(255,255,255,0.08)) !important;
 						border-radius: 999px;
 						background: var(--background-floating, #232428) !important;
-						background: color-mix(in srgb, var(--background-floating, #232428) 90%, black 10%) !important;
-						box-shadow: 0 1px 3px rgba(0,0,0,0.32) !important;
+						box-shadow: var(--shadow-low, 0 1px 3px rgba(0,0,0,0.32)) !important;
 						color: var(--text-muted, #b5bac1);
 						font-size: 12px;
 						font-weight: 500;
@@ -357,14 +356,20 @@ function createTranslatorStyles(BDFDB) {
 						display: none !important;
 					}
 					.translator-loaded-status-floating.translator-loaded-status-retryable {pointer-events: auto;}
-					.translator-loaded-status-dot {
-						width: 6px;
-						height: 6px;
-						border-radius: 50%;
-						background: var(--interactive-normal, #b5bac1);
-						box-shadow: none;
+					.translator-loaded-status-icon {
+						display: inline-flex;
+						width: 14px;
+						height: 14px;
+						color: var(--interactive-normal, var(--text-muted));
 						flex: 0 0 auto;
 					}
+					.translator-loaded-status-icon > svg {display: block; width: 100%; height: 100%;}
+					.translator-loaded-status-collecting .translator-loaded-status-icon,
+					.translator-loaded-status-requesting .translator-loaded-status-icon,
+					.translator-loaded-status-committing .translator-loaded-status-icon {color: var(--brand-500, var(--text-link));}
+					.translator-loaded-status-repairing .translator-loaded-status-icon {color: var(--status-warning, var(--yellow-300));}
+					.translator-loaded-status-done .translator-loaded-status-icon {color: var(--status-positive, var(--green-360));}
+					.translator-loaded-status-failed .translator-loaded-status-icon {color: var(--status-danger, var(--red-400));}
 					.translator-loaded-status-text {white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%;}
 					.translator-loaded-status-retry {
 						appearance: none;

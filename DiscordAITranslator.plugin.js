@@ -1588,13 +1588,12 @@ var require_styles = __commonJS({
 						gap: 6px;
 						width: auto !important;
 						min-width: 0 !important;
-						max-width: min(360px, calc(100vw - 32px));
+						max-width: min(230px, calc(100vw - 32px));
 						padding: 4px 9px;
 						border: 1px solid var(--background-modifier-accent, rgba(255,255,255,0.08)) !important;
 						border-radius: 999px;
 						background: var(--background-floating, #232428) !important;
-						background: color-mix(in srgb, var(--background-floating, #232428) 90%, black 10%) !important;
-						box-shadow: 0 1px 3px rgba(0,0,0,0.32) !important;
+						box-shadow: var(--shadow-low, 0 1px 3px rgba(0,0,0,0.32)) !important;
 						color: var(--text-muted, #b5bac1);
 						font-size: 12px;
 						font-weight: 500;
@@ -1609,14 +1608,20 @@ var require_styles = __commonJS({
 						display: none !important;
 					}
 					.translator-loaded-status-floating.translator-loaded-status-retryable {pointer-events: auto;}
-					.translator-loaded-status-dot {
-						width: 6px;
-						height: 6px;
-						border-radius: 50%;
-						background: var(--interactive-normal, #b5bac1);
-						box-shadow: none;
+					.translator-loaded-status-icon {
+						display: inline-flex;
+						width: 14px;
+						height: 14px;
+						color: var(--interactive-normal, var(--text-muted));
 						flex: 0 0 auto;
 					}
+					.translator-loaded-status-icon > svg {display: block; width: 100%; height: 100%;}
+					.translator-loaded-status-collecting .translator-loaded-status-icon,
+					.translator-loaded-status-requesting .translator-loaded-status-icon,
+					.translator-loaded-status-committing .translator-loaded-status-icon {color: var(--brand-500, var(--text-link));}
+					.translator-loaded-status-repairing .translator-loaded-status-icon {color: var(--status-warning, var(--yellow-300));}
+					.translator-loaded-status-done .translator-loaded-status-icon {color: var(--status-positive, var(--green-360));}
+					.translator-loaded-status-failed .translator-loaded-status-icon {color: var(--status-danger, var(--red-400));}
 					.translator-loaded-status-text {white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%;}
 					.translator-loaded-status-retry {
 						appearance: none;
@@ -4981,11 +4986,25 @@ var require_loaded_translation_status_store = __commonJS({
       return phaseStartedAt ? chinese ? `，${label} ${formatSeconds(currentTime - phaseStartedAt)}` : `, ${label} ${formatSeconds(currentTime - phaseStartedAt)}` : chinese ? `，${label}` : `, ${label}`;
     }
     __name(renderPhaseSegment, "renderPhaseSegment");
-    function renderStatusText(status, chinese, phaseSegment) {
-      let total = Math.max(0, status && status.total || 0), processed = Math.max(0, Math.min(total || 0, status && status.processed || 0)), displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0)), skipped = Math.max(0, Math.min(total || 0, status && status.skipped || 0)), failedValue = status && status.failed != null ? status.failed : status && status.aiDropped, failed = Math.max(0, failedValue || 0), retryable = Math.max(0, status && status.retryable || 0), batch = Math.max(1, status && status.batch || 1), extraText = `${skipped ? chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}` : ""}${failed ? chinese ? `，失败 ${failed}` : `, failed ${failed}` : ""}${retryable && retryable != failed ? chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}` : ""}`;
+    function getStatusCounters(status) {
+      let total = Math.max(0, status && status.total || 0), processed = Math.max(0, Math.min(total || 0, status && status.processed || 0)), displayed = Math.max(0, Math.min(total || 0, status && status.displayed || 0)), skipped = Math.max(0, Math.min(total || 0, status && status.skipped || 0)), failedValue = status && status.failed != null ? status.failed : status && status.aiDropped, failed = Math.max(0, failedValue || 0), retryable = Math.max(0, status && status.retryable || 0), batch = Math.max(1, status && status.batch || 1);
+      return { total, processed, displayed, skipped, failed, retryable, batch };
+    }
+    __name(getStatusCounters, "getStatusCounters");
+    function renderCompactStatusText(status, currentTime) {
+      let { total, processed, displayed, skipped, failed, retryable } = getStatusCounters(status), ratio = `${status && status.done ? displayed : processed}/${total}`, repairReady = Math.max(displayed, total - skipped - (retryable || failed));
+      if (status && status.phase === "repairing") return `${repairReady}/${total}${retryable || failed ? ` · ${retryable || failed}↻` : ""}`;
+      if (status && (status.phase === "failed" || status.done && (failed || retryable))) return `${displayed}/${total} · ${failed || retryable}!`;
+      if (status && status.done) return `${displayed}/${total}`;
+      let phaseStartedAt = status && status.phaseStartedAt || 0;
+      return phaseStartedAt ? `${ratio} · ${formatSeconds(currentTime - phaseStartedAt)}` : ratio;
+    }
+    __name(renderCompactStatusText, "renderCompactStatusText");
+    function renderStatusDetailText(status, chinese, phaseSegment) {
+      let { total, processed, displayed, skipped, failed, retryable, batch } = getStatusCounters(status), extraText = `${skipped ? chinese ? `，跳过 ${skipped}` : `, skipped ${skipped}` : ""}${failed ? chinese ? `，失败 ${failed}` : `, failed ${failed}` : ""}${retryable && retryable != failed ? chinese ? `，待重试 ${retryable}` : `, retry pending ${retryable}` : ""}`;
       return status && status.done ? total ? chinese ? `已加载翻译：第 ${batch} 批完成，显示 ${displayed}/${total}${extraText}` : `Loaded translation: batch ${batch} done, shown ${displayed}/${total}${extraText}` : failed || retryable ? chinese ? `已加载翻译：失败 ${failed}，待重试 ${retryable}` : `Loaded translation: ${failed} failed, ${retryable} retry pending` : chinese ? "已加载翻译：开启，暂无待翻译" : "Loaded translation: on, no pending messages" : status && status.collecting ? chinese ? `收集已加载：第 ${batch} 批 ${processed}/${total}${extraText}${phaseSegment}` : `Collecting loaded: batch ${batch} ${processed}/${total}${extraText}${phaseSegment}` : total ? chinese ? `翻译已加载：第 ${batch} 批 ${processed}/${total}，显示 ${displayed}${extraText}${phaseSegment}` : `Translating loaded: batch ${batch} ${processed}/${total}, shown ${displayed}${extraText}${phaseSegment}` : chinese ? "已加载翻译：开启，等待消息" : "Loaded translation: on, waiting";
     }
-    __name(renderStatusText, "renderStatusText");
+    __name(renderStatusDetailText, "renderStatusDetailText");
     function createLoadedTranslationStatusStore({
       now = Date.now,
       setTimeout: scheduleTimer = null,
@@ -4995,7 +5014,7 @@ var require_loaded_translation_status_store = __commonJS({
       requestFrame = /* @__PURE__ */ __name((callback) => typeof requestAnimationFrame == "function" ? requestAnimationFrame(callback) : globalThis.setTimeout(callback, 16), "requestFrame"),
       cancelFrame = /* @__PURE__ */ __name((handle) => typeof cancelAnimationFrame == "function" ? cancelAnimationFrame(handle) : globalThis.clearTimeout(handle), "cancelFrame")
     } = {}) {
-      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), positionFrame = null, status = createEmptyStatus(), hideTimer = null, seenMessages = {};
+      let startTimer = scheduleTimer || ((callback, delay) => globalThis.setTimeout(callback, delay)), stopTimer = cancelTimer || ((handle) => globalThis.clearTimeout(handle)), positionFrame = null, status = createEmptyStatus(), hideTimer = null, refreshTimer = null, seenMessages = {}, sealedTotal = null, sealedJobKey = "";
       function resolvePhase(previous, next, updates) {
         if (updates && typeof updates.phase == "string" && LOADED_STATUS_PHASE_SET.has(updates.phase)) return updates.phase;
         if (next.done) return "done";
@@ -5038,11 +5057,11 @@ var require_loaded_translation_status_store = __commonJS({
           return LOADED_STATUS_PHASE_BY_JOB_STATE[jobState] || null;
         },
         update(updates = {}) {
-          let previous = status, next = Object.assign({}, previous, updates);
-          return next.phase = resolvePhase(previous, next, updates), next.phase !== previous.phase ? (next.phaseStartedAt = now(), next.progressAt = next.phaseStartedAt) : (next.phaseStartedAt = previous.phaseStartedAt, next.progressAt = hasCounterMoved(previous, next) ? now() : previous.progressAt), status = next, this.getStatus();
+          let previous = status, next = Object.assign({}, previous, updates), nextJobKey = `${normalizeChannelId(next.channelId)}:${Math.max(0, next.batch || 0)}`;
+          return nextJobKey !== sealedJobKey && (sealedJobKey = nextJobKey, sealedTotal = null), next.phase = resolvePhase(previous, next, updates), sealedTotal === null && !next.collecting && (next.active || next.done) && next.total > 0 && (sealedTotal = Math.max(0, next.total || 0)), sealedTotal !== null && !next.collecting && (next.total = sealedTotal), next.phase !== previous.phase ? (next.phaseStartedAt = now(), next.progressAt = next.phaseStartedAt) : (next.phaseStartedAt = previous.phaseStartedAt, next.progressAt = hasCounterMoved(previous, next) ? now() : previous.progressAt), status = next, this.getStatus();
         },
         clear() {
-          return this.cancelHide(), status = createEmptyStatus(), this.getStatus();
+          return this.cancelTimers(), status = createEmptyStatus(), sealedTotal = null, sealedJobKey = "", this.getStatus();
         },
         // Reports whether the phase is progressing, so a caller can log or diagnose
         // without parsing the rendered text.
@@ -5060,8 +5079,12 @@ var require_loaded_translation_status_store = __commonJS({
           };
         },
         getStatusText(statusOverride) {
+          let target = readStatus(statusOverride);
+          return renderCompactStatusText(target, now());
+        },
+        getStatusDetailText(statusOverride) {
           let target = readStatus(statusOverride), chinese = !!isChineseUiLanguage();
-          return renderStatusText(target, chinese, renderPhaseSegment(target, chinese, now(), stalledAfterMs));
+          return renderStatusDetailText(target, chinese, renderPhaseSegment(target, chinese, now(), stalledAfterMs));
         },
         getPreviewText(text) {
           return text = (text || "").replace(/\s+/g, " ").trim(), text ? text.length > 24 ? `${text.slice(0, 24)}...` : text : "";
@@ -5084,6 +5107,20 @@ var require_loaded_translation_status_store = __commonJS({
           return this.cancelHide(), hideTimer = startTimer(() => {
             hideTimer = null, typeof onHide == "function" && onHide();
           }, delay), hideTimer;
+        },
+        hasPendingRefresh() {
+          return refreshTimer !== null;
+        },
+        cancelRefresh() {
+          refreshTimer !== null && stopTimer(refreshTimer), refreshTimer = null;
+        },
+        cancelTimers() {
+          this.cancelHide(), this.cancelRefresh();
+        },
+        scheduleRefresh(delay, onRefresh) {
+          return this.cancelRefresh(), refreshTimer = startTimer(() => {
+            refreshTimer = null, typeof onRefresh == "function" && onRefresh();
+          }, delay), refreshTimer;
         },
         getSeenCount(channelId) {
           let key = normalizeChannelId(channelId), seen = key && seenMessages[key];
@@ -5125,6 +5162,8 @@ var require_loaded_translation_status_store = __commonJS({
     }
     __name(createLoadedTranslationStatusStore, "createLoadedTranslationStatusStore");
     module2.exports = {
+      LOADED_STATUS_COMPLETION_HIDE_MS: 3e3,
+      LOADED_STATUS_REFRESH_MS: 1e3,
       LOADED_STATUS_STALLED_AFTER_MS: 45e3,
       LOADED_STATUS_PREVIEW_MAX_LENGTH: 24,
       LOADED_STATUS_PHASES,
@@ -9374,7 +9413,7 @@ Please click <a style="font-weight: 500;">Download Now</a> to install it.</div>`
         }
       } : (([Plugin, BDFDB]) => {
         var _a;
-        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { resumeHistoricalHandoff } = require_historical_handoff_runtime(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), { parseStoredEmbedTranslations } = require_embed_translation_parser(), {
+        let { createDisplayRuntime } = require_display_runtime(), { createTranslationDisplayLogic } = require_translation_display_logic(), { createDisplayRepaintScheduler } = require_repaint_scheduler(), { createTranslatorStyles } = require_styles(), { renderSettingsPanel } = require_settings_panel(), { createTranslateComponents, translateIcon, translateIconUntranslate } = require_translate_components(), { createChannelTitleStore } = require_channel_title_store(), { createMessageViewportStore } = require_message_viewport_store(), { LOADED_STATUS_COMPLETION_HIDE_MS, LOADED_STATUS_REFRESH_MS, createLoadedTranslationStatusStore } = require_loaded_translation_status_store(), { createTranslationCacheStore } = require_translation_cache_store(), { createProviderClient, translationEngines, enginePortals } = require_provider_client(), { createSentTranslationStore } = require_sent_translation_store(), { createLiveTranslationQueue } = require_live_translation_queue(), { resumeHistoricalHandoff } = require_historical_handoff_runtime(), { createHistoricalJobRegistry } = require_historical_job_registry(), { HistoricalTranslationJob, HISTORICAL_TERMINAL_ITEM_STATES, HISTORICAL_AI_BATCH_ITEM_LIMIT_MAX } = require_historical_translation_job(), { createProtectionLogic, TRANSLATION_PROTECTION_SIGNATURE_VERSION } = require_protection_logic(), { parseStoredEmbedTranslations } = require_embed_translation_parser(), {
           foreignLanguageDecisionRuntime,
           receivedMessageFilterRuntime,
           createReceivedTranslationRuntime
@@ -10580,6 +10619,9 @@ __________________ __________________ __________________
           getLoadedAutoTranslationStatusText(status) {
             return loadedTranslationStatusStore.getStatusText(status);
           }
+          getLoadedAutoTranslationStatusDetailText(status) {
+            return loadedTranslationStatusStore.getStatusDetailText(status);
+          }
           getLoadedAutoTranslationSkipReasonText(reason) {
             switch (reason) {
               case "symbol_only":
@@ -10609,7 +10651,7 @@ __________________ __________________ __________________
           }
           getLoadedAutoTranslationStatusTitleText(status) {
             if (!status) return "";
-            let baseText = this.getLoadedAutoTranslationStatusText(status), detailParts = [];
+            let baseText = this.getLoadedAutoTranslationStatusDetailText(status), detailParts = [];
             return status && status.lastSkipReason && detailParts.push(this.getLoadedAutoTranslationSkipReasonText(status.lastSkipReason)), status && status.lastSkipPreview && detailParts.push(status.lastSkipPreview), detailParts.length ? `${baseText} | ${this.isChineseUiLanguage() ? "最近跳过" : "Last skipped"}: ${detailParts.join(" | ")}` : baseText;
           }
           getAutoTranslatedResultRejectReason(translation, channelId) {
@@ -10749,12 +10791,12 @@ __________________ __________________ __________________
               this.removeLoadedAutoTranslationStatusElement();
               return;
             }
-            if (loadedTranslationStatusStore.cancelHide(), typeof document > "u" || !document.body) return;
+            if (loadedTranslationStatusStore.cancelTimers(), typeof document > "u" || !document.body) return;
             this.attachAutoTranslationScrollWatcher(), this.ensureLoadedAutoTranslationStatusPositionWatcher();
             let element = document.getElementById("DiscordAITranslator-loaded-status");
             element || (element = document.createElement("div"), element.id = "DiscordAITranslator-loaded-status", document.body.appendChild(element));
-            let retryableCount = Math.max(0, currentStatus.retryable || 0), showRetry = !currentStatus.active && retryableCount > 0;
-            element.className = `translator-loaded-status-floating${showRetry ? " translator-loaded-status-retryable" : ""}`, (!element.querySelector(".translator-loaded-status-text") || element.querySelector(".translator-loaded-status-progress")) && (element.innerHTML = '<span class="translator-loaded-status-dot"></span><span class="translator-loaded-status-text"></span>');
+            let retryableCount = Math.max(0, currentStatus.retryable || 0), showRetry = !currentStatus.active && retryableCount > 0, visualPhase = showRetry ? "failed" : currentStatus.phase || (currentStatus.collecting ? "collecting" : currentStatus.done ? "done" : "requesting");
+            element.className = `translator-loaded-status-floating translator-loaded-status-${visualPhase}${showRetry ? " translator-loaded-status-retryable" : ""}`, (!element.querySelector(".translator-loaded-status-icon") || !element.querySelector(".translator-loaded-status-text") || element.querySelector(".translator-loaded-status-progress")) && (element.innerHTML = '<span class="translator-loaded-status-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M12.9 15.1 10.8 13l.1-.1a14.7 14.7 0 0 0 3.1-5.4h2.4V5.4h-5.2V3.3H9.1v2.1H3.9v2.1H12a12.5 12.5 0 0 1-2.6 4.1 12.4 12.4 0 0 1-1.9-2.7H5.4a14.8 14.8 0 0 0 2.5 4.1l-4.2 4.1 1.5 1.5 4.2-4.2 2.6 2.7.9-2Zm5.9-3.4h-2.1L12 22.2h2.2l1.2-3.1h4.8l1.2 3.1h2.2l-4.8-10.5Zm-2.6 5.3 1.6-4.2 1.6 4.2h-3.2Z"/></svg></span><span class="translator-loaded-status-text"></span>');
             let textElement = element.querySelector(".translator-loaded-status-text");
             textElement && (textElement.textContent = this.getLoadedAutoTranslationStatusText(currentStatus));
             let retryButton = element.querySelector(".translator-loaded-status-retry");
@@ -10763,14 +10805,7 @@ __________________ __________________ __________________
               let retryResult = this.retryFailedHistoricalTranslations(currentStatus.channelId);
               retryResult && typeof retryResult.catch == "function" && retryResult.catch((_2) => {
               });
-            }) : retryButton && retryButton.remove(), element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus), this.updateInlineLoadedAutoTranslationStatusElements(), loadedTranslationStatusStore.schedulePosition((_2) => this.positionLoadedAutoTranslationStatusElement(element));
-          }
-          hideLoadedAutoTranslationStatus(delay = 1600) {
-            if (loadedTranslationStatusStore.cancelHide(), this.shouldShowLoadedAutoTranslationStatus(loadedTranslationStatusStore.getStatus())) {
-              this.updateLoadedAutoTranslationStatus({});
-              return;
-            }
-            loadedTranslationStatusStore.scheduleHide(() => this.removeLoadedAutoTranslationStatusElement(), delay);
+            }) : retryButton && retryButton.remove(), element.title = this.getLoadedAutoTranslationStatusTitleText(currentStatus), this.updateInlineLoadedAutoTranslationStatusElements(), loadedTranslationStatusStore.schedulePosition((_2) => this.positionLoadedAutoTranslationStatusElement(element)), currentStatus.active ? loadedTranslationStatusStore.scheduleRefresh(LOADED_STATUS_REFRESH_MS, () => this.updateLoadedAutoTranslationStatus({})) : currentStatus.done && !retryableCount && !Math.max(0, currentStatus.failed || currentStatus.aiDropped || 0) && loadedTranslationStatusStore.scheduleHide(LOADED_STATUS_COMPLETION_HIDE_MS, () => this.removeLoadedAutoTranslationStatusElement());
           }
           clearLoadedAutoTranslationStatus() {
             loadedTranslationStatusStore.clear();
