@@ -2074,6 +2074,29 @@ test("editing a source removes its retained historical failure snapshot", async 
 	assert.equal(plugin.getFailedHistoricalTranslationCount(channelId), 0);
 });
 
+test("deleting a source cancels its historical record and retained retry snapshot only in that channel", () => {
+	const plugin = configureHistoricalCoordinatorPlugin();
+	const firstChannelId = "channel-history-delete";
+	const secondChannelId = "channel-history-delete-other";
+	const deletedMessage = createMessage("deleted-history", "deleted source");
+	const otherMessage = createMessage("other-history", "other source");
+	plugin.queueAutoTranslateMessage(deletedMessage, {id: firstChannelId}, {content: deletedMessage.content}, {historicalLoad: true, deferHistoricalSnapshotStart: true});
+	plugin.queueAutoTranslateMessage(otherMessage, {id: secondChannelId}, {content: otherMessage.content}, {historicalLoad: true, deferHistoricalSnapshotStart: true});
+	plugin.ensureHistoricalJobRegistry().setFailedSnapshot(firstChannelId, {channelId: firstChannelId, items: [{message: deletedMessage}]});
+	plugin.ensureHistoricalJobRegistry().setFailedSnapshot(secondChannelId, {channelId: secondChannelId, items: [{message: otherMessage}]});
+	const deletedJob = plugin.getHistoricalTranslationJobQueue(firstChannelId, false).jobs[0];
+	const otherJob = plugin.getHistoricalTranslationJobQueue(secondChannelId, false).jobs[0];
+
+	assert.equal(plugin.removeDeletedHistoricalTranslationMessage(deletedMessage.id, firstChannelId), true);
+	assert.equal(deletedJob.items.get(deletedMessage.id).status, "cancelled");
+	assert.equal(deletedJob.items.get(deletedMessage.id).reason, "source-deleted");
+	assert.equal(plugin.getFailedHistoricalTranslationCount(firstChannelId), 0);
+	assert.equal(plugin.ensureLiveTranslationQueue().isMessageQueued(deletedMessage.id), false);
+	assert.equal(otherJob.items.get(otherMessage.id).status, "pending");
+	assert.equal(plugin.getFailedHistoricalTranslationCount(secondChannelId), 1);
+	assert.equal(plugin.ensureLiveTranslationQueue().isMessageQueued(otherMessage.id), true);
+});
+
 test("failed historical status exposes a visible retry action", () => {
 	const plugin = createPluginInstance({
 		callSetLanguages: false,

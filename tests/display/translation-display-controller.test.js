@@ -143,6 +143,24 @@ test("createDisplayView uses translated content only for a translated state with
 	}
 });
 
+test("deleting a referenced message refreshes its reply hosts once and removes its display state", async () => {
+	const {store, refreshes, controller} = createHarness();
+	store.capturePreviewSource({messageId: "referenced", channelId: "c1", sourceSignature: "preview", source: {content: "source", embeds: []}});
+	store.commitPreviewResult({messageId: "referenced", channelId: "c1", signature: "preview", translation: {translatedContent: "translated preview"}});
+	store.markPreviewHost("c1", "referenced", "reply-1");
+	store.markPreviewHost("c1", "referenced", "reply-2");
+
+	const outcome = await controller.deleteMessage("referenced", "c1");
+
+	assert.equal(store.getDisplayState("referenced"), null);
+	assert.equal(refreshes.length, 1);
+	assert.deepEqual(refreshes[0].messageIds, []);
+	assert.deepEqual(refreshes[0].ownerMessageIds, ["reply-1", "reply-2"]);
+	assert.deepEqual(outcome.confirmedIds, []);
+	assert.equal(await controller.deleteMessage("referenced", "wrong-channel"), false);
+	assert.equal(refreshes.length, 1, "an unrelated channel must not repaint");
+});
+
 test("one result refreshes text and decoration under one revision", async () => {
 	const {store, refreshes, controller} = createHarness();
 	capture(store, "m1");

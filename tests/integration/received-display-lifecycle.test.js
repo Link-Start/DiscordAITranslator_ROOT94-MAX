@@ -131,6 +131,50 @@ test("reply preview commit and restore refresh every host in one scoped transact
 	finally {harness.restore();}
 });
 
+test("a deleted message is removed from display cache live history and reply preview ownership", async () => {
+	const harness = createHarness({mountedMessageIds: ["deleted-message", "reply-host", "other-message"]});
+	try {
+		const {plugin, calls} = harness;
+		const channelId = "channel-delete";
+		const message = {id: "deleted-message", channel_id: channelId, content: "source", embeds: [], attachments: [], author: {id: "other-user"}};
+		const otherMessage = {id: "other-message", channel_id: "other-channel", content: "other", embeds: [], attachments: [], author: {id: "other-user"}};
+		plugin.scheduleHistoricalTranslationJobStart = () => {};
+		plugin.shouldAutoTranslateReceivedMessage = () => true;
+		plugin.isMessageWithinLoadedRange = () => true;
+
+		plugin.captureReceivedMessageSource({messageId: message.id, channelId, generation: 1, sourceSignature: "delete-signature", source: {content: message.content, embeds: []}});
+		await plugin.commitReceivedDisplayResult({messageId: message.id, channelId, generation: 1, sourceSignature: "delete-signature", origin: "automatic", status: "translated", translation: {content: "translated", auto: true}});
+		plugin.captureReceivedMessageSource({messageId: otherMessage.id, channelId: otherMessage.channel_id, generation: 1, sourceSignature: "other-signature", source: {content: otherMessage.content, embeds: []}});
+		await plugin.commitReceivedDisplayResult({messageId: otherMessage.id, channelId: otherMessage.channel_id, generation: 1, sourceSignature: "other-signature", origin: "automatic", status: "translated", translation: {content: "other translated", auto: true}});
+		const runtime = plugin.ensureReceivedDisplayRuntime();
+		runtime.commitPreviewResult({messageId: message.id, channelId, signature: "preview", translation: {translatedContent: "preview translated", channelId, auto: true}}, {refresh: false});
+		runtime.markPreviewHost(channelId, message.id, "reply-host");
+		plugin.persistTranslationCacheEntry(message.id, "cache-signature", {content: "cached"});
+		const liveQueue = plugin.ensureLiveTranslationQueue();
+		const liveRequest = liveQueue.createRequest(message, channelId, {content: message.content});
+		liveQueue.markMessageQueued(message.id, liveRequest);
+		plugin.collectHistoricalTranslationMessage({message, channel: {id: channelId}, originalContentData: {content: message.content}, historicalLoad: true, deferHistoricalSnapshotStart: true});
+		const historicalJob = plugin.getHistoricalTranslationJobQueue(channelId, false).jobs[0];
+		const updatesBeforeDelete = calls.forceUpdate;
+
+		await plugin.handleMessageDeletionAction({type: "MESSAGE_DELETE", id: message.id, channelId});
+
+		assert.equal(runtime.getDisplayState(message.id), null);
+		assert.equal(plugin.hasCachedTranslationEntry(message.id), false);
+		assert.equal(liveQueue.isRequestCurrent(liveRequest), false);
+		assert.equal(liveQueue.isMessageQueued(message.id), false);
+		assert.equal(historicalJob.items.get(message.id).status, "cancelled");
+		assert.deepEqual(runtime.getPreviewHostMessageIds(channelId), []);
+		assert.equal(calls.forceUpdate, updatesBeforeDelete + 1);
+		assert.deepEqual(calls.forceUpdateBatches.at(-1), ["reply-host"]);
+		assert.equal(runtime.getDisplayState(otherMessage.id).translation.content, "other translated", "another channel remains untouched");
+		const late = await plugin.commitReceivedDisplayResult({messageId: message.id, channelId, generation: 1, sourceSignature: "delete-signature", origin: "automatic", status: "translated", translation: {content: "late"}});
+		assert.deepEqual(late.rejectedIds, [message.id]);
+		assert.equal(runtime.getDisplayState(message.id), null);
+	}
+	finally {harness.restore();}
+});
+
 test("plugin stop restores automatic records before requesting the final rerender", async () => {
 	const harness = createHarness();
 	try {

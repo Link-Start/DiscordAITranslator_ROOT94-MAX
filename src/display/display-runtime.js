@@ -23,6 +23,7 @@ function createDisplayRuntime(dependencies) {
 		commitHistoricalBatch: results => controller.commitHistoricalBatch(results),
 		renderMessages: messageIds => controller.renderMessages(messageIds),
 		refreshDisplayTransaction: request => controller.refreshDisplayTransaction(request),
+		deleteMessage: (messageId, channelId, options) => controller.deleteMessage(messageId, channelId, options),
 		restoreMessage: (messageId, options) => controller.restoreMessage(messageId, options),
 		restoreChannel: (channelId, options) => controller.restoreChannel(channelId, options),
 		restoreAll: options => controller.restoreAll(options),

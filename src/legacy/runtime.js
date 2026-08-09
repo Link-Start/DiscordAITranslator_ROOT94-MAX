@@ -282,6 +282,33 @@ module.exports = (_ => {
 				});
 			}
 
+			handleDeletedMessage (messageId, channelId) {
+				if (!messageId || !channelId) return Promise.resolve(false);
+				const normalizedMessageId = String(messageId);
+				const normalizedChannelId = String(channelId);
+				const liveRemoved = this.ensureLiveTranslationQueue().removeMessage(normalizedMessageId, normalizedChannelId);
+				const historicalRemoved = this.removeDeletedHistoricalTranslationMessage(normalizedMessageId, normalizedChannelId);
+				const cacheRemoved = this.hasCachedTranslationEntry(normalizedMessageId);
+				this.clearCachedTranslation(normalizedMessageId);
+				return Promise.resolve(this.ensureReceivedDisplayRuntime().deleteMessage(normalizedMessageId, normalizedChannelId)).then(displayOutcome => ({
+					messageId: normalizedMessageId,
+					channelId: normalizedChannelId,
+					removed: !!(liveRemoved || historicalRemoved || cacheRemoved || displayOutcome),
+					displayOutcome
+				}));
+			}
+
+			handleMessageDeletionAction (action) {
+				if (!action || action.type != "MESSAGE_DELETE" && action.type != "MESSAGE_DELETE_BULK") return Promise.resolve(false);
+				const channelId = action.channelId || action.channel_id;
+				const messageIds = action.type == "MESSAGE_DELETE_BULK"
+					? action.ids || action.messageIds || action.message_ids || []
+					: [action.id || action.messageId || action.message_id];
+				const uniqueMessageIds = [...new Set([].concat(messageIds || []).filter(Boolean).map(String))];
+				if (!channelId || !uniqueMessageIds.length) return Promise.resolve(false);
+				return Promise.all(uniqueMessageIds.map(messageId => this.handleDeletedMessage(messageId, channelId)));
+			}
+
 			onStart () {
 				pluginRuntimeActive = true;
 				this.resetReceivedDisplayRuntime();
@@ -289,6 +316,12 @@ module.exports = (_ => {
 				this.ensureSentTranslationStore().resetForStart();
 				this.ensureHistoricalJobRegistry().advanceRuntimeGeneration();
 				this.attachAutoTranslationInputActivityWatcher();
+				const dispatcher = BDFDB.LibraryModules.Dispatcher || BDFDB.LibraryModules.DispatcherUtils;
+				if (dispatcher && typeof dispatcher.dispatch == "function") BDFDB.PatchUtils.patch(this, dispatcher, "dispatch", {before: event => {
+					const action = event.methodArguments && event.methodArguments[0];
+					if (!action || action.type != "MESSAGE_DELETE" && action.type != "MESSAGE_DELETE_BULK") return;
+					this.handleMessageDeletionAction(action).catch(_ => {});
+				}});
 				BDFDB.PatchUtils.patch(this, BDFDB.LibraryModules.MessageUtils, "startEditMessage", {before: e => {
 					const editArchive = e.methodArguments[1] && this.ensureReceivedDisplayRuntime().peekSourceArchive(e.methodArguments[1]);
 						if (editArchive && editArchive.message.content) e.methodArguments[2] = editArchive.message.content;
@@ -2463,6 +2496,27 @@ module.exports = (_ => {
 					}
 				}
 				return invalidated;
+			}
+
+			removeDeletedHistoricalTranslationMessage (messageId, channelId) {
+				if (!messageId || !channelId) return false;
+				const normalizedMessageId = String(messageId);
+				const entry = this.getHistoricalTranslationJobQueue(channelId, false);
+				let removed = false;
+				for (const job of entry && entry.jobs || []) {
+					if (job.invalidateMessage(normalizedMessageId, "source-deleted")) removed = true;
+					this.ensureLiveTranslationQueue().clearHistoricalQueuedMessage(normalizedMessageId, job.id);
+				}
+				const failedEntry = this.ensureHistoricalJobRegistry().getFailedSnapshot(channelId);
+				if (failedEntry && failedEntry.items) {
+					const nextItems = failedEntry.items.filter(item => !item || !item.message || String(item.message.id) !== normalizedMessageId);
+					if (nextItems.length !== failedEntry.items.length) {
+						removed = true;
+						if (nextItems.length) this.ensureHistoricalJobRegistry().setFailedSnapshot(channelId, Object.assign({}, failedEntry, {items: nextItems}));
+						else this.ensureHistoricalJobRegistry().deleteFailedSnapshot(channelId);
+					}
+				}
+				return removed;
 			}
 
 			cancelHistoricalTranslationJobs (channelId = null, reason = "cancelled") {

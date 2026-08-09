@@ -12,6 +12,7 @@ function createLiveRequestRegistry({
 	let liveRequests = {};
 	let requestSequence = 0;
 	let runtimeGeneration = 0;
+	const finishedRequests = new WeakSet();
 
 	function getRequestKey(messageId, channelId) {
 		return `${channelId || "__global"}:${String(messageId || "")}`;
@@ -32,7 +33,8 @@ function createLiveRequestRegistry({
 	}
 
 	function finishRequest(request) {
-		if (!request) return false;
+		if (!request || finishedRequests.has(request)) return false;
+		finishedRequests.add(request);
 		const key = getRequestKey(request.messageId, request.channelId);
 		if (liveRequests[key] === request) delete liveRequests[key];
 		forgetQueuedRequest(request);
@@ -69,6 +71,7 @@ function createLiveRequestRegistry({
 			const request = liveRequests[requestKey];
 			if (channelKey && normalizeChannelId(request.channelId) !== channelKey) continue;
 			delete liveRequests[requestKey];
+			finishedRequests.add(request);
 			forgetQueuedRequest(request);
 			releaseRequestDisplayPending(request);
 		}
@@ -80,9 +83,23 @@ function createLiveRequestRegistry({
 		const request = liveRequests[key];
 		if (!request || request.signature === currentSignature) return false;
 		delete liveRequests[key];
+		finishedRequests.add(request);
 		forgetQueuedRequest(request);
 		releaseRequestDisplayPending(request);
 		retireReservedLiveRequest(channelId, String(request.id), "source-invalidated");
+		return true;
+	}
+
+	function removeMessage(messageId, channelId) {
+		if (!messageId || !channelId) return false;
+		const key = getRequestKey(messageId, channelId);
+		const request = liveRequests[key];
+		if (!request) return false;
+		delete liveRequests[key];
+		finishedRequests.add(request);
+		forgetQueuedRequest(request);
+		releaseRequestDisplayPending(request);
+		retireReservedLiveRequest(channelId, String(request.id), "source-deleted");
 		return true;
 	}
 
@@ -101,8 +118,10 @@ function createLiveRequestRegistry({
 		releaseRequestDisplayPending,
 		invalidateRequests,
 		invalidateRequestForMessage,
+		removeMessage,
 		restartRequestGeneration() {
 			runtimeGeneration++;
+			for (const request of Object.values(liveRequests)) finishedRequests.add(request);
 			liveRequests = {};
 		},
 		getRuntimeGeneration: () => runtimeGeneration,

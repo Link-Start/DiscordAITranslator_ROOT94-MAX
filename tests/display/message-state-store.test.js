@@ -1263,6 +1263,29 @@ test("clearing preview state retires only its recorded host rows", () => {
 	assert.deepEqual(store.getPreviewHostMessageIds("c2"), []);
 });
 
+test("deleting one message removes its state and reply ownership without crossing channels", () => {
+	const store = createMessageStateStore();
+	store.captureSource(snapshot("referenced", "c1", "source"));
+	store.commitPreviewResult({messageId: "referenced", channelId: "c1", signature: "sig", translation: {translatedContent: "preview"}});
+	store.markPreviewHost("c1", "referenced", "reply-1");
+	store.markPreviewHost("c1", "referenced", "reply-2");
+	store.markPreviewEligible("c1", "reply-1");
+	store.captureSource(snapshot("other", "c2", "other source"));
+	store.markPreviewHost("c2", "other", "other-reply");
+
+	assert.equal(store.deleteMessage("reply-1", "wrong-channel"), false, "a mismatched channel cannot delete ownership");
+	assert.equal(store.deleteMessage("reply-1", "c1"), true);
+	assert.deepEqual(store.getPreviewHostMessageIds("c1", ["referenced"]), ["reply-2"]);
+	assert.equal(store.isPreviewEligible("c1", "reply-1"), false);
+
+	assert.equal(store.deleteMessage("referenced", "c1"), true);
+	assert.equal(store.getDisplayState("referenced"), null);
+	assert.deepEqual(store.getPreviewHostMessageIds("c1"), []);
+	assert.equal(store.getChannelGeneration("c1"), undefined, "deleting the final record releases its generation");
+	assert.equal(store.getDisplayState("other").channelId, "c2");
+	assert.deepEqual(store.getPreviewHostMessageIds("c2"), ["other-reply"]);
+});
+
 test("eligibility is not a record flag and clears per channel or entirely", () => {
 	const store = createMessageStateStore();
 	store.markPreviewEligible("c1", "base-1");
