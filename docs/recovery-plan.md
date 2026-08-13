@@ -10,6 +10,90 @@
 
 ---
 
+## Reopened Full Display Debug — Approved 2026-08-10
+
+The 2026-08-04 component-scoped display task is retained below as implementation history, but its central per-message-owner assumption is invalidated by real-client evidence. Hover-dependent translation display, partial translated styling, and hover-dependent channel restoration remain reproducible. The checked boxes below do not represent current release readiness.
+
+### Confirmed root-cause evidence
+
+- Parent `Messages` before-render projection owns message text; child `MessageContent` after-render projection owns decoration. The current per-message update does not guarantee both paths execute in one React cycle.
+- Original restoration can change props after text children were built, leaving stale translated children until Discord naturally rerenders the row.
+- Per-message owner lookup is synthetic in tests and constrained to updateable class instances in the installed BDFDB runtime. Real message rows may be functional or memoized.
+- The adapter's exact selectors have drifted from the more tolerant selector shapes already implemented in `message-viewport-store.js`.
+- `deferredIds` include both off-screen rows and mounted-but-unconfirmed rows, allowing status accounting to overstate visible success.
+- Reply previews and embeds depend on host-row invalidation; thread titles are a separate render surface.
+- The stream pass shallow-clones only the `channelStream` array, then mutates shared entries and message/embed props. Existing source-recapture branches are compensating for plugin-painted text re-entering the source pipeline.
+- Manual translations use the state store but still schedule the legacy full-list repaint. Settings, re-enable, stop, and some cleanup paths also retain broad repaint calls, so the architecture currently has two display transaction systems.
+- The adapter performs one internal retry while the repaint scheduler allows up to three further attempts. This exceeds the documented single repair transaction and can repeatedly query/update rows without proving the parent projection ran.
+- Test `forceUpdate` fakes directly create revision acknowledgement, and lifecycle tests manually invoke parent and child projection in the successful order. This makes the principal regression structurally absent from the suite.
+- Historical prefetch probes undocumented action signatures and trusts the first non-null return without validating that it contains messages. A real action that updates the store asynchronously or returns another shape can leave a configured 50-message job sealed near the mounted 20-message window.
+- Embed restoration mutates/stashes fields on render props, while title restoration uses global title-component updates without visible acknowledgement.
+- Child message rendering can decorate a store-translated revision even when the parent stream never projected translated text. Render hooks also clear state, queue work, and mutate props, so a single React render is not a read-only projection of one revision.
+- Preview/suppression/archive projection changes do not advance a display revision. A reply host can be requested for update without any preview-specific DOM acknowledgement.
+- Historical source collection performs only one prefetch attempt. Ineligible, duplicate, or off-channel records in that response can underfill the configured eligible-message maximum even when older eligible messages still exist.
+- Manual source archives are shallow at nested embed boundaries, and the cache deliberately abandons its final debounced write on stop; both violate the intended immutable-source/cache-retention contract.
+- `npm run verify` passed 1,047/1,047 on this exact debug baseline while the real-client hover regressions remain observed. The suite is therefore not a release signal until the render fixtures are replaced.
+- Manual anchor restoration has delayed writes that survive channel switch/reload, and toggle versioning does not cover the asynchronous store mutation itself; both can reintroduce scroll jumps or a late disabled projection after rapid toggles.
+- Historical source generations are retained for every visited channel instead of being released with the channel session.
+- The source graph has no relative-import cycle, but `src/plugin/index.js` still delegates entirely to the 4,428-line legacy runtime, which directly imports 27 of 38 source modules. The current ratchet prevents growth without forcing the final composition-root migration.
+- The generated release is 13,305 readable lines and 904,357 bytes, and multiple extracted files remain 700-1,490 lines. Structural extraction is therefore incomplete even though the runtime line ratchet passes.
+- The release metadata has no commit/build fingerprint. Current source renders a compact numeric floating status, while the observed client rendered the older sentence-style status; the loaded artifact cannot be identified from the UI or metadata alone.
+- This file is 2,106 lines and mixes active work with checked implementation history; `extraction-plan.md` is an additional unlisted plan with conflicting completion language. After the debug evidence is sealed, retain only the active sequence here and archive the historical implementation transcript outside the repository.
+- DOM confirmation currently proves only a `MessageContent` revision marker. It does not prove body text, translated decoration, embed, reply preview, or title content, so a partial child render can be reported as complete.
+- Manual/live/history do not share a latest-command identity. Late automatic results can overwrite manual results, and old manual callbacks survive channel disable, edit, and deletion.
+- One stale item makes `MessageStateStore.commitBatch` discard every otherwise valid item in the same historical batch without reporting the collateral drops.
+- Worker locks, preview tokens, post-await historical status updates, animation frames, provider I/O, and channel maps are not governed by one runtime epoch/task registry; stop/start and channel switches leave several ABA and late-callback paths.
+- Historical status keys do not use `job.id`, one pending display batch overwrites another per channel, and live priority is only a job-boundary handoff. Historical commit can explicitly supersede a concurrent live request.
+- The loaded-message limit is read from persisted settings but has no current settings-panel writer. A swallowed prefetch failure can seal a short snapshot, mark the channel initialized, and hide the apparently successful capsule three seconds later.
+- Reply previews are explicitly stripped of translated background/style even though this exception is absent from the product contract. Focused tests may also execute an old root bundle because they do not build first.
+
+### Mandatory second-debug evidence before implementation
+
+- [ ] Trace one mounted translated message through snapshot, provider result, state commit, parent projection, child decoration, DOM revision, and status accounting without changing runtime behavior.
+- [ ] Capture the real active channel-stream patch instance/Fiber shape and prove which parent render handle is updateable.
+- [ ] Trace one channel-disable restoration through automatic, manual, reply-preview, embed, and title state and record the first boundary that remains stale.
+- [ ] Trace one virtualized-ready message through unmount/remount and distinguish it from a mounted render failure.
+- [ ] Trace historical batch parsing by request ID and prove missing, duplicate, reordered, and partial provider results have explicit terminal reasons.
+- [ ] Audit live/history/manual/disable/edit/delete races against channel generation and source signature.
+- [ ] Audit status counts so translated, background-ready, DOM-confirmed, skipped, failed, cancelled, and stale are never conflated.
+- [ ] Audit timers, subscriptions, host mappings, state indexes, and abort controllers for bounded cleanup on channel switch, disable, stop, and reload.
+- [ ] Replace fake-owner test contracts with captured parent/child lifecycle fixtures before changing production rendering.
+- [ ] Make every render projection read-only: no cache eviction, state transition, provider queueing, or mutation of Discord-owned message/embed props inside child decoration hooks.
+- [ ] Add independent acknowledgement for reply previews and thread titles; a helper invocation alone is not visible success.
+- [ ] Prove bounded historical pagination fills the eligible maximum when older eligible messages exist and terminates on exhaustion without duplicate fetch actions.
+- [ ] Flush the bounded translation cache on clean stop and deep-clone every restore source needed by message and embed projection.
+- [ ] Cancel every delayed anchor restore as one lifecycle-owned operation and make disable/re-enable transaction generations reject late state and render acknowledgements.
+- [ ] Release historical generation entries with channel-session cleanup and assert long-session state remains bounded.
+- [ ] Replace the legacy-runtime entry with a small composition root and make the architecture gate require progress toward its deletion, not merely prevent line-count growth.
+- [ ] Split oversized extracted modules by ownership only after their behavior contracts are captured; do not treat file movement or minification as refactoring completion.
+- [ ] Embed a deterministic source/build fingerprint in the generated artifact and expose it in a non-localized diagnostics/about surface so repository, installed file, and loaded runtime can be compared exactly.
+- [ ] Compress this canonical plan after the audit and archive superseded task transcripts plus `extraction-plan.md` outside Git; keep no second active plan.
+- [ ] Introduce one runtime epoch, one channel operation generation, and one message latest-command identity shared by manual, live, historical, edit, delete, preview, and display completion paths.
+- [ ] Separate provider-result validation from atomic visual commit: reject stale items individually, account for every dropped item, then reveal all remaining valid results in one channel transaction.
+- [ ] Make DOM acknowledgement surface-specific and content-aware for body text, decoration, embeds, reply previews, and titles; never infer complete display from a child revision marker alone.
+- [ ] Give every historical job a stable status/display identity and permit multiple pending acknowledgement records without overwriting an earlier job.
+- [ ] Put live and historical provider work behind one coordinator, preserve immediate live priority, and prevent historical results from taking ownership from newer live or manual commands.
+- [ ] Add physical provider cancellation where supported and a runtime task registry for workers, timers, animation frames, host mappings, and channel-session maps; assert stop/start and long-session cleanup.
+- [ ] Restore an explicit loaded-message limit control or remove the persisted setting contract; an unfilled target must report exhausted/failed rather than successful completion and must not auto-hide as complete.
+- [ ] Decide and document reply-preview decoration, then test actual computed presentation. Make focused generated-plugin tests build/check first and extend the release gate to changelog plus artifact identity.
+
+### Approved replacement architecture
+
+- One immutable `MessageStateStore` remains the source of display truth.
+- One coalesced channel transaction requests one refresh at the parent `Messages`/channel-stream projection boundary.
+- Message IDs and host IDs select state and confirm exact DOM revisions; they are not the primary refresh owners.
+- Historical results commit as the configured ID-keyed batch; live results use the immediate priority lane and request an immediate transaction.
+- Text, background, text color, watermark, reply preview, and embed projection must derive from the same revision in normal parent-to-child React order.
+- Disable invalidates pending work, restores automatic and manual display state, clears reply/embed/title projections, and requests one channel transaction while retaining valid translation cache.
+- Mounted-but-unconfirmed rows are visible failures. Only absent rows are virtualized-ready/deferred.
+- The old per-message owner refresh, duplicate DOM resolver, fabricated acknowledgement, and obsolete repair scheduler paths are deleted after the replacement passes focused, full, and real-client verification.
+
+### Full debug coverage
+
+The second debug covers acquisition, batch/result parsing, state ownership, rendering, virtualization, scrolling/input, automatic/manual precedence, disable/re-enable, edits/deletes, replies, embeds, titles, status, themes/localization, lifecycle cleanup, deterministic build, artifact identity, rollback, and real-client smoke evidence. `docs/architecture.md` is the canonical detailed contract.
+
+---
+
 ## Active Automatic Translation Recovery Design (Approved 2026-08-04)
 
 The completed display-migration tasks below remain verification history. The next active work is the approved automatic-translation recovery slice. It must be implemented with failing regression tests before behavior changes and must not be deployed to Discord until the user separately permits deployment.
@@ -21,7 +105,7 @@ The completed display-migration tasks below remain verification history. The nex
 - Prefetch does not simulate scrolling, populate the visible list, or page beyond the configured maximum.
 - Live messages use an immediate high-priority lane with a per-message loading icon. They do not wait for the historical job or for a batching timer.
 - Historical messages form one immutable ID-keyed job. Provider transport may split an oversized request internally, but display commits once after validation and one targeted repair pass.
-- Mounted message owners and reply-preview host owners refresh in one component-scoped display transaction. Virtualized rows render from stored state when mounted.
+- **Superseded:** the former per-message owner transaction is implementation history only. The reopened 2026-08-10 design refreshes the parent channel-stream projection once and uses message/host IDs only for state selection and DOM acknowledgement.
 - The viewport anchor restores once unless user intent changes. Composer and unrelated Discord surfaces are excluded from the transaction.
 - The compact theme-aware status uses `translation icon completed/total · elapsed`; detailed counts are hover-only.
 - Disable restores automatic and manual message presentation, reply previews, embeds, and titles for the affected channel while retaining valid translation-cache entries; stop performs the same presentation restore for every channel.
