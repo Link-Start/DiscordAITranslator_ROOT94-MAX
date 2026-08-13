@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the approved target architecture for the repository. The migration has not started until `src/` and the deterministic build exist in Git.
+This document defines the approved target architecture for the repository. The deterministic `src/` build exists, but the received-message display migration is reopened because repository verification did not reproduce the real Discord React lifecycle.
 
-The current shipped runtime remains `DiscordAITranslator.plugin.js`. It is approximately 10,700 lines and 618 KB. It must remain installable while the source architecture is migrated.
+The shipped runtime remains the generated `DiscordAITranslator.plugin.js`. At the 2026-08-10 debug baseline (`9fb24a1`) it is 13,305 lines and 904,357 bytes. It must remain installable while the display ownership boundary is replaced.
 
 ## Distribution Contract
 
@@ -14,7 +14,7 @@ BetterDiscord users install exactly one file:
 DiscordAITranslator.plugin.js
 ```
 
-The repository will contain readable source modules under `src/`. A deterministic build will bundle those modules into the root plugin file. The generated plugin is a distribution artifact and must not be edited manually after the migration begins.
+The repository contains readable source modules under `src/`. A deterministic build bundles those modules into the root plugin file. The generated plugin is a distribution artifact and must not be edited manually.
 
 The build contract is:
 
@@ -55,6 +55,71 @@ Translation data and visible Discord output currently have different owners.
 The regression was exposed when a full message-list rerender was replaced with targeted component updates. Unit tests verified the update function call, but not the visible Discord result. Hovering a message causes Discord to rerender that component naturally, which reveals already-stored translation data.
 
 The new architecture must treat a data commit and a visible render commit as separate, observable operations.
+
+### Full Debug Evidence — 2026-08-10
+
+The following findings are confirmed from the repository and the observed hover-dependent UI failure:
+
+1. `Messages` projects translated or restored message text in a before-render path, while `MessageContent` applies translated decoration in an after-render path. Updating only a message-content owner can therefore repaint decoration without rerunning the parent text projection.
+2. The restore path can update message props after React has already built the text children for that render. The style may disappear while translated text remains until a later natural render such as hover.
+3. `discord-render-adapter.js` currently locates exact per-message DOM IDs and requests per-message owners. The viewport module already supports newer suffix and containment selector shapes, so the repository has two incompatible message-element resolvers.
+4. Installed BDFDB owner lookup and force-update behavior require an updateable class instance. Current tests supply synthetic owners and manually acknowledge revisions, so they prove a helper call rather than the parent-to-child render result.
+5. `deferredIds` currently mix truly virtualized rows with mounted rows that failed render confirmation. Historical accounting may therefore report a row as displayed when no matching DOM revision was painted.
+6. Reply previews and embeds inherit the host message-row invalidation boundary. Thread titles use a separate title-component refresh and require independent confirmation.
+7. The former component-scoped owner plan was marked complete in `recovery-plan.md` even though real UI evidence invalidated its central assumption. That plan is retained only as historical evidence and is superseded by the reopened debug work.
+8. `Messages` clones the `channelStream` array but not each stream entry. Translation and restoration then assign `stream.content` or `stream.content.content` on shared entry objects. The code contains source-recapture workarounds specifically because a later pass can observe the plugin's painted text as Discord source data.
+9. Manual translation commits into `MessageStateStore`, but visible refresh still goes through the retained full-list repaint scheduler. Automatic, manual, settings, enable, disable, and stop paths therefore do not yet share one display transaction boundary.
+10. The full-list compatibility scheduler may delay repaint while typing or settings are open and can wait 1.5 seconds while viewing history. It also permits up to three scheduler attempts after the adapter's own targeted retry, so the documented one-repair limit is not the runtime limit.
+11. Adapter and lifecycle tests make `forceUpdate` directly add the requested DOM revision. Integration tests invoke stream projection and content decoration manually in the desired order. Neither test shape proves that the real parent patch reruns or that React produced the acknowledged DOM.
+12. The historical prefetch adapter probes several undocumented Discord action signatures and accepts the first non-null result before proving it contains messages. If the action returns dispatch metadata, a promise with another shape, or populates the store asynchronously, the source can seal at the mounted/cache count instead of the configured maximum. This is a leading unverified explanation for a configured 50 appearing as 20.
+13. Embed translation stores restoration fields on mutable embed props and restores them in a separate before-render branch. It has the same ownership and stale-prop risk as message text and needs host-row revision acknowledgement.
+14. Thread-title refresh uses `forceAllUpdates` across all title surfaces and has no per-title render acknowledgement. Title state cancellation is generation-aware, but visible restoration remains a separate unverified surface.
+15. `processMessageContent` may apply translated class, colour, watermark, and revision from `MessageStateStore` even when the parent `Messages` projection did not replace the text. This is a direct path to an original body with translated decoration. The inverse path also exists: shared message props can retain translated text after the active translation and decoration are cleared.
+16. Several render hooks are stateful. `getActiveMessageTranslation` may clear display state and cache while rendering; loaded-message resolution may queue provider work while rendering; reply and embed hooks mutate render props. A child render can therefore change the revision after the parent selected its text. The replacement projection must be read-only during one React render.
+17. Reply-preview commits, preview clears, suppression changes, and source-archive consumption deliberately do not advance the message display revision. Host-only preview refreshes consequently have no preview-specific revision to acknowledge. Existing tests prove that `forceUpdate` was requested, not that the host preview changed.
+18. `historical-message-source.js` performs at most one prefetch for the number of eligible messages initially missing. Duplicates, off-channel records, or locally ineligible messages in that response can leave the final immutable job below the configured maximum even when older eligible messages exist. A bounded source must continue paging until the eligible maximum, an explicit exhaustion signal, or a request/page ceiling is reached.
+19. The translation cache cancels rather than flushes its debounced save on plugin stop. Translations committed during the last 300 ms can therefore disappear from persisted cache even though display state already reported them complete.
+20. Manual restore archives clone only the top-level message object. Nested embeds and related objects can remain shared with render props, so embed mutation can contaminate the archive that is supposed to restore the immutable original.
+21. The compact status currently derives its completed count from `displayed`, but that value includes deferred virtualized-ready rows. The name and detail text imply visible DOM success while the implementation partly means stored-ready. Stored-valid, mounted-confirmed, deferred-ready, skipped, failed, and stale require separate counters and labels.
+22. A fresh `npm run verify` passed all 1,047 tests while the hover-dependent text/decorations/restoration defects remain observed. This is positive evidence that the current suite is false-green at the Discord render boundary, not evidence that the UI defect is intermittent or already repaired.
+23. `restoreAnchorState` schedules a two-frame restore plus four delayed writes, but those delayed writes are not tracked as a cancellable group. A channel switch, disable, or reload can therefore let an old manual anchor write into the new message list and recreate the scroll-jump class of bug.
+24. Channel toggle versions guard only the final cleanup callback. The restore transaction mutates `MessageStateStore` before its asynchronous render acknowledgement, and re-enable does not advance a display transaction generation. A rapid disable -> enable can therefore let an older restore finish after re-enable and leave the store/UI in the disabled projection.
+25. `historical-source-runtime.js` removes in-flight builds but retains one generation entry for every channel ever visited during the plugin lifetime. This is small but unbounded session state and can be eliminated when a channel session is pruned.
+26. The modular entry point is still only `module.exports = require("../legacy/runtime")`. That 4,428-line runtime directly imports 27 of the 38 source modules and remains the composition root, Discord patch shell, UI coordinator, status DOM owner, repaint compatibility layer, and lifecycle dispatcher. The relative-import graph has no cycles, which is useful, but the fan-out proves that extraction created modules around a retained god object rather than completing the new runtime architecture.
+27. The legacy line-count ratchet prevents further growth but does not require the final shell migration. It can remain green forever with the entire 4,428-line class intact. Several extracted modules also exceed the architecture boundary budget (`provider-client.js` 1,490 lines, `settings-panel.js` 1,286, `labels.js` 1,028, `styles.js` 899, and `message-state-store.js` 766), so moving code out of `legacy/runtime.js` has not by itself produced small, independently reviewable responsibilities.
+28. The generated plugin is currently 13,305 readable lines and 904,357 bytes, above the documented 7,000-8,500-line and 350-450 KB release guardrails. This is not by itself a functional defect, but it is objective evidence that the architectural cleanup and dead compatibility removal are incomplete.
+29. The build banner contains semantic version `0.3.37` but no source commit, build fingerprint, or deterministic artifact identity visible at runtime. Two different bundles built without changing metadata are indistinguishable in BetterDiscord. The repository's current floating status renderer emits compact numeric text such as `0/0`, while the observed client showed the older sentence-style status. Without an embedded build identity, support cannot distinguish a stale loaded bundle, a stale DOM node, or the current source from the UI alone.
+30. Documentation remains noisy enough to misdirect implementation. `recovery-plan.md` has grown to 2,106 lines and mixes the active reopened debug with checked historical tasks and code templates. The unlisted `extraction-plan.md` separately declares M0-M11 finished while the active entry still delegates to `legacy/runtime.js`. Historical evidence must be archived outside the repository after this audit, leaving one short active recovery sequence in the existing canonical plan.
+31. `styles.js` contains an exact duplicate `.translator-settings-panel-root` rule and formatting residue around it. The responsive second `.translator-prefix-translation-row` rule is intentional rather than a conflict. This duplicate does not explain the message colour failure, but it confirms that presentation code has accumulated by append-style edits and needs ownership-based cleanup after the render root cause is fixed.
+32. The DOM acknowledgement checks only the revision attribute emitted from `MessageContent`. It does not compare the rendered body text, translated class, computed colours, watermark, embed fields, reply preview, or thread title with the expected revision. A child decoration render can therefore be reported as confirmed while the parent body is still original, and a message-body acknowledgement can hide a stale embed or preview.
+33. Manual, live, and historical results do not share one latest-command identity. A manual commit clears `requestIdentity`; the terminal-result validator treats a current null identity as unconstrained, so an older automatic result can overwrite the newer manual result. Channel disable, message edit, and deletion cancel automatic work but do not invalidate an already running manual callback by channel generation, source signature, or deletion tombstone.
+34. Historical `commitBatch` rejects the entire recorded batch when any one result is stale or invalid. One edited or superseded message in a 50-message result can therefore prevent the other 49 valid translations from committing, while the return value reports only the actually invalid item and leaves the collateral drops unexplained.
+35. Runtime request generations do not cover worker and callback ownership. A live worker's `finally` unconditionally clears the shared busy flag even after stop/start has created a newer worker. Reply-preview tokens restart at `preview-1` with a new display runtime, permitting an old callback to collide with a new token. Historical status/tracker updates also continue after the awaited display transaction without a second current-generation check.
+36. Translation-provider requests are logically invalidated but not physically aborted. The live scheduler uses one global busy flag across channels, so a slow request from a left or disabled channel can continue consuming the provider connection and block a new channel until completion or timeout.
+37. Historical status identity is based on `channelId + batch`, but runtime job creation owns a distinct `job.id` and does not reliably advance the status batch. `sealedTotal` can consequently carry an old job's total into a later job. `HistoricalDisplayTracker` also stores only one pending batch per channel, so beginning a later display acknowledgement replaces an unfinished earlier one.
+38. Live priority is enforced only between historical jobs, not inside a running historical provider request. Worse, historical commit deliberately echoes the currently active request identity so the batch may supersede concurrent live work for the same message. The runtime therefore does not satisfy the documented single coordinator with newest live/manual command ownership.
+39. `receivedAutoTranslateLoadedLimit` remains in defaults and runtime reads, but the extracted settings panel has no control that writes it. Tests assign the value directly. The configured quantity shown in an existing installation may therefore be legacy persisted data rather than a setting the current UI can inspect or change.
+40. A failed history prefetch is swallowed, the channel is marked initialized before the asynchronous snapshot completes, and the smaller snapshot is allowed to finish normally. The status capsule then hides a successful terminal record after three seconds. This creates the observed chain: configured 50 -> roughly mounted 20 -> apparently complete -> status disappears -> later scroll discovers more messages.
+41. The sent-message store validates each request independently but has no per-message latest-edit sequence and no ordered send lane. Two rapid edits can commit in callback order rather than user order, and two translated sends can be submitted in reverse if the second provider call finishes first.
+42. Lifecycle cleanup is incomplete beyond the already identified anchor timers. Status positioning has a cancellable animation frame that `clear()` does not cancel; live channel-state, toggle-version, and historical-generation maps retain visited channel keys; provider promises can retain snapshots after logical cancellation. Cleanup needs one runtime-owned task registry and bounded channel-session release contract.
+43. Reply-preview styling is deliberately stripped: runtime code removes translator classes/styles and CSS forces preview backgrounds transparent. That explains some reports of translated text without a translation block, but the product specification does not currently state this exception. The visual contract must explicitly decide whether previews share translated decoration; implementation and tests must then match that decision.
+44. Focused tests can load the committed root plugin without first rebuilding it. `npm test -- <file>` therefore may execute an older bundle after `src/` changes; only `npm run verify` performs the deterministic build check. RED/GREEN commands must either test source modules directly or build/check the bundle before any test that instantiates the generated plugin.
+45. Release bookkeeping is inconsistent: package metadata and the generated bundle are `0.3.37`, while `CHANGELOG.md` still ends at `0.3.36`. The build contract checks package/metadata/bundle agreement but not changelog or deployed/loaded artifact identity.
+
+The next implementation must first prove the updateable channel-stream render boundary and the real history-fetch return shape with captured runtime evidence. No display owner, prefetch, or acknowledgement strategy is considered complete from mocked helper calls alone.
+
+### Full Debug Coverage Matrix
+
+The release gate covers all boundaries below:
+
+- message acquisition: mounted rows, Discord cache, bounded prefetch, live messages, replies, embeds, short text, and thread titles;
+- transport and parsing: exact request IDs, missing/duplicate/reordered provider results, partial success, backup-provider handoff, timeout, retry, and cancellation;
+- state: immutable source, message signature, channel generation, automatic/manual origin, suppression, cache reuse, and render revision;
+- rendering: parent text projection, child decoration, loading indicator, reply/embed host rows, title refresh, and DOM revision acknowledgement;
+- virtualization and interaction: row reuse, unmount/remount, historical loading, row-height change, user scroll intent, composer input, and channel switching;
+- lifecycle: edit, delete, disable, re-enable, plugin stop, reload, stale result rejection, cleanup, and bounded runtime memory;
+- status and theme: configured historical maximum, translated/ready/visible/failed separation, compact localization, and Discord theme variables;
+- distribution: deterministic source bundle, syntax/tests, artifact hash, installed-file hash, backup, rollback, and explicit real-client smoke evidence.
 
 ## Design Principles
 
@@ -216,11 +281,14 @@ Contains all knowledge of Discord and BDFDB rendering internals.
 ```text
 captureVisibleMessages(channelId)
 applyDisplayTransaction(transaction)
-refreshMessages({channelId, messageIds, ownerMessageIds, views, transactionId})
+refreshChannelTransaction({channelId, views, hostMessageIds, transactionId})
+confirmMountedViews({channelId, views})
 refreshThreadTitles(channelId)
 ```
 
-No translation policy or provider logic is allowed in this adapter. It returns `confirmedIds`, `missingIds`, and `deferredIds` so state commit and render commit can be measured separately. Mounted message owners are refreshed together, with at most one targeted retry for an unconfirmed owner. A deferred ID is outside Discord's mounted virtual list: it renders from store state when it later mounts. The automatic path never invokes a full-list rerender. Revision acknowledgement applies to translated, loading, skipped, failed, cancelled, and restored-original views.
+No translation policy or provider logic is allowed in this adapter. One transaction requests one refresh at the parent channel-stream projection boundary so normal React parent-to-child order produces text and decoration from the same revision. A channel-scoped render handle may be captured from the `Messages` patch or resolved from the active scroller, but the adapter must prove that the handle is updateable before using it. Message DOM nodes and IDs are used for mounted-state detection and revision confirmation, not as the primary refresh owners.
+
+The adapter returns separate `confirmedIds`, `deferredIds`, `missingIds`, and `ownerMissing` evidence. `deferredIds` means the row was not mounted. A mounted row without the requested revision is `missing`, never deferred or displayed. Off-screen rows remain state-ready and render from the store when mounted. Automatic display does not use a whole-chat remount as its normal or repair path.
 
 ### TranslationOrchestrator
 
@@ -259,7 +327,7 @@ Discord patch
   -> render acknowledgement or visible failure
 ```
 
-Historical results enter the state store together. One historical display transaction then refreshes the exact committed message IDs. New live messages use a separate path and do not wait for historical work.
+Historical results enter the state store together. One historical display transaction then refreshes the active channel-stream projection and confirms the exact committed message revisions. New live messages use a separate high-priority scheduling lane and request an immediate channel transaction without waiting for historical work.
 
 ## Live And Historical Scheduling
 
@@ -284,9 +352,11 @@ Prefetched records stay in plugin-owned job and translation state. The source do
 
 ## Display Transaction And Host Ownership
 
-Translation state and Discord component ownership are related but distinct. A display transaction contains translated message IDs plus any host-row IDs whose reply previews project those translations. The channel-isolated mapping is one referenced message ID to zero or more host reply-row IDs. Clearing a preview retains a non-active restore candidate until the host row repaints, so an already-painted preview cannot be mistaken for original text.
+Translation state and Discord component ownership are related but distinct. A display transaction contains translated message IDs plus any host-row IDs whose reply previews project those translations. The channel-isolated mapping is one referenced message ID to zero or more host reply-row IDs. Clearing a preview retains a non-active restore candidate until the host row confirms the restored revision, so an already-painted preview cannot be mistaken for original text.
 
-The render adapter refreshes all mounted owners in one component-scoped update, performs at most one targeted retry for unconfirmed mounted owners, and never remounts the whole chat list. A row without a mounted owner remains virtualized-ready and renders from the state store when mounted.
+The render adapter requests one channel-scoped parent refresh per coalesced transaction. It does not depend on updateability of per-message functional or memoized owners. Parent `Messages` projection selects original or translated content first; child message, reply, and embed render paths then apply matching decoration from the same immutable revision. Thread titles remain a separate surface with a separate acknowledgement.
+
+A mounted row that fails revision acknowledgement is a visible render failure and may receive one repeat of the same channel transaction after evidence is recorded. A row that is not mounted remains virtualized-ready and renders from the state store when it later mounts. Repeated failure reopens root-cause investigation instead of escalating to broader repaint helpers.
 
 Before the update, the adapter captures a visible anchor and offset. It restores that offset once after paint unless user scroll intent changed during the transaction. Composer, channel list, member list, and unrelated channels are not part of the transaction.
 
@@ -304,7 +374,7 @@ Disabling one channel:
 2. Cancel pending automatic work for that channel.
 3. Restore automatic and manual message display states and clear channel-scoped manual suppression while retaining immutable source snapshots and valid translation-cache entries.
 4. Clear reply-preview and embed projections and restore the thread title as part of the same disable flow.
-5. Refresh all mounted message and reply-host owners in one channel-scoped transaction; virtualized rows read the restored state when they mount.
+5. Request one parent channel-stream transaction so all mounted messages and reply/embed hosts read restored state in the same React cycle; virtualized rows read restored state when they mount.
 6. Keep manual translation available after disable so a newer per-message action can display a cached or newly translated result.
 
 Stopping the plugin performs the same operation for every channel before unregistering patches.
@@ -358,11 +428,11 @@ Tests are divided by confidence level:
 
 - Domain tests verify state transitions, policy, provider parsing, and cancellation.
 - Display contract tests assert complete display transactions, including text, watermark, styling, loading, and restoration.
-- Discord adapter tests use captured component shapes and verify the exact message IDs requested for refresh.
+- Discord adapter tests use captured component/Fiber shapes, exercise the real `Messages` before -> child after order, and verify both the parent refresh boundary and exact DOM revision acknowledgements.
 - Build tests verify metadata, one-file output, deterministic bytes, and exclusion of test/debug code.
 - DiscordPTB smoke tests verify hover-independent display, disable restoration, atomic historical reveal, scroll stability, edits, titles, stop, and reload.
 
-A test that only asserts `forceAllUpdates` or another refresh helper was called is not sufficient evidence that a visible message changed.
+A test that only asserts `findOwner`, `forceUpdate`, `forceAllUpdates`, or another refresh helper was called is not sufficient evidence that a visible message changed. Tests may not fabricate confirmation as a side effect of the refresh mock.
 
 ## Observability
 
