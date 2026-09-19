@@ -1,0 +1,169 @@
+﻿const test = require("node:test");
+const assert = require("node:assert/strict");
+const {createProtectionRegressionPluginInstance: createPluginInstance} = require("./helpers/createPluginInstance");
+
+test("live provider responses missing protected placeholders are rejected", async () => {
+	const plugin = createPluginInstance();
+	plugin.settings.choices.received = {input: "en", output: "zh-CN"};
+	plugin.getEffectivePrimaryEngine = () => "deepseek";
+	plugin.getEffectiveBackupEngine = () => "----";
+	plugin.validTranslator = key => key == "deepseek";
+	plugin.deepSeekTranslate = (_data, callback) => callback("你好");
+	plugin.isTranslationLikelyInTargetLanguage = () => true;
+
+	const result = await new Promise(resolve => {
+		plugin.translateText("hello <@123456789>", "received", translation => resolve(translation), null, {
+			auto: true,
+			forcePlainTranslation: true,
+			showToast: false,
+			showFailureToast: false,
+			channelId: "channel-protection"
+		});
+	});
+
+	assert.equal(result, "");
+});
+
+function runProtection(text, place = "sent") {
+	const plugin = createPluginInstance();
+	const [maskedText, protectedSegments, shouldTranslate] = plugin.removeExceptions(text, place);
+	return {
+		maskedText,
+		protectedSegments,
+		protectedValues: Object.values(protectedSegments),
+		shouldTranslate,
+		restoredText: plugin.addExceptions(maskedText, protectedSegments)
+	};
+}
+
+test("triple backtick code blocks are fully protected", () => {
+	const source = "```js\nconst model = \"deepseek-v3\";\n```";
+	const result = runProtection(source, "sent");
+
+	assert.equal(result.shouldTranslate, false);
+	assert.deepEqual(result.protectedValues, [source]);
+	assert.equal(result.restoredText, source);
+});
+
+test("configured multiword terms match regardless of internal spaces", () => {
+	const source = "搞的bugteam给我自己的号连坐封了";
+	const result = runProtection(source, "sent");
+
+	// Configured term "BUG team" (with a space) must also protect the no-space variant "bugteam".
+	assert.ok(result.protectedValues.some(value => /^bug\s*team$/i.test(value)));
+	assert.equal(result.restoredText, source);
+});
+
+test("inline code and configured protected terms are both preserved", () => {
+	const source = "Use `default` for BUG team and ChatGPT Plus only";
+	const result = runProtection(source, "sent");
+
+	assert.match(result.maskedText, /⟦0⟧/);
+	assert.match(result.maskedText, /⟦1⟧/);
+	assert.match(result.maskedText, /⟦2⟧/);
+	assert.ok(result.protectedValues.includes("`default`"));
+	assert.ok(result.protectedValues.includes("BUG team"));
+	assert.ok(result.protectedValues.includes("ChatGPT Plus"));
+	assert.equal(result.restoredText, source);
+});
+
+test("urls domains and emails are auto-protected", () => {
+	const source = "Docs https://api.deepseek.com/chat/completions via platform.openai.com contact name@example.com and Claude 3.7 Sonnet";
+	const result = runProtection(source, "sent");
+
+	assert.ok(result.protectedValues.includes("https://api.deepseek.com/chat/completions"));
+	assert.ok(result.protectedValues.includes("platform.openai.com"));
+	assert.ok(result.protectedValues.includes("name@example.com"));
+	// Natural-language model names (e.g. "Claude 3.7 Sonnet") are not auto-protected: there is no
+	// built-in model/brand dictionary by design. Users can add them to Protected Terms.
+	assert.ok(!result.protectedValues.includes("Claude 3.7 Sonnet"));
+	assert.equal(result.restoredText, source);
+});
+
+test("discord special objects stay protected in received messages", () => {
+	const source = "hello <@!123456789> <:wave:456789> world";
+	const result = runProtection(source, "received");
+
+	assert.ok(result.protectedValues.includes("<@!123456789>"));
+	assert.ok(result.protectedValues.includes("<:wave:456789>"));
+	assert.equal(result.restoredText, source);
+});
+
+test("plain version numbers are not misdetected as domains or model names", () => {
+	const source = "版本 3.1 不应该被自动保护";
+	const result = runProtection(source, "sent");
+
+	assert.deepEqual(result.protectedValues, []);
+	assert.equal(result.shouldTranslate, true);
+	assert.equal(result.restoredText, source);
+});
+
+test("mixed CJK text does not auto-protect ordinary latin tokens", () => {
+	const source = "这个用 bybit 弄完，再冻结 bybit 吧";
+	const result = runProtection(source, "sent");
+
+	// Ordinary lowercase Latin words in mixed-language chat are not auto-protected by design.
+	// Users can add exact tokens (e.g. "bybit") to Protected Terms / Phrases.
+	assert.ok(!result.protectedValues.includes("bybit"));
+	assert.equal(result.restoredText, source);
+});
+
+test("common lowercase English stopwords in mixed text are not auto-protected", () => {
+	const source = "这个 need 处理";
+	const result = runProtection(source, "sent");
+
+	assert.deepEqual(result.protectedValues, []);
+	assert.equal(result.restoredText, source);
+});
+
+test("all-caps Latin shouting is translatable, not treated as acronyms", () => {
+	const source = "HELLO CRYZYYY";
+	const result = runProtection(source, "received");
+
+	// Whole-message shouting must keep translatable content and not mask every word.
+	assert.equal(result.shouldTranslate, true);
+	assert.ok(!result.protectedValues.includes("HELLO"));
+	assert.ok(!result.protectedValues.includes("CRYZYYY"));
+});
+
+test("all-caps words inside CJK text are translatable text, not guessed acronyms", () => {
+	const source = "我需要CDK用于GPT";
+	const result = runProtection(source, "received");
+	assert.ok(!result.protectedValues.includes("CDK"));
+	assert.ok(!result.protectedValues.includes("GPT"));
+	assert.equal(result.shouldTranslate, true);
+	assert.equal(result.restoredText, source);
+});
+
+test("all-caps words in Latin prose are left to the translator; a protected term pins them", () => {
+	for (const source of ["use the API key please", "do NOT restart the bot", "I am SO tired"]) {
+		const result = runProtection(source, "received");
+		assert.deepEqual(result.protectedValues, [], source);
+		assert.equal(result.restoredText, source);
+	}
+	// The regression helper takes no options; pin the term on the live settings instead.
+	const plugin = createPluginInstance();
+	plugin.settings.exceptions.protectedTerms = ["API"];
+	const [masked, protectedSegments] = plugin.removeExceptions("use the API key please", "received");
+	assert.deepEqual(Object.values(protectedSegments), ["API"]);
+	assert.equal(plugin.addExceptions(masked, protectedSegments), "use the API key please");
+});
+
+test("a received message that is only a short all-caps word stays translatable", () => {
+	// "NO", "YES", "OK" and "GG" used to be masked as acronyms, which left no translatable
+	// content and made the auto-translate pre-filter drop them as link-only.
+	for (const source of ["NO", "YES", "OK", "GG", "YES!", "NO...", "GG 😂"]) {
+		const result = runProtection(source, "received");
+		assert.equal(result.shouldTranslate, true, source);
+		assert.ok(!result.protectedValues.some(value => /^[A-Z]+$/.test(value)), `${source} must not be protected`);
+		assert.equal(result.restoredText, source);
+	}
+});
+
+test("the sent direction no longer guesses acronyms either", () => {
+	for (const source of ["GED", "use the API key please"]) {
+		const result = runProtection(source, "sent");
+		assert.deepEqual(result.protectedValues, [], source);
+		assert.equal(result.shouldTranslate, true, source);
+	}
+});

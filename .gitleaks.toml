@@ -1,0 +1,43 @@
+title = "DiscordAITranslator publication"
+
+[extend]
+useDefault = true
+
+# esbuild's keepNames output is a function name, not a Discord credential.
+# Keep both the path and the exact extracted value constrained.
+[[rules]]
+id = "discord-client-secret"
+[[rules.allowlists]]
+condition = "AND"
+paths = ['''^DiscordAITranslator\.plugin\.js$''']
+regexTarget = "secret"
+regexes = ['''^resolveConcreteDiscordLanguageId$''']
+
+# Synthetic value used specifically to verify redaction of upstream errors.
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+condition = "AND"
+paths = ['''^tests/provider-client\.test\.js$''']
+regexTarget = "secret"
+regexes = ['''^plain-secret-456$''']
+
+[[rules]]
+id = "personal-home-path"
+description = "Personal home paths must not enter public history"
+regex = '''(?i)(?:[a-z]:[\\/]+Users[\\/]+|/(?:Users|home)/)[^\s/\\<>"']+'''
+
+[[rules]]
+id = "machine-path-in-docs"
+description = "Use portable placeholders in documentation"
+path = '''\.md$'''
+regex = '''\b[A-Za-z]:[\\/]+[^\s<>"']+'''
+
+# These exact sequences are synthetic fixtures; no test file is exempted.
+[[rules]]
+id = "unreviewed-discord-identity"
+description = "Review long numeric identities before publication"
+regex = '''[1-9][0-9]{16,19}'''
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = ['''^(1000000000000000001|1000000000000000002|111111111111111111|123456789012345678|1000000000000000003|222222222222222222|223456789012345678|234567890123456789|323456789012345678|333333333333333333)$''']

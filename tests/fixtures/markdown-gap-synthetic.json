@@ -1,0 +1,25 @@
+{
+  "source": "## Synthetic release notes\n\n> Translate the explanation but keep the structure.\n\n- First checklist item\n- Second checklist item with ||spoiler text||\n\n| Field | Value |\n| --- | --- |\n| Status | Ready for review |\n\n[Read the synthetic guide](https://docs.example.invalid/guide)\n\n```js\nconst syntheticVersion = \"v2.4.1\";\n```\n\nThe fenced code and link destination must remain unchanged.",
+  "expected": "## 合成版本说明\n\n> 翻译说明，但保留结构。\n\n- 第一项检查事项\n- 第二项检查事项，包含 ||剧透文字||\n\n| 字段 | 值 |\n| --- | --- |\n| 状态 | 准备好供审阅 |\n\n[阅读合成指南](https://docs.example.invalid/guide)\n\n```js\nconst syntheticVersion = \"v2.4.1\";\n```\n\n围栏代码和链接目标必须保持不变。",
+  "sourceSha256": "27A2D7B733773B1594DE72CC72894373415C704C5917E91A0DDBCA223929D69B",
+  "note": "Synthetic source from f06; local provider rows are constructed trimmed translations, not the unavailable original provider response.",
+  "wireOracle": {
+    "wireSha256": "0fc74d4d2e9cc9f0a9f8ecad32cc01176f1c49fe4edf2cac40718239a3b18a54",
+    "promptSha256": "8dd78d3e6945cb82f80e22dedeb1f5d34f889d1e3fe34c5c6276dfe217cdf901",
+    "planSha256": "c87458cbfb3d8ad0264f7726f1f9bfd4515b326aa88727bc4ffb9502540e382a",
+    "segmentOrder": [
+      "m3i-v2|received|body|2:26|b5b5fe02",
+      "m3i-v2|received|body|29:79|38f635cb",
+      "m3i-v2|received|body|82:103|624d6fca",
+      "m3i-v2|received|body|105:133|4baf0452",
+      "m3i-v2|received|body|135:147|30c0e70c",
+      "m3i-v2|received|body|152:159|2c5f7973",
+      "m3i-v2|received|body|160:167|ff3e6d5c",
+      "m3i-v2|received|body|184:192|77b1f7cb",
+      "m3i-v2|received|body|193:211|93c22ad9",
+      "m3i-v2|received|body|215:239|df929119",
+      "m3i-v2|received|body|324:383|1a74add9"
+    ],
+    "wireVersion": "typed-compact-v1"
+  }
+}

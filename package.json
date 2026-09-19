@@ -1,0 +1,26 @@
+{
+  "name": "discord-ai-translator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BetterDiscord translation plugin with channel-aware automatic translation.",
+  "license": "GPL-2.0-only",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build-plugin.mjs",
+    "build:debug": "node scripts/build-plugin.mjs --debug > DiscordAITranslator.debug.plugin.js",
+    "build:check": "node scripts/build-plugin.mjs --check",
+    "check": "node --check DiscordAITranslator.plugin.js",
+    "test": "npm run build:check && node --test",
+    "test:node": "node --test",
+    "test:w1": "node scripts/run-w1-red-tests.mjs",
+    "bench:w1": "node scripts/benchmark-w1-wire-offline.js",
+    "check:publication": "node scripts/check-publication.mjs",
+    "verify": "npm run check:publication && npm run check:notes && npm run build:check && npm run check && npm run test:node",
+    "check:notes": "node scripts/check-agent-notes.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}

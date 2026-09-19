@@ -1,0 +1,2450 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Translator 界面焕新</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+	/* ============ 文档外框令牌（浅色为基准，深色覆写） ============ */
+	:root {
+		--ground: #f4f4f8;
+		--card: #ffffff;
+		--ink: #20222b;
+		--muted: #676b7d;
+		--line: #e2e3ee;
+		--accent: #4752c4;
+		--accent-strong: #5865f2;
+		--signature: #58b9f2;
+		--accent-wash: rgba(88, 101, 242, 0.08);
+		--ok: #1e9e52;
+		--warn: #a86f0f;
+		--well: #e9eaf2;
+		--chip-bg: #ffffff;
+		--code-bg: #ecedf4;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root:not([data-theme="light"]) {
+			--ground: #131419;
+			--card: #1b1d25;
+			--ink: #e9eaf0;
+			--muted: #989cae;
+			--line: #2b2e3a;
+			--accent: #8b94f7;
+			--accent-strong: #5865f2;
+			--accent-wash: rgba(88, 101, 242, 0.14);
+			--ok: #3dbb72;
+			--warn: #d9a439;
+			--well: #0d0e13;
+			--chip-bg: #22242e;
+			--code-bg: #232531;
+		}
+	}
+	:root[data-theme="dark"] {
+		--ground: #131419;
+		--card: #1b1d25;
+		--ink: #e9eaf0;
+		--muted: #989cae;
+		--line: #2b2e3a;
+		--accent: #8b94f7;
+		--accent-strong: #5865f2;
+		--accent-wash: rgba(88, 101, 242, 0.14);
+		--ok: #3dbb72;
+		--warn: #d9a439;
+		--well: #0d0e13;
+		--chip-bg: #22242e;
+		--code-bg: #232531;
+	}
+	* { box-sizing: border-box; }
+	body {
+		margin: 0;
+		background: var(--ground);
+		color: var(--ink);
+		font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+		font-size: 16px;
+		line-height: 1.75;
+	}
+	.page { max-width: 1080px; margin: 0 auto; padding: 0 28px 96px; }
+	.prose { max-width: 76ch; }
+	a { color: var(--accent); }
+	code, .mono {
+		font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+		font-size: 0.86em;
+		background: var(--code-bg);
+		padding: 1px 6px;
+		border-radius: 5px;
+	}
+	::selection { background: var(--accent-wash); }
+
+	/* ============ 刊头 ============ */
+	.mast { border-top: 3px solid var(--accent-strong); padding-top: 40px; margin-bottom: 20px; }
+	.mast-eyebrow {
+		font-family: "JetBrains Mono", Consolas, monospace;
+		font-size: 12px;
+		letter-spacing: 0.22em;
+		color: var(--muted);
+		text-transform: uppercase;
+		margin-bottom: 18px;
+	}
+	.mast h1 {
+		font-family: "Noto Serif SC", Georgia, "Songti SC", SimSun, serif;
+		font-weight: 900;
+		font-size: clamp(30px, 4.6vw, 46px);
+		line-height: 1.25;
+		margin: 0 0 14px;
+		text-wrap: balance;
+	}
+	.mast h1 em { font-style: normal; color: var(--accent); }
+	.mast-sub { color: var(--muted); max-width: 66ch; margin: 0 0 22px; }
+	.meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 26px; }
+	.meta-chip {
+		display: inline-flex; align-items: center; gap: 6px;
+		height: 28px; padding: 0 12px;
+		border: 1px solid var(--line); border-radius: 14px;
+		background: var(--chip-bg);
+		font-size: 12.5px; color: var(--muted); white-space: nowrap;
+	}
+	.meta-chip b { color: var(--ink); font-weight: 500; }
+
+	/* 修订记录 */
+	.rev {
+		border: 1px solid color-mix(in srgb, var(--accent-strong) 35%, var(--line));
+		background: linear-gradient(180deg, var(--accent-wash), transparent 80%), var(--card);
+		border-radius: 14px; padding: 16px 20px; margin: 0 0 8px;
+	}
+	.rev-title { font-weight: 700; margin-bottom: 8px; }
+	.rev ol { margin: 0; padding-left: 22px; font-size: 14px; }
+	.rev li { margin: 5px 0; }
+	.rev li .to { color: var(--accent); font-weight: 700; }
+	.rev .rev-old { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+
+	/* ============ 目录条 ============ */
+	.toc {
+		position: sticky; top: 0; z-index: 50;
+		display: flex; gap: 4px; flex-wrap: wrap;
+		padding: 10px 0; margin: 18px 0 36px;
+		background: color-mix(in srgb, var(--ground) 88%, transparent);
+		backdrop-filter: blur(6px);
+		border-bottom: 1px solid var(--line);
+	}
+	.toc a {
+		display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
+		border-radius: 15px; font-size: 13px; text-decoration: none; color: var(--muted);
+	}
+	.toc a:hover { background: var(--accent-wash); color: var(--accent); }
+
+	/* ============ 章节 ============ */
+	section.part { margin: 64px 0 0; }
+	.part-eyebrow {
+		font-family: "JetBrains Mono", Consolas, monospace;
+		font-size: 12px; letter-spacing: 0.2em; color: var(--accent);
+		margin-bottom: 8px;
+	}
+	.part h2 {
+		font-family: "Noto Serif SC", Georgia, "Songti SC", serif;
+		font-weight: 900; font-size: clamp(23px, 3vw, 30px); line-height: 1.3;
+		margin: 0 0 6px; text-wrap: balance;
+	}
+	.part h3 { font-size: 17px; font-weight: 700; margin: 30px 0 8px; }
+	.part-lede { color: var(--muted); max-width: 70ch; margin: 0 0 20px; }
+
+	ul.flat { padding-left: 0; list-style: none; margin: 12px 0; max-width: 76ch; }
+	ul.flat li { position: relative; padding-left: 20px; margin: 8px 0; }
+	ul.flat li::before {
+		content: ""; position: absolute; left: 2px; top: 0.72em;
+		width: 7px; height: 7px; border-radius: 2px; background: var(--accent-strong); opacity: 0.75;
+	}
+	ul.flat li b { font-weight: 700; }
+
+	.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; vertical-align: 1px; }
+	.tag-keep { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+	.tag-move { background: var(--accent-wash); color: var(--accent); }
+	.tag-new { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+
+	/* UX 原则条 */
+	.ux-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0 26px; }
+	.ux-card { border: 1px solid var(--line); border-radius: 12px; background: var(--card); padding: 12px 16px; }
+	.ux-card .ux-no { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--accent); letter-spacing: 0.12em; }
+	.ux-card .ux-t { font-weight: 700; font-size: 14.5px; margin: 2px 0; }
+	.ux-card .ux-b { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+
+	/* ============ 令牌色票 ============ */
+	.swatch-board {
+		display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+		background: #1e1f22; border-radius: 14px; padding: 16px; margin: 16px 0;
+	}
+	.swatch { border-radius: 9px; padding: 10px 12px; min-height: 66px; display: flex; flex-direction: column; justify-content: space-between; }
+	.swatch .sw-name { font-size: 12.5px; font-weight: 700; }
+	.swatch .sw-val { font-family: "JetBrains Mono", monospace; font-size: 11px; opacity: 0.85; background: none; padding: 0; }
+
+	/* ============ 画板 ============ */
+	.artboard { margin: 26px 0 8px; }
+	.artboard-bar { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+	.artboard-bar .ab-id {
+		font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.14em;
+		color: var(--accent); font-weight: 600;
+	}
+	.artboard-bar .ab-title { font-weight: 700; font-size: 16px; }
+	.artboard-bar .ab-hint { font-size: 12.5px; color: var(--muted); }
+	.canvas {
+		background: var(--well);
+		border: 1px solid var(--line);
+		border-radius: 16px;
+		padding: clamp(14px, 3vw, 34px);
+		overflow-x: auto;
+	}
+	.canvas-inner { display: flex; justify-content: center; }
+	.caption { font-size: 13.5px; color: var(--muted); margin: 12px 0 0; max-width: 76ch; }
+	.caption b { color: var(--ink); }
+
+	/* ================================================================
+	   .mk-* 为界面稿样式：固定 Discord 深色，数值取自删除插件样式表。
+	   ================================================================ */
+	.mk {
+		--mk-bg: #313338;
+		--mk-surface: #2b2d31;
+		--mk-sunken: #1e1f22;
+		--mk-hover: rgba(255, 255, 255, 0.06);
+		--mk-border: rgba(78, 80, 88, 0.48);
+		--mk-text: #dbdee1;
+		--mk-strong: #f2f3f5;
+		--mk-sub: #b5bac1;
+		--mk-faint: #949ba4;
+		--mk-brand: #5865f2;
+		--mk-signature: #58b9f2;
+		--mk-ok: #23a55a;
+		--mk-warn: #f0b232;
+		--mk-danger: #f23f43;
+		--mk-link: #00a8fc;
+		font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+		color: var(--mk-text);
+		font-size: 14px;
+		line-height: 1.5;
+	}
+	.mk .ic { width: 15px; height: 15px; display: block; fill: currentColor; }
+	.mk-shell {
+		width: 760px; max-width: 100%;
+		background: var(--mk-bg);
+		border-radius: 12px;
+		box-shadow: 0 14px 40px rgba(0, 0, 0, 0.42);
+	}
+	.mk-shell-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+	.mk-shell-title { font-size: 17px; font-weight: 700; color: var(--mk-strong); flex: 1 1 auto; }
+	.mk-shell-sub { font-size: 12px; color: var(--mk-faint); }
+	.mk-x {
+		width: 28px; height: 28px; border: 0; border-radius: 4px;
+		display: flex; align-items: center; justify-content: center;
+		background: transparent; color: var(--mk-faint); cursor: pointer; font-size: 16px;
+	}
+	.mk-x:hover { background: var(--mk-hover); color: var(--mk-text); }
+	.mk-body { padding: 6px 16px 18px; }
+
+	/* 悬停提示（正式实现 = BdApi.Components.Tooltip，同删除插件） */
+	.mk-tip { position: relative; display: inline-flex; }
+	.mk-tip > .mk-info {
+		display: inline-flex; width: 13px; height: 13px;
+		color: var(--mk-faint); cursor: help; align-items: center; justify-content: center;
+	}
+	.mk-tip > .mk-info .ic { width: 13px; height: 13px; }
+	.mk-tip:hover > .mk-info, .mk-tip:focus-within > .mk-info { color: var(--mk-brand); }
+	.mk-tip::after {
+		content: attr(data-tip);
+		position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(-50%);
+		width: max-content; max-width: 250px;
+		background: #111214; border: 1px solid rgba(78, 80, 88, 0.48);
+		color: var(--mk-text); font-size: 12px; font-weight: 400; line-height: 1.55;
+		padding: 8px 10px; border-radius: 8px;
+		box-shadow: 0 8px 16px rgba(0, 0, 0, 0.42);
+		opacity: 0; pointer-events: none; transition: opacity 120ms ease; z-index: 60;
+		white-space: normal;
+	}
+	.mk-tip::before {
+		content: ""; position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%) rotate(45deg);
+		width: 8px; height: 8px; background: #111214;
+		border-right: 1px solid rgba(78, 80, 88, 0.48); border-bottom: 1px solid rgba(78, 80, 88, 0.48);
+		opacity: 0; pointer-events: none; transition: opacity 120ms ease; z-index: 61;
+	}
+	.mk-tip:hover::after, .mk-tip:hover::before,
+	.mk-tip:focus-within::after, .mk-tip:focus-within::before { opacity: 1; }
+	.mk-tip.tip-left::after { left: auto; right: -8px; transform: none; }
+
+	/* 条件显示标注（设计稿注记，不是真实控件） */
+	.mk-cond {
+		display: inline-flex; align-items: center; height: 18px; padding: 0 7px; flex: 0 0 auto;
+		border: 1px dashed color-mix(in srgb, var(--mk-warn) 55%, transparent);
+		color: var(--mk-warn); border-radius: 9px;
+		font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+	}
+
+	/* 标签页 */
+	.mk-tabbar { display: flex; gap: 4px; padding: 3px; height: 36px; border-radius: 8px; background: var(--mk-sunken); }
+	.mk-tab {
+		flex: 1 1 0; height: 30px; border: 0; border-radius: 5px;
+		background: transparent; color: var(--mk-faint);
+		font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+		display: flex; align-items: center; justify-content: center;
+		transition: background 120ms ease, color 120ms ease;
+	}
+	.mk-tab:hover { background: var(--mk-hover); color: var(--mk-text); }
+	.mk-tab.on, .mk-tab.on:hover { background: var(--mk-brand); color: #fff; }
+	.mk-tab:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--mk-brand) 45%, transparent); }
+	.mk-page { display: none; padding-top: 16px; min-height: 380px; }
+	.mk-page.on { display: block; }
+
+	/* 行式布局 */
+	.mk-group {
+		font-size: 13px; font-weight: 700; color: var(--mk-faint);
+		margin: 22px 0 8px; display: flex; align-items: center; gap: 6px;
+	}
+	.mk-group:first-child { margin-top: 2px; }
+	.mk-row { min-height: 36px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+	.mk-label { flex: 1 1 auto; min-width: 0; font-size: 15px; font-weight: 500; display: inline-flex; align-items: center; gap: 5px; }
+	.mk-note { font-size: 12.5px; line-height: 1.55; color: var(--mk-faint); margin: 4px 0 10px; }
+	.mk-split { height: 1px; background: var(--mk-border); opacity: 0.55; margin: 14px 0; }
+
+	/* 依赖子项：跟随父开关缩进，父关闭时整块变灰失效 */
+	.mk-dep { margin-left: 10px; padding-left: 14px; border-left: 2px solid rgba(255, 255, 255, 0.07); transition: opacity 150ms ease; }
+	.mk-dep .mk-label { font-size: 14px; color: var(--mk-sub); }
+	.mk-dep.dep-off { opacity: 0.4; pointer-events: none; }
+
+	/* 开关 */
+	.mk-switch {
+		position: relative; width: 36px; height: 20px; flex: 0 0 auto;
+		border-radius: 10px; border: 1px solid var(--mk-border);
+		background: var(--mk-sunken); cursor: pointer;
+		transition: background 150ms ease, border-color 150ms ease;
+	}
+	.mk-switch::after {
+		content: ""; position: absolute; top: 2px; left: 2px;
+		width: 14px; height: 14px; border-radius: 50%;
+		background: var(--mk-faint);
+		transition: transform 150ms ease, background 150ms ease;
+	}
+	.mk-switch.on { background: var(--mk-ok); border-color: transparent; }
+	.mk-switch.on::after { background: #fff; transform: translateX(16px); }
+	.mk-switch:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--mk-brand) 45%, transparent); }
+
+	/* 作用域勾选小片（保护规则用） */
+	.mk-scope-chips { display: flex; gap: 6px; flex: 0 0 auto; }
+	.mk-scope-chip {
+		height: 24px; padding: 0 10px; border-radius: 12px;
+		border: 1px solid var(--mk-border); background: var(--mk-sunken);
+		color: var(--mk-faint); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+		display: inline-flex; align-items: center; gap: 4px;
+	}
+	.mk-scope-chip.on {
+		background: color-mix(in srgb, var(--mk-ok) 14%, transparent);
+		border-color: color-mix(in srgb, var(--mk-ok) 50%, transparent);
+		color: var(--mk-ok);
+	}
+	.mk-scope-chip.on::before { content: "✓"; font-size: 11px; }
+
+	/* 输入与下拉 */
+	.mk-input {
+		width: 100%; height: 32px; padding: 0 10px;
+		border-radius: 6px; border: 1px solid var(--mk-border);
+		background: var(--mk-sunken); color: var(--mk-text);
+		font: inherit; font-size: 14px; outline: none;
+	}
+	.mk-input:focus { border-color: var(--mk-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mk-brand) 18%, transparent); }
+	.mk-input-wrap { position: relative; }
+	.mk-input-wrap .mk-input { padding-right: 38px; }
+	.mk-eye {
+		position: absolute; top: 1px; right: 1px; bottom: 1px; width: 30px;
+		border: 0; border-left: 1px solid var(--mk-border); border-radius: 0 5px 5px 0;
+		background: transparent; color: var(--mk-sub); cursor: pointer;
+		display: flex; align-items: center; justify-content: center;
+	}
+	.mk-eye:hover { background: var(--mk-hover); color: var(--mk-text); }
+	.mk-select {
+		width: 210px; max-width: 100%; height: 32px; padding-left: 10px;
+		display: flex; align-items: center; gap: 8px;
+		border-radius: 6px; border: 1px solid var(--mk-border);
+		background: var(--mk-sunken); color: var(--mk-text);
+		font: inherit; font-size: 14px; cursor: pointer; overflow: hidden; flex: 0 0 auto;
+	}
+	.mk-select:hover { background: var(--mk-hover); }
+	.mk-select .sel-label { flex: 1 1 auto; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.mk-select .sel-arrow {
+		align-self: stretch; width: 26px; flex: 0 0 auto;
+		display: flex; align-items: center; justify-content: center;
+		border-left: 1px solid var(--mk-border); color: var(--mk-sub);
+	}
+	.mk-select-w { width: 260px; }
+	.mk-dir { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+	.mk-dir .arr { color: var(--mk-faint); font-weight: 700; }
+
+	/* 选择卡（判定方式） */
+	.mk-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0 4px; }
+	.mk-choice {
+		border: 1px solid var(--mk-border); border-radius: 8px; background: var(--mk-surface);
+		padding: 10px 12px; cursor: pointer; text-align: left; font: inherit; color: var(--mk-text);
+		display: flex; flex-direction: column; gap: 3px; position: relative;
+		transition: border-color 120ms ease, background 120ms ease;
+	}
+	.mk-choice:hover { border-color: color-mix(in srgb, var(--mk-text) 20%, transparent); }
+	.mk-choice.on { border-color: var(--mk-brand); background: color-mix(in srgb, var(--mk-brand) 7%, var(--mk-surface)); }
+	.mk-choice .ch-t { font-size: 14px; font-weight: 700; color: var(--mk-strong); display: flex; align-items: center; gap: 7px; }
+	.mk-choice .ch-radio {
+		width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto;
+		border: 2px solid var(--mk-faint); background: transparent;
+	}
+	.mk-choice.on .ch-radio { border-color: var(--mk-brand); background: radial-gradient(circle, var(--mk-brand) 0 4px, transparent 4.5px); }
+	.mk-choice .ch-d { font-size: 12px; color: var(--mk-faint); line-height: 1.55; }
+	.mk-choice .ch-d b { color: var(--mk-sub); font-weight: 600; }
+
+	/* 按钮（语义配色：添加=绿，删除=红悬停，主操作=蓝紫） */
+	.mk-btn {
+		height: 28px; padding: 0 12px; border: 0; border-radius: 6px;
+		display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+		background: var(--mk-brand); color: #fff;
+		font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; flex: 0 0 auto;
+	}
+	.mk-btn:hover { background: #4752c4; }
+	.mk-btn.sec { background: var(--mk-sunken); color: var(--mk-text); border: 1px solid var(--mk-border); }
+	.mk-btn.sec:hover { background: var(--mk-hover); }
+	.mk-btn.grn { background: var(--mk-ok); }
+	.mk-btn.grn:hover { background: #1f934f; }
+	.mk-iconbtn {
+		width: 32px; height: 32px; border: 1px solid var(--mk-border); border-radius: 6px;
+		background: var(--mk-sunken); color: var(--mk-sub); cursor: pointer;
+		display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+	}
+	.mk-iconbtn:hover { background: var(--mk-hover); color: var(--mk-text); }
+	.mk-iconbtn.danger:hover { background: color-mix(in srgb, var(--mk-danger) 12%, transparent); border-color: color-mix(in srgb, var(--mk-danger) 45%, transparent); color: var(--mk-danger); }
+	.mk-minibtn {
+		width: 24px; height: 24px; border: 0; border-radius: 4px; background: transparent;
+		color: var(--mk-faint); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+	}
+	.mk-minibtn:hover { background: var(--mk-hover); color: var(--mk-text); }
+	.mk-minibtn.danger:hover { background: color-mix(in srgb, var(--mk-danger) 12%, transparent); color: var(--mk-danger); }
+	.mk-minibtn .ic { width: 14px; height: 14px; }
+
+	/* 状态行 */
+	.mk-status { margin-top: 8px; font-size: 13px; color: var(--mk-faint); }
+	.mk-status.ok { color: var(--mk-ok); }
+	.mk-status.ok::before, .mk-status.fail::before {
+		content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+		background: currentColor; margin-right: 6px; vertical-align: 2px;
+	}
+
+	/* 首次引导横幅 */
+	.mk-intro {
+		display: flex; gap: 10px; padding: 12px; border-radius: 8px;
+		background: color-mix(in srgb, var(--mk-brand) 8%, transparent);
+		margin-bottom: 14px; align-items: flex-start;
+	}
+	.mk-intro-ic { flex: 0 0 auto; color: #a0a9ff; display: flex; }
+	.mk-intro-ic svg { width: 20px; height: 20px; fill: currentColor; }
+	.mk-intro-t { font-size: 14.5px; font-weight: 700; color: var(--mk-strong); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+	.mk-intro-b { font-size: 12.5px; color: var(--mk-faint); margin-top: 2px; line-height: 1.6; }
+	.mk-intro-b b { color: var(--mk-sub); }
+
+	/* 服务商轨道 + 表单 */
+	.mk-prov-grid { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 16px; }
+	.mk-rail { display: flex; flex-direction: column; gap: 2px; }
+	.mk-rail-h {
+		font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
+		color: var(--mk-faint); margin: 10px 0 3px 10px;
+	}
+	.mk-rail-h:first-child { margin-top: 0; }
+	.mk-prov {
+		height: 34px; padding: 0 8px 0 10px; border-radius: 6px;
+		display: flex; align-items: center; gap: 8px;
+		font-size: 14.5px; font-weight: 500; color: var(--mk-sub); cursor: default;
+	}
+	.mk-prov:hover { background: var(--mk-hover); color: var(--mk-text); }
+	.mk-prov.sel { background: rgba(255, 255, 255, 0.09); color: var(--mk-strong); font-weight: 600; }
+	.mk-prov-ic { position: relative; width: 18px; height: 18px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+	.mk-prov-ic svg { width: 16px; height: 16px; display: block; }
+	.mk-prov-ic .mono-ic {
+		width: 17px; height: 17px; border-radius: 4px; background: var(--mk-sunken);
+		border: 1px solid var(--mk-border);
+		font-size: 9px; font-weight: 700; color: var(--mk-sub);
+		display: flex; align-items: center; justify-content: center;
+	}
+	.mk-dot-ok { position: absolute; right: -3px; bottom: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--mk-ok); }
+	.mk-prov-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.mk-prov-mark { flex: 0 0 auto; font-size: 11px; font-weight: 700; }
+	.mk-prov-mark.primary { color: var(--mk-brand); }
+	.mk-prov-mark.backup {
+		height: 16px; padding: 0 6px; border-radius: 8px;
+		background: color-mix(in srgb, var(--mk-warn) 16%, transparent); color: var(--mk-warn);
+		display: inline-flex; align-items: center;
+	}
+	.mk-prov-card {
+		display: flex; align-items: center; gap: 10px;
+		padding: 8px 10px; border-radius: 8px;
+		border: 1px solid var(--mk-border); background: var(--mk-surface);
+		margin-bottom: 14px;
+	}
+	.mk-tile {
+		width: 32px; height: 32px; border-radius: 8px; flex: 0 0 auto;
+		background: var(--mk-sunken); border: 1px solid var(--mk-border);
+		display: flex; align-items: center; justify-content: center; color: var(--mk-strong);
+	}
+	.mk-tile svg { width: 18px; height: 18px; }
+	.mk-prov-copy { flex: 1 1 auto; min-width: 0; }
+	.mk-prov-title { font-size: 15px; font-weight: 700; color: var(--mk-strong); }
+	.mk-prov-sub { font-size: 12px; color: var(--mk-faint); display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.mk-prov-sub::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--mk-ok); flex: 0 0 auto; }
+	.mk-badge {
+		height: 22px; padding: 0 8px; border-radius: 10px; flex: 0 0 auto;
+		background: color-mix(in srgb, var(--mk-brand) 15%, transparent); color: #a0a9ff;
+		font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center;
+	}
+	.mk-field-label { font-size: 14.5px; font-weight: 500; margin: 12px 0 6px; display: flex; align-items: center; gap: 5px; }
+	.mk-model-row { display: flex; gap: 8px; align-items: stretch; }
+	.mk-model-row .mk-input-wrap { flex: 1 1 auto; }
+	.mk-portal-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+	.mk-portal {
+		height: 26px; padding: 0 11px; border-radius: 13px;
+		border: 1px solid var(--mk-border);
+		background: color-mix(in srgb, var(--mk-brand) 9%, var(--mk-surface));
+		color: var(--mk-text); font-size: 12px; font-weight: 600;
+		display: inline-flex; align-items: center; gap: 6px; cursor: pointer; text-decoration: none;
+	}
+	.mk-portal:hover { border-color: color-mix(in srgb, var(--mk-brand) 55%, transparent); color: var(--mk-strong); }
+	.mk-portal .ic { width: 13px; height: 13px; color: var(--mk-sub); }
+	.mk-portal:hover .ic { color: #a0a9ff; }
+
+	/* 词条 chips */
+	.mk-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+	.mk-chip {
+		height: 26px; padding: 0 6px 0 10px; border-radius: 6px;
+		background: var(--mk-sunken); border: 1px solid var(--mk-border);
+		font-size: 13px; display: inline-flex; align-items: center; gap: 6px;
+	}
+	.mk-chip .x { color: var(--mk-faint); cursor: pointer; font-size: 13px; padding: 0 3px; border-radius: 3px; }
+	.mk-chip .x:hover { color: var(--mk-danger); background: color-mix(in srgb, var(--mk-danger) 12%, transparent); }
+	.mk-chip-add {
+		height: 26px; padding: 0 10px; border-radius: 6px;
+		border: 1px dashed color-mix(in srgb, var(--mk-ok) 45%, transparent); background: transparent;
+		color: var(--mk-ok); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+	}
+	.mk-chip-add:hover { background: color-mix(in srgb, var(--mk-ok) 10%, transparent); }
+
+	/* 提示词卡片（同删除插件 policy card） */
+	.mk-policy { border: 1px solid var(--mk-border); border-radius: 8px; overflow: hidden; background: var(--mk-surface); margin-top: 8px; }
+	.mk-policy.editable:focus-within { border-color: var(--mk-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mk-brand) 18%, transparent); }
+	.mk-policy-head {
+		display: flex; align-items: center; gap: 8px; padding: 7px 11px;
+		background: rgba(255, 255, 255, 0.03);
+		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+	}
+	.mk-policy-name { font-weight: 700; color: var(--mk-strong); font-size: 13.5px; display: inline-flex; align-items: center; gap: 6px; cursor: text; }
+	.mk-policy-name .ic { width: 12px; height: 12px; color: var(--mk-faint); }
+	.mk-policy-name:hover { text-decoration: underline; text-decoration-color: var(--mk-faint); text-underline-offset: 3px; }
+	.mk-policy-lock {
+		display: inline-flex; align-items: center; gap: 4px;
+		height: 18px; padding: 0 8px; border-radius: 9px;
+		font-size: 11px; font-weight: 600;
+		color: var(--mk-warn); background: color-mix(in srgb, var(--mk-warn) 13%, transparent);
+	}
+	.mk-policy-lock .ic { width: 10px; height: 10px; }
+	.mk-policy-actions { margin-left: auto; display: flex; gap: 2px; }
+	.mk-policy-body {
+		display: block; width: 100%; min-height: 92px; padding: 10px 12px; border: 0;
+		background: var(--mk-sunken); color: var(--mk-text);
+		font: inherit; font-size: 13px; line-height: 1.6; resize: vertical; outline: none;
+	}
+
+	/* 颜色色票 */
+	.mk-colors { display: flex; flex-wrap: wrap; gap: 8px; }
+	.mk-color {
+		height: 30px; padding: 0 10px; border-radius: 15px;
+		border: 1px solid var(--mk-border); background: var(--mk-sunken);
+		display: inline-flex; align-items: center; gap: 7px;
+		font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--mk-sub); cursor: pointer;
+	}
+	.mk-color .dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.25); }
+	.mk-color.on { border-color: var(--mk-brand); color: var(--mk-strong); box-shadow: 0 0 0 1px var(--mk-brand); }
+	.mk-color-add {
+		width: 30px; height: 30px; border-radius: 50%;
+		border: 1px dashed color-mix(in srgb, var(--mk-ok) 45%, transparent); background: transparent;
+		color: var(--mk-ok); font-size: 16px; cursor: pointer;
+	}
+	.mk-color-add:hover { background: color-mix(in srgb, var(--mk-ok) 10%, transparent); }
+
+	/* 聊天消息预览 */
+	.mk-msg { display: flex; gap: 12px; padding: 12px 4px 4px; }
+	.mk-avatar { width: 36px; height: 36px; border-radius: 50%; flex: 0 0 auto; background: linear-gradient(135deg, #4752c4, #8b5cf6); }
+	.mk-msg-body { flex: 1 1 auto; min-width: 0; }
+	.mk-msg-head { display: flex; align-items: baseline; gap: 8px; }
+	.mk-msg-name { font-weight: 600; color: #8ab4f8; font-size: 14.5px; }
+	.mk-msg-time { font-size: 11px; color: var(--mk-faint); }
+	.mk-msg-text { font-size: 14.5px; }
+	.mk-trans {
+		margin-top: 4px; padding: 6px 10px 6px 12px; border-radius: 6px;
+		border-left: 2px solid var(--tc, #00ff40);
+		background: color-mix(in srgb, var(--tc, #00ff40) 8%, transparent);
+	}
+	.mk-trans-mark { font-size: 11px; color: var(--mk-faint); margin-top: 2px; }
+	.mk-spoiler {
+		display: inline-block; margin-top: 4px; padding: 1px 8px; border-radius: 4px;
+		background: var(--mk-sunken); color: transparent; cursor: pointer; user-select: none;
+	}
+
+	/* 关于卡 / 诊断卡 */
+	.mk-about { padding: 14px 16px; border-radius: 8px; background: color-mix(in srgb, var(--mk-signature) 6%, var(--mk-surface)); }
+	.mk-about-id { display: flex; align-items: center; gap: 12px; }
+	.mk-about-ic {
+		width: 36px; height: 36px; border-radius: 8px; flex: 0 0 auto;
+		background: color-mix(in srgb, var(--mk-signature) 18%, transparent); color: var(--mk-signature);
+		display: flex; align-items: center; justify-content: center;
+	}
+	.mk-about-ic svg { width: 22px; height: 22px; fill: currentColor; }
+	.mk-about-name { font-size: 15.5px; font-weight: 700; color: var(--mk-strong); }
+	.mk-about-desc { font-size: 12.5px; color: var(--mk-faint); }
+	.mk-ver {
+		margin-left: auto; height: 22px; padding: 0 8px; border-radius: 11px; flex: 0 0 auto;
+		background: color-mix(in srgb, var(--mk-signature) 15%, transparent); color: var(--mk-signature);
+		font-size: 12px; font-weight: 700; display: inline-flex; align-items: center;
+		font-family: "JetBrains Mono", monospace;
+	}
+	.mk-about-split { height: 1px; background: rgba(255, 255, 255, 0.08); margin: 12px 0; }
+	.mk-diag { border: 1px solid var(--mk-border); border-radius: 8px; background: var(--mk-surface); padding: 2px 12px; margin-top: 10px; }
+	.mk-diag-row { min-height: 30px; display: flex; align-items: center; gap: 12px; font-size: 13px; }
+	.mk-diag-row + .mk-diag-row { border-top: 1px solid rgba(255, 255, 255, 0.05); }
+	.mk-diag-key { flex: 1 1 auto; font-family: "JetBrains Mono", monospace; font-size: 12.5px; }
+	.mk-diag-val { font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+	.mk-diag-val.ok { color: var(--mk-ok); }
+	.mk-diag-val.dim { color: var(--mk-faint); font-weight: 400; }
+	.mk-diag-val.ok::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+	/* 频道弹窗 */
+	.mk-pop-shell { width: 480px; max-width: 100%; background: var(--mk-bg); border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.42); }
+	.mk-zone { background: var(--mk-surface); border-radius: 8px; margin-bottom: 12px; }
+	.mk-zone-row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; }
+	.mk-zone-row + .mk-zone-row { border-top: 1px solid rgba(255, 255, 255, 0.05); }
+	.mk-zone-label { flex: 1 1 auto; min-width: 0; font-size: 14.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 5px; }
+	.mk-zone-head {
+		display: flex; align-items: center; gap: 8px; padding: 10px 14px 0;
+		font-size: 12.5px; font-weight: 700; color: var(--mk-faint);
+	}
+	.mk-scope {
+		height: 20px; padding: 0 8px; border-radius: 10px; border: 0;
+		font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; flex: 0 0 auto;
+		background: rgba(255, 255, 255, 0.06); color: var(--mk-faint);
+	}
+	.mk-scope[data-scope="服务器"] { background: color-mix(in srgb, var(--mk-warn) 16%, transparent); color: var(--mk-warn); }
+	.mk-scope[data-scope="频道"] { background: color-mix(in srgb, var(--mk-signature) 14%, transparent); color: var(--mk-signature); }
+	.mk-swap {
+		width: 24px; height: 24px; margin-left: auto; border: 0; border-radius: 4px;
+		background: transparent; color: var(--mk-faint); cursor: pointer;
+		display: inline-flex; align-items: center; justify-content: center;
+	}
+	.mk-swap:hover { background: var(--mk-hover); color: var(--mk-text); }
+
+	/* 悬浮胶囊 */
+	.mk-pill {
+		display: inline-flex; align-items: center; gap: 8px;
+		height: 36px; padding: 0 8px 0 14px; border-radius: 18px;
+		background: var(--mk-sunken); border: 1px solid var(--mk-signature);
+		box-shadow: 0 8px 16px rgba(0, 0, 0, 0.24);
+		font-size: 13px; font-weight: 600;
+	}
+	.mk-pill svg { width: 15px; height: 15px; fill: var(--mk-signature); }
+	.mk-pill .px { width: 22px; height: 22px; border: 0; border-radius: 50%; background: transparent; color: var(--mk-faint); cursor: pointer; }
+	.mk-pill .px:hover { background: var(--mk-hover); color: var(--mk-danger); }
+
+	/* ============ 前后对比小图 ============ */
+	.ba-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin: 16px 0; }
+	.ba-card { border: 1px solid var(--line); border-radius: 12px; background: var(--card); padding: 14px 16px; }
+	.ba-kicker { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.08em; margin-bottom: 10px; }
+	.ba-kicker.after { color: var(--accent); }
+	.wire { border-radius: 8px; background: var(--well); padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+	.wire .wr { height: 14px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 22%, transparent); }
+	.wire .wr.deep { height: 34px; }
+	.wire .wr.brand { background: color-mix(in srgb, var(--accent-strong) 40%, transparent); }
+	.wire .wtabs { display: flex; gap: 4px; }
+	.wire .wtabs span { flex: 1; height: 18px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 22%, transparent); }
+	.wire .wtabs span.on { background: color-mix(in srgb, var(--accent-strong) 55%, transparent); }
+	.ba-note { font-size: 13px; color: var(--muted); margin-top: 10px; }
+
+	/* ============ 架构映射 ============ */
+	.map-grid { display: grid; grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr); gap: 0 6px; align-items: stretch; margin: 18px 0; }
+	.map-col-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.08em; padding-bottom: 8px; }
+	.map-item { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 10px 14px; margin-bottom: 8px; }
+	.map-item b { display: block; font-size: 14.5px; }
+	.map-item span { font-size: 12.5px; color: var(--muted); }
+	.map-item.new-home { border-color: color-mix(in srgb, var(--accent-strong) 45%, transparent); }
+	.map-arrow { display: flex; align-items: center; justify-content: center; color: var(--accent); font-weight: 900; }
+
+	/* ============ 对照表 ============ */
+	.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; margin: 18px 0; }
+	table.spec { border-collapse: collapse; width: 100%; min-width: 720px; background: var(--card); font-size: 13.5px; }
+	table.spec th, table.spec td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+	table.spec th { font-size: 12px; letter-spacing: 0.06em; color: var(--muted); background: color-mix(in srgb, var(--well) 55%, var(--card)); position: sticky; top: 0; }
+	table.spec tr.grp td { font-weight: 700; color: var(--accent); background: var(--accent-wash); font-size: 12.5px; letter-spacing: 0.05em; }
+	table.spec td:first-child { font-weight: 500; }
+	table.spec td .mono, table.spec td code { font-size: 12px; }
+	table.spec tbody tr:last-child td { border-bottom: 0; }
+
+	/* ============ 阶段卡 ============ */
+	.phase-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 18px 0; }
+	.phase { border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+	.phase .ph-no { font-family: "Noto Serif SC", serif; font-weight: 900; font-size: 26px; color: var(--accent); line-height: 1; }
+	.phase .ph-title { font-weight: 700; font-size: 16px; }
+	.phase .ph-body { font-size: 13.5px; color: var(--muted); }
+	.phase .ph-gain { font-size: 12.5px; color: var(--ok); font-weight: 500; }
+
+	.qa {
+		border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
+		background: color-mix(in srgb, var(--warn) 6%, var(--card));
+		border-radius: 12px; padding: 16px 20px; margin: 20px 0;
+	}
+	.qa-title { font-weight: 700; margin-bottom: 6px; }
+	ol.qs { margin: 0; padding-left: 22px; }
+	ol.qs li { margin: 6px 0; }
+
+	.settled {
+		border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--line));
+		background: color-mix(in srgb, var(--ok) 5%, var(--card));
+		border-radius: 12px; padding: 14px 20px; margin: 20px 0; font-size: 14px;
+	}
+	.settled b { color: var(--ok); }
+
+	footer.doc-foot {
+		margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--line);
+		font-size: 12.5px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap;
+	}
+
+	/* ============ 2026-08-24 画板 A0 · 真实模态主稿（602×663，现状 ⇄ 优化后） ============ */
+	/* 稿件工具条（文档章法，非插件 UI） */
+	.pmbar {
+		display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+		padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--card);
+	}
+	.pmbar-t { font-size: 12px; font-weight: 700; color: var(--muted); margin-right: 2px; }
+	.pmbar-btn {
+		appearance: none; padding: 3px 9px; font-size: 12px; font-weight: 600;
+		color: var(--muted); background: var(--chip-bg); border: 1px solid var(--line);
+		border-radius: 6px; cursor: pointer; transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+	}
+	.pmbar-btn:hover { color: var(--ink); border-color: var(--accent); }
+	.pmbar-btn.on { background: var(--accent-strong); color: #fff; border-color: var(--accent-strong); }
+	.pmbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+	.pmbar-sep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
+	.pmbar-note { flex: 1 1 100%; font-size: 12.5px; color: var(--muted); line-height: 1.6; margin-top: 2px; }
+	.pmbar-note b { color: var(--ink); }
+
+	/* —— 模态外壳 1:1（Discord 深色字面值，不依赖文档令牌） —— */
+	.pm-modal {
+		width: 602px; height: 663px; flex: 0 0 auto;
+		background: #313338; border-radius: 10px; overflow: hidden;
+		display: flex; flex-direction: column;
+		box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+		font-size: 14px; color: #dbdee1; text-align: left;
+	}
+	.pm-head { display: flex; align-items: center; gap: 10px; padding: 16px 16px 10px; }
+	.pm-title { font-size: 19px; font-weight: 700; color: #f2f3f5; flex: 1 1 auto; }
+	.pm-x { width: 26px; height: 26px; border: 0; background: transparent; color: #b5bac1; font-size: 16px; cursor: pointer; border-radius: 4px; }
+	.pm-x:hover { color: #dbdee1; background: rgba(255, 255, 255, 0.06); }
+	.pm-tabs { display: flex; gap: 2px; margin: 0 16px; padding: 4px; background: #1e1f22; border-radius: 10px; }
+	.pm-tab { flex: 1 1 0; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #b5bac1; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+	.pm-tab.on { background: #5865f2; color: #fff; }
+	.pm-tab:not(.on):hover { color: #f2f3f5; background: rgba(255, 255, 255, 0.04); }
+	.pm-body { flex: 1 1 auto; min-height: 0; display: flex; padding: 12px 4px 0 16px; }
+	.pm-rail { width: 160px; flex: 0 0 auto; padding-right: 6px; }
+	.pm-rail-h { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; color: #949ba4; margin: 10px 4px 4px 8px; }
+	.pm-rail-h:first-child { margin-top: 2px; }
+	.pm-prov { height: 32px; padding: 0 8px; border-radius: 6px; display: flex; align-items: center; gap: 8px; color: #b5bac1; font-size: 14px; cursor: default; }
+	.pm-prov:hover { background: rgba(255, 255, 255, 0.05); color: #dbdee1; }
+	.pm-prov.sel { background: rgba(255, 255, 255, 0.09); color: #f2f3f5; font-weight: 600; }
+	.pm-prov-ic { position: relative; width: 17px; height: 17px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+	.pm-prov-ic svg { width: 15px; height: 15px; display: block; }
+	.pm-mono { width: 16px; height: 16px; border-radius: 4px; background: #1e1f22; border: 1px solid #3f4147; font-size: 8.5px; font-weight: 700; color: #b5bac1; display: flex; align-items: center; justify-content: center; }
+	.pm-dot { position: absolute; right: -3px; bottom: -2px; width: 6px; height: 6px; border-radius: 50%; background: #23a55a; }
+	.pm-prov-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.pm-mark-main { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; height: 16px; padding: 0 5px; border-radius: 8px; background: #5865f2; color: #fff; display: inline-flex; align-items: center; }
+	.pm-mark-bak { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; height: 16px; padding: 0 5px; border-radius: 8px; background: rgba(240, 178, 50, 0.85); color: #1e1f22; display: inline-flex; align-items: center; }
+	.pm-add { margin: 8px 4px 0; width: calc(100% - 8px); height: 30px; border: 1px dashed #3f4147; border-radius: 6px; background: transparent; color: #949ba4; font: inherit; font-size: 12.5px; cursor: pointer; }
+	.pm-add:hover { color: #dbdee1; border-color: #565963; }
+	.pm-detail { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 0 10px 14px 12px; scrollbar-gutter: stable; }
+	.pm-detail::-webkit-scrollbar { width: 8px; }
+	.pm-detail::-webkit-scrollbar-thumb { background: #1a1b1e; border-radius: 4px; }
+	.pm-detail::-webkit-scrollbar-thumb:hover { background: #232428; }
+	.pm-detail::-webkit-scrollbar-thumb:active { background: #2a2c31; }
+	.pm-foot { flex: 0 0 auto; display: flex; justify-content: flex-end; padding: 12px 16px; background: #2b2d31; }
+	.pm-done { height: 38px; padding: 0 26px; background: #5865f2; color: #fff; border: 0; border-radius: 6px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+	.pm-done:hover { background: #4752c4; }
+
+	/* —— 详情通用控件 —— */
+	.pm-card { display: flex; align-items: center; gap: 10px; padding: 10px; background: #2b2d31; border-radius: 8px; }
+	.pm-tile { width: 34px; height: 34px; border-radius: 8px; flex: 0 0 auto; background: #4752c4; color: #fff; display: flex; align-items: center; justify-content: center; }
+	.pm-tile svg { width: 18px; height: 18px; fill: currentColor; }
+	.pm-card-copy { flex: 1 1 auto; min-width: 0; }
+	.pm-card-t { font-size: 15px; font-weight: 700; color: #f2f3f5; display: flex; align-items: center; gap: 6px; }
+	.pm-card-s { font-size: 12px; color: #949ba4; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.pm-card-s::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #23a55a; flex: 0 0 auto; }
+	.pm-badge { height: 24px; padding: 0 9px; border-radius: 4px; flex: 0 0 auto; background: #5865f2; color: #fff; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; }
+	.pm-btn { height: 28px; padding: 0 12px; border: 0; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: #5865f2; color: #fff; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; flex: 0 0 auto; }
+	.pm-btn:hover { background: #4752c4; }
+	.pm-btn.sec { background: #1e1f22; color: #dbdee1; border: 1px solid #3f4147; }
+	.pm-btn.sec:hover { background: #26282c; }
+	.pm-btn:disabled { opacity: 0.55; cursor: default; }
+	.pm-minibtn { width: 26px; height: 26px; border: 0; border-radius: 4px; background: transparent; color: #949ba4; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+	.pm-minibtn:hover { background: rgba(242, 63, 67, 0.12); color: #f23f43; }
+	.pm-minibtn .ic { width: 14px; height: 14px; }
+	.pm-label { font-size: 14px; font-weight: 600; color: #dbdee1; margin: 14px 0 6px; display: flex; align-items: center; gap: 5px; }
+	.pm-input { width: 100%; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid #26282c; background: #1e1f22; color: #dbdee1; font: inherit; font-size: 13.5px; outline: none; }
+	.pm-input:focus { border-color: #5865f2; }
+	.pm-iwrap { position: relative; }
+	.pm-iwrap .pm-input { padding-right: 34px; }
+	.pm-eye { position: absolute; top: 1px; right: 1px; bottom: 1px; width: 28px; border: 0; border-left: 1px solid #26282c; border-radius: 0 5px 5px 0; background: transparent; color: #949ba4; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+	.pm-eye:hover { background: rgba(255, 255, 255, 0.05); color: #dbdee1; }
+	.pm-eye .ic, .pm-iconbtn .ic { width: 15px; height: 15px; }
+	.pm-iconbtn { width: 32px; height: 32px; border: 1px solid #3f4147; border-radius: 6px; background: #1e1f22; color: #949ba4; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+	.pm-iconbtn:hover { background: #26282c; color: #dbdee1; }
+	.pm-select { height: 32px; padding-left: 10px; display: flex; align-items: center; gap: 8px; border-radius: 6px; border: 1px solid #26282c; background: #1e1f22; color: #dbdee1; font: inherit; font-size: 13.5px; cursor: pointer; overflow: hidden; }
+	.pm-select:hover { background: #26282c; }
+	.pm-select .sel-label { flex: 1 1 auto; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.pm-select .sel-arrow { align-self: stretch; width: 24px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; border-left: 1px solid #26282c; color: #949ba4; }
+	.pm-select .sel-arrow .ic { width: 14px; height: 14px; }
+	.pm-tipd { position: relative; display: inline-flex; color: #949ba4; }
+	.pm-tipd .ic { width: 13px; height: 13px; }
+	.pm-tipd:hover { color: #a0a9ff; }
+	.pm-caption { font-size: 12px; color: #949ba4; margin-top: 6px; line-height: 1.5; }
+	.pm-caption.warn { color: #f0b232; }
+	.pm-split { border-top: 1px solid rgba(255, 255, 255, 0.06); margin: 14px 0 0; }
+
+	/* —— 模型与思考分组（优化后） —— */
+	.pm-group { margin-top: 14px; padding: 12px; background: rgba(0, 0, 0, 0.18); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; }
+	.pm-group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: #949ba4; }
+	.pm-cap { font-size: 11px; font-weight: 600; letter-spacing: 0; color: #b5bac1; padding: 1px 8px; border-radius: 9px; border: 1px solid #3f4147; background: #1e1f22; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+	.pm-model-row { display: flex; gap: 8px; align-items: stretch; }
+	.pm-model-row .pm-iwrap { flex: 1 1 auto; min-width: 0; }
+	.pm-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+	.pm-row .pm-label { margin: 0; flex: 1 1 auto; min-width: 0; }
+	.pm-row .pm-ctrl { flex: 0 0 auto; width: 190px; max-width: 60%; }
+	.pm-status-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; margin-top: 12px; flex-wrap: wrap; }
+	.pm-status { min-width: 0; flex: 1 1 210px; display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; line-height: 18px; }
+	.pm-status.ok { color: #23a55a; }
+	.pm-status.warn { color: #f0b232; }
+	.pm-status.neutral { color: #949ba4; }
+	.pm-status.fail { color: #f23f43; }
+	.pm-status .dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; background: currentColor; align-self: flex-start; margin-top: 6px; }
+	.pm-status .txt { min-width: 0; white-space: normal; line-height: 1.45; }
+	.pm-raw { flex: 0 0 auto; font-family: "JetBrains Mono", Consolas, monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: #1e1f22; border: 1px solid #3f4147; color: #b5bac1; }
+	.pm-status .pm-raw { color: inherit; border-color: color-mix(in srgb, currentColor 35%, transparent); background: color-mix(in srgb, currentColor 10%, transparent); }
+	.pm-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; margin-left: auto; }
+	.pm-link { appearance: none; border: 0; background: transparent; padding: 0; font: inherit; font-size: 12.5px; font-weight: 600; color: #f0b232; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+	.pm-link:hover { color: #f2f3f5; }
+	.pm-note-inline { min-height: 32px; padding: 5px 11px; border: 1px dashed #3f4147; border-radius: 6px; font-size: 12px; line-height: 1.45; color: #949ba4; display: flex; align-items: center; }
+	.pm-custom-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+	.pm-custom-row .pm-input { width: 150px; flex: 0 0 auto; font-family: "JetBrains Mono", Consolas, monospace; font-size: 12.5px; }
+	.pm-custom-hint { font-size: 11.5px; color: #949ba4; line-height: 1.45; flex: 1 1 140px; }
+
+	/* —— 检测状态徽章 —— */
+	.pm-chip { flex: 0 0 auto; font-size: 10.5px; font-weight: 600; }
+	.pm-chip.ok { color: #23a55a; }
+	.pm-chip.wait { color: #949ba4; }
+	.pm-chip.warn { color: #f0b232; }
+	.pm-chip.fail { color: #f23f43; }
+
+	/* —— 排查面板（二级动作） —— */
+	.pm-fix { margin-top: 10px; padding: 10px 12px; border-radius: 8px; display: none; border: 1px solid rgba(240, 178, 50, 0.45); background: rgba(240, 178, 50, 0.07); }
+	.pm-fix.open { display: block; animation: pmPop 120ms ease; }
+	.pm-fix-head { font-size: 12.5px; color: #dbdee1; line-height: 1.6; }
+	.pm-fix-head b { color: #f2f3f5; }
+	.pm-fix-opts { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+	.pm-fix-opt { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #3f4147; border-radius: 6px; background: #2b2d31; font: inherit; font-size: 13px; color: #dbdee1; cursor: pointer; text-align: left; }
+	.pm-fix-opt:hover { border-color: #565963; }
+	.pm-fix-opt.on { border-color: #5865f2; background: rgba(88, 101, 242, 0.08); }
+	.pm-fix-opt .fo-radio { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #949ba4; flex: 0 0 auto; }
+	.pm-fix-opt.on .fo-radio { border-color: #5865f2; background: radial-gradient(circle, #5865f2 0 3px, transparent 3.5px); }
+	.pm-fix-opt .fo-main { flex: 1 1 auto; min-width: 0; }
+	.pm-fix-opt .fo-sub { display: block; font-size: 11.5px; color: #949ba4; margin-top: 1px; }
+	.pm-fix-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 11.5px; color: #949ba4; }
+
+	/* —— 高级设置盒 —— */
+	.pm-adv { margin-top: 10px; padding: 2px 12px 10px; background: #1e1f22; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; display: none; }
+	.pm-adv.open { display: block; animation: pmPop 140ms ease; }
+	.pm-adv-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0 8px; }
+	.pm-adv-label { font-size: 13.5px; color: #dbdee1; display: flex; align-items: flex-start; gap: 5px; flex: 1 1 auto; min-width: 0; }
+	.pm-adv-sub { font-size: 11.5px; color: #949ba4; margin-top: 2px; line-height: 1.5; font-weight: 400; }
+	.pm-adv .pm-ctrl { flex: 0 0 auto; width: 190px; max-width: 55%; }
+	.pm-speed { padding-top: 2px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+	.pm-speed-toggle { appearance: none; width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border: 0; background: transparent; color: #dbdee1; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+	.pm-speed-toggle:hover { color: #f2f3f5; }
+	.pm-speed-content { display: none; margin: 2px 0 8px; padding: 10px; background: rgba(0, 0, 0, 0.2); border-radius: 6px; }
+	.pm-speed-content.open { display: block; }
+	.pm-speed-results { margin-top: 8px; font-size: 12px; color: #dbdee1; }
+	.pm-speed-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+	.pm-speed-ok { display: inline-block; padding: 2px 6px; background: rgba(35, 165, 90, 0.2); color: #23a55a; border-radius: 4px; font-weight: 700; }
+
+	/* —— 自绘下拉弹层（pm 作用域） —— */
+	.pm-dd { position: relative; }
+	.pm-dd .pm-select { width: 100%; }
+	.pm-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; min-width: 100%; width: max-content; max-width: 300px; background: #1e1f22; border: 1px solid #3f4147; border-radius: 8px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5); padding: 4px; display: none; }
+	.pm-menu.right { left: auto; right: 0; }
+	.pm-menu.up { top: auto; bottom: calc(100% + 4px); }
+	.pm-menu.open { display: block; animation: pmPop 120ms ease; }
+	@keyframes pmPop { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+	.pm-menu-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; text-align: left; font: inherit; font-size: 13px; color: #dbdee1; cursor: pointer; }
+	.pm-menu-item:hover { background: rgba(255, 255, 255, 0.06); }
+	.pm-menu-item.is-on { background: rgba(88, 101, 242, 0.16); color: #f2f3f5; }
+	.pm-menu-item .mi-main { flex: 1 1 auto; min-width: 0; }
+	.pm-menu-item .mi-label { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+	.pm-menu-item .mi-sub { font-size: 11.5px; color: #949ba4; margin-top: 1px; line-height: 1.45; }
+	.pm-menu-note { padding: 7px 9px 5px; font-size: 11.5px; color: #949ba4; border-top: 1px solid #3f4147; margin-top: 4px; line-height: 1.5; }
+
+	/* —— 排查面板 v2：模板分组 / 类型徽章 / patch 预览 / 自定义映射编辑器 —— */
+	.pm-fix-group { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; color: #949ba4; margin: 10px 0 4px; }
+	.pm-fix-group:first-of-type { margin-top: 8px; }
+	.pm-tb { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; }
+	.pm-tb.bool { background: rgba(35, 165, 90, 0.18); color: #3dbb72; }
+	.pm-tb.enum { background: rgba(88, 101, 242, 0.2); color: #a0a9ff; }
+	.pm-tb.num { background: rgba(240, 178, 50, 0.18); color: #f0b232; }
+	.pm-tb.multi { background: rgba(145, 104, 201, 0.22); color: #c4a6ee; }
+	.pm-patch { margin-top: 8px; }
+	.pm-patch-t { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; color: #949ba4; margin-bottom: 4px; }
+	.pm-patch pre { margin: 0; padding: 8px 10px; background: #111214; border: 1px solid #3f4147; border-radius: 6px; font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; line-height: 1.55; color: #b5e3c0; white-space: pre; overflow-x: auto; }
+	.pm-map { margin-top: 10px; padding: 10px 12px; border-radius: 8px; display: none; border: 1px solid rgba(88, 101, 242, 0.45); background: rgba(88, 101, 242, 0.06); }
+	.pm-map.open { display: block; animation: pmPop 120ms ease; }
+	.pm-map-h { font-size: 12.5px; font-weight: 700; color: #f2f3f5; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+	.pm-map-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+	.pm-map-row label { flex: 0 0 92px; font-size: 12px; color: #b5bac1; }
+	.pm-map-row .pm-input, .pm-map-row .pm-select { flex: 1 1 auto; min-width: 0; height: 28px; font-size: 12.5px; }
+	.pm-map-tiers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+	.pm-map-tier { display: flex; flex-direction: column; gap: 3px; }
+	.pm-map-tier label { font-size: 10.5px; color: #949ba4; }
+	.pm-map-tier .pm-input { height: 26px; font-size: 11.5px; font-family: "JetBrains Mono", Consolas, monospace; }
+	.pm-map-err { display: none; margin-top: 8px; padding: 7px 10px; border-radius: 6px; font-size: 12px; line-height: 1.5; background: rgba(242, 63, 67, 0.1); border: 1px solid rgba(242, 63, 67, 0.4); color: #f23f43; }
+	.pm-map-err.show { display: block; }
+	.pm-map-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+	.pm-map-note { font-size: 11px; color: #949ba4; line-height: 1.5; margin-top: 8px; }
+	.pm-narrow .pm-map-tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.pm-narrow .pm-map-row { flex-wrap: wrap; }
+	.pm-narrow .pm-map-row label { flex: 1 1 100%; }
+
+	/* —— 排查面板 v3：模板下拉 + 选中摘要 + 折叠 PATCH（修复长路径挤压布局） —— */
+	.pm-menu-search { display: block; width: calc(100% - 8px); margin: 4px 4px 6px; height: 26px; padding: 0 8px; border-radius: 5px; border: 1px solid #3f4147; background: #111214; color: #dbdee1; font: inherit; font-size: 12px; outline: none; box-sizing: border-box; }
+	.pm-menu-search:focus { border-color: #5865f2; }
+	.pm-menu-group { padding: 6px 9px 2px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; color: #949ba4; }
+	.pm-menu-list { max-height: 240px; overflow-y: auto; }
+	.pm-menu-list::-webkit-scrollbar { width: 6px; }
+	.pm-menu-list::-webkit-scrollbar-thumb { background: #111214; border-radius: 3px; }
+	.pm-menu-item .pm-raw, .pm-fix-opt .pm-raw { max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.pm-tpl-sum { margin-top: 8px; padding: 8px 10px; background: #2b2d31; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; display: flex; flex-direction: column; gap: 6px; }
+	.pm-tpl-sum-row { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: #dbdee1; min-width: 0; }
+	.pm-tpl-sum-row .k { flex: 0 0 52px; color: #949ba4; font-size: 11px; line-height: 1.5; }
+	.pm-tpl-sum-row .v { min-width: 0; line-height: 1.5; }
+	.pm-tpl-path { display: block; min-width: 0; flex: 1 1 auto; font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; word-break: break-all; background: #111214; border: 1px solid #3f4147; border-radius: 4px; padding: 3px 8px; color: #b5bac1; }
+	#pm-menu-tpl { max-width: 330px; }
+	.pm-patch-toggle { appearance: none; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 0 2px; border: 0; background: transparent; color: #b5bac1; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+	.pm-patch-toggle:hover { color: #f2f3f5; }
+
+	/* —— 现状复刻（问题标注圈号） —— */
+	.pm-issue { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #f23f43; color: #fff; font-size: 10.5px; font-weight: 700; flex: 0 0 auto; cursor: help; }
+	.pm-cur-adv { margin-top: 10px; padding: 2px 12px 10px; background: #1e1f22; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; }
+	.pm-cur-tight { margin-top: 6px; }
+
+	/* —— 窄宽副稿：容器类，不使用全局 @media —— */
+	.pm-narrow .pm-modal { width: 404px; height: 663px; }
+	.pm-narrow .pm-body { flex-direction: column; padding: 10px 4px 0 12px; }
+	.pm-narrow .pm-rail { width: auto; display: flex; flex-wrap: wrap; gap: 2px 6px; padding: 0 8px 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); margin-bottom: 4px; }
+	.pm-narrow .pm-rail-h { flex: 1 1 100%; margin: 6px 0 2px 2px; }
+	.pm-narrow .pm-prov { flex: 1 1 45%; min-width: 0; height: 28px; }
+	.pm-narrow .pm-add { flex: 1 1 100%; margin: 6px 0 0; width: auto; }
+	.pm-narrow .pm-model-row { flex-wrap: wrap; }
+	.pm-narrow .pm-model-row .pm-iwrap { flex: 1 1 100%; }
+	.pm-narrow .pm-model-row .pm-btn { flex: 1 1 auto; }
+	.pm-narrow .pm-row { flex-wrap: wrap; }
+	.pm-narrow .pm-row .pm-ctrl { width: 100%; max-width: 100%; flex: 1 1 100%; }
+	.pm-narrow .pm-adv-row { flex-direction: column; align-items: stretch; gap: 6px; }
+	.pm-narrow .pm-adv .pm-ctrl { width: 100%; max-width: 100%; }
+	.pm-narrow .pm-status-row { align-items: flex-start; }
+
+	@media (prefers-reduced-motion: reduce) {
+		* { transition: none !important; animation: none !important; }
+	}
+	@media (max-width: 640px) {
+		.mk-prov-grid { grid-template-columns: 1fr; }
+		.map-grid { grid-template-columns: 1fr; }
+		.map-arrow { transform: rotate(90deg); padding: 4px 0; }
+		.mk-choice-grid { grid-template-columns: 1fr; }
+	}
+</style>
+</head>
+<body>
+
+<!-- 图标库（与删除插件同一套 Material Symbols） -->
+<svg style="display:none" aria-hidden="true">
+	<symbol id="i-info" viewBox="0 -960 960 960"><path fill="currentColor" d="M511-258.03q11-11.03 11-27T510.97-312q-11.03-11-27-11T457-311.97q-11 11.03-11 27T457.03-258q11.03 11 27 11T511-258.03ZM480.27-80q-82.74 0-155.5-31.5Q252-143 197.5-197.5t-86-127.34Q80-397.68 80-480.5t31.5-155.66Q143-709 197.5-763t127.34-85.5Q397.68-880 480.5-880t155.66 31.5Q709-817 763-763t85.5 127Q880-563 880-480.27q0 82.74-31.5 155.5Q817-252 763-197.68q-54 54.31-127 86Q563-80 480.27-80Zm.23-60Q622-140 721-239.5t99-241Q820-622 721.19-721T480-820q-141 0-240.5 98.81T140-480q0 141 99.5 240.5t241 99.5Zm-.5-340Zm2.77-180Q513-660 536-641.5q23 18.5 23 47.2 0 26.3-15.65 45.73Q527.7-529.14 508-512q-23 19-40 42.38-17 23.39-17 52.62 0 11 8.4 17.5T479-393q12 0 19.88-8 7.87-8 10.12-20 3-21 16-38t30.23-30.78Q580-510 596-537q16-27 16-58.61 0-50.39-37.5-83.89T485.55-713Q450-713 417-698t-54 44q-7 10-6.5 21.5t9.47 18.5q11.41 8 23.65 5 12.23-3 20.38-14 12.75-17.9 31.88-27.45Q461-660 482.77-660Z"/></symbol>
+	<symbol id="i-chev" viewBox="0 -960 960 960"><path fill="currentColor" d="M480-357q-6 0-11-2t-10-7L261-564q-9-9-9-21t9-21q9-9 21.5-9t21.5 9l176 176 176-176q9-9 21-9t21 9q9 9 9 21.5t-9 21.5L501-366q-5 5-10 7t-11 2Z"/></symbol>
+	<symbol id="i-eye" viewBox="0 -960 960 960"><path fill="currentColor" d="M480-320q75 0 127.5-52.5T660-500q0-75-52.5-127.5T480-680q-75 0-127.5 52.5T300-500q0 75 52.5 127.5T480-320Zm0-72q-45 0-76.5-31.5T372-500q0-45 31.5-76.5T480-608q45 0 76.5 31.5T588-500q0 45-31.5 76.5T480-392Zm0 192q-146 0-266-81.5T40-500q54-137 174-218.5T480-800q146 0 266 81.5T920-500q-54 137-174 218.5T480-200Z"/></symbol>
+	<symbol id="i-refresh" viewBox="0 -960 960 960"><path fill="currentColor" d="M480-160q-133 0-226.5-93.5T160-480q0-133 93.5-226.5T480-800q85 0 149 34.5T740-671v-99q0-13 8.5-21.5T770-800q13 0 21.5 8.5T800-770v194q0 13-8.5 21.5T770-546H576q-13 0-21.5-8.5T546-576q0-13 8.5-21.5T576-606h138q-38-60-97-97t-137-37q-109 0-184.5 75.5T220-480q0 109 75.5 184.5T480-220q75 0 140-39.5T717-366q5-11 16.5-16.5t22.5-.5q12 5 16 16.5t-1 23.5q-39 84-117.5 133.5T480-160Z"/></symbol>
+	<symbol id="i-trash" viewBox="0 -960 960 960"><path fill="currentColor" d="M261-120q-24.75 0-42.37-17.63Q201-155.25 201-180v-570h-11q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h158q0-13 8.63-21.5 8.62-8.5 21.37-8.5h204q12.75 0 21.38 8.62Q612-822.75 612-810h158q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5h-11v570q0 24.75-17.62 42.37Q723.75-120 699-120H261Zm157.5-154.63q8.5-8.62 8.5-21.37v-339q0-12.75-8.68-21.38-8.67-8.62-21.5-8.62-12.82 0-21.32 8.62-8.5 8.63-8.5 21.38v339q0 12.75 8.68 21.37 8.67 8.63 21.5 8.63 12.82 0 21.32-8.63Zm166 0q8.5-8.62 8.5-21.37v-339q0-12.75-8.68-21.38-8.67-8.62-21.5-8.62-12.82 0-21.32 8.62-8.5 8.63-8.5 21.38v339q0 12.75 8.68 21.37 8.67 8.63 21.5 8.63 12.82 0 21.32-8.63Z"/></symbol>
+	<symbol id="i-add" viewBox="0 -960 960 960"><path fill="currentColor" d="M450-450H230q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h220v-220q0-12.75 8.68-21.38 8.67-8.62 21.5-8.62 12.82 0 21.32 8.62 8.5 8.63 8.5 21.38v220h220q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H510v220q0 12.75-8.68 21.37-8.67 8.63-21.5 8.63-12.82 0-21.32-8.63-8.5-8.62-8.5-21.37v-220Z"/></symbol>
+	<symbol id="i-copy" viewBox="0 -960 960 960"><path fill="currentColor" d="M300-200q-24 0-42-18t-18-42v-560q0-24 18-42t42-18h440q24 0 42 18t18 42v560q0 24-18 42t-42 18H300ZM180-80q-24 0-42-18t-18-42v-590q0-13 8.5-21.5T150-760q13 0 21.5 8.5T180-730v590h470q13 0 21.5 8.5T680-110q0 13-8.5 21.5T650-80H180Z"/></symbol>
+	<symbol id="i-lock" viewBox="0 -960 960 960"><path fill="currentColor" d="M220-80q-24.75 0-42.37-17.63Q160-115.25 160-140v-434q0-24.75 17.63-42.38Q195.25-634 220-634h70v-96q0-78.85 55.61-134.42Q401.21-920 480.11-920q78.89 0 134.39 55.58Q670-808.85 670-730v96h70q24.75 0 42.38 17.62Q800-598.75 800-574v434q0 24.75-17.62 42.37Q764.75-80 740-80H220Zm314.5-222.03Q557-324.06 557-355q0-30-22.67-54.5t-54.5-24.5q-31.83 0-54.33 24.5t-22.5 55q0 30.5 22.67 52.5t54.5 22q31.83 0 54.33-22.03ZM350-634h260v-96q0-54.17-37.88-92.08-37.88-37.92-92-37.92T388-822.08q-38 37.91-38 92.08v96Z"/></symbol>
+	<symbol id="i-pencil" viewBox="0 -960 960 960"><path fill="currentColor" d="M150-120q-13 0-21.5-8.5T120-150v-73q0-12 5-23.5t13-19.5l557-556q8-8 19-12.5t23-4.5q11 0 22 4.5t20 12.5l44 44q9 9 13 20t4 22q0 11-4.5 22.5T823-694L266-138q-8 8-19.5 13t-23.5 5h-73Zm589-577 40-40-41-41-40 40 41 41Z"/></symbol>
+	<symbol id="i-swap" viewBox="0 -960 960 960"><path fill="currentColor" d="M280-160 80-360l200-200 56 57-103 103h287v80H233l103 103-56 57Zm400-240-56-57 103-103H440v-80h287L624-743l56-57 200 200-200 200Z"/></symbol>
+	<symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
+	<symbol id="i-feedback" viewBox="0 -960 960 960"><path fill="currentColor" d="M240-240 131-131q-14 14-32.5 6.5T80-152v-668q0-24 18-42t42-18h680q24 0 42 18t18 42v520q0 24-18 42t-42 18H240Z"/></symbol>
+	<symbol id="i-translate" viewBox="0 0 24 24"><path fill="currentColor" d="m 9.6568988,1.9999999 c -1.141416,0 -0.951614,1.2688185 -0.951614,1.2688185 v 0.6505173 h -5.392479 c 0,0 -1.2688185,-0.1898024 -1.2688185,0.9516139 0,1.1414159 1.2688185,0.9516139 1.2688185,0.9516139 H 12.426863 C 12.695162,7.2780713 11.349082,9.1398691 9.7646988,10.765256 8.6555628,9.6878231 7.4332858,8.3134878 6.8664892,7.065981 6.6161862,6.515072 5.9881318,6.6956414 5.7283935,6.9736693 5.1836529,7.5567679 5.5785907,8.592173 6.0833902,9.3409331 c 0.246901,0.366224 1.3724726,1.5182279 2.4570966,2.5995909 -1.6322361,1.477469 -3.154699,2.550028 -3.154699,2.550028 0,0 -1.0769951,0.696378 -0.322161,1.552568 0.7548319,0.856187 1.5810669,-0.125147 1.5810669,-0.125147 0,0 1.5136611,-1.082765 3.2203701,-2.6696 0.5195872,0.508635 0.8970952,0.874172 0.8970952,0.874172 0,0 0.82821,0.985394 1.582925,0.09231 0.754714,-0.893081 -0.354377,-1.545753 -0.354377,-1.545753 0.0097,0.03486 -0.34186,-0.224086 -0.864878,-0.666625 1.804964,-1.884163 3.470802,-4.1622897 3.47686,-6.1799145 h 1.398302 c 0,0 1.268819,0.2176541 1.268819,-0.9516139 0,-1.1692683 -1.268819,-0.9516139 -1.268819,-0.9516139 H 10.608512 V 3.2688184 c 0,0 0.189804,-1.2688185 -0.9516132,-1.2688185 z M 15.056812,10.104826 10.536646,22 h 2.379035 l 0.964624,-2.537637 h 4.732049 L 19.576978,22 h 2.379035 L 17.435847,10.104826 Z m 1.189517,3.130537 1.643021,4.323772 h -3.286042 z"/></symbol>
+	<symbol id="i-open" viewBox="0 -960 960 960"><path fill="currentColor" d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h240v60H200q-8 0-14 6t-6 14v560q0 8 6 14t14 6h560q8 0 14-6t6-14v-240h60v240q0 33-23.5 56.5T760-120H200Zm194-232-42-42 386-386H540v-60h300v300h-60v-198L394-352Z"/></symbol>
+</svg>
+
+<div class="page">
+
+	<!-- ======================= 刊头 ======================= -->
+	<header class="mast">
+		<div class="mast-eyebrow">DISCORD 插件家族 · 界面统一提案 · 修订 V3</div>
+		<h1>把翻译插件的界面，<br>换成和删除插件<em>同一套设计语言</em></h1>
+		<p class="mast-sub">参考《AI 消息删除插件》定型的界面体系，为 DiscordAITranslator 重排全部设置界面。原则：<b>功能一项不少</b>，长相完全同族，而且这一版专门为「让用户一眼看懂、快速做对选择」做了精修。深色图全部可以点。</p>
+		<div class="meta-row">
+			<span class="meta-chip">基准版本 <b class="mono">v0.3.41</b></span>
+			<span class="meta-chip">参考对象 <b>DiscordAIMessageCleaner</b></span>
+		<span class="meta-chip">修订 <b>v4 · 2026-08-22</b></span>
+		<span class="meta-chip">性质 <b>已实施 · 全量验证通过</b></span>
+		</div>
+		<div class="rev">
+			<div class="rev-title">v3 修订：UX 精修（让用户快速理解、快速选对）</div>
+			<ol>
+				<li><b>语言方向句式化</b> <span class="to">→</span> 四个孤立下拉改成两句话：「收到的消息：从 __ 翻成 __」「发送的消息：从 __ 翻成 __」，中间带交换按钮。</li>
+				<li><b>选项写明代价</b> <span class="to">→</span> 「基础规则 / AI 智能判断」从两个小按钮改成两张对比选择卡，卡上直接写「免费、快」vs「更聪明、耗额度、需 AI 服务商」。</li>
+				<li><b>子项跟随父项</b> <span class="to">→</span> 剧透遮盖、补翻数量这类子设置缩进挂在父开关下面，父项关闭时子项变灰（画板里可点开关看联动）。</li>
+				<li><b>补翻简化</b> <span class="to">→</span> 「范围+数量」两个下拉改成一个开关＋一个数量（开关关闭即原来的「仅新消息」）。</li>
+				<li><b>服务商会引导</b> <span class="to">→</span> 轨道按「AI 服务 / 机器翻译」分组；Google 固定在机器翻译首位，免费属性由状态卡说明，避免挤压名称。</li>
+				<li><b>上轮 5 条行为修正纳入方案</b> <span class="to">→</span> 模型列表持久化、备用被静默改动、逐键写盘、语言下拉搜索、AI 置灰引导，全部进第壹步清单。</li>
+			</ol>
+			<div class="rev-old">v2 已定：5 个标签页（服务商/翻译策略/通用/高级/诊断）· ⓘ 悬停提示 · 提示词库可自定义 · 诊断页同删除插件 · 添加绿/删除红。</div>
+		</div>
+	</header>
+
+	<nav class="toc">
+		<a href="#p1">1 体系拆解</a>
+		<a href="#p2">2 现状问题</a>
+		<a href="#p3">3 新架构</a>
+		<a href="#p4">4 界面稿</a>
+		<a href="#p5">5 功能对照</a>
+		<a href="#p6">6 落地方案</a>
+	</nav>
+
+	<!-- ======================= PART 1 ======================= -->
+	<section class="part" id="p1">
+		<div class="part-eyebrow">PART 01 · 拆解</div>
+		<h2>删除插件的界面好在哪</h2>
+		<p class="part-lede">值得搬过来的是一套「造界面的规矩」，不是某个页面。</p>
+		<ul class="flat prose">
+			<li><b>一套颜色令牌。</b>颜色全部取自 Discord 官方主题变量，界面与 Discord 本体融为一体，换主题自动跟随。</li>
+			<li><b>一套自绘控件。</b>开关、下拉、密钥框、模型框、分段按钮全部自己画，不依赖会过时的第三方库。</li>
+			<li><b>说明藏在 ⓘ 里。</b>设置行只留「名字 + 控件」，解释文字悬停才出现。</li>
+			<li><b>标签页替代长页面。</b>每页只讲一件事，左边名字、右边控件。</li>
+			<li><b>状态一眼可读。</b>绿点=已配置、蓝紫=生效中、彩色状态行=操作结果、红=危险。</li>
+		</ul>
+		<h3>颜色令牌（前缀改为 <span class="mono">dat-</span> 后原样继承）</h3>
+		<div class="swatch-board">
+			<div class="swatch" style="background:#313338;color:#dbdee1"><span class="sw-name">底色 bg</span><span class="sw-val">#313338</span></div>
+			<div class="swatch" style="background:#2b2d31;color:#dbdee1"><span class="sw-name">卡片 surface</span><span class="sw-val">#2b2d31</span></div>
+			<div class="swatch" style="background:#1e1f22;color:#dbdee1"><span class="sw-name">凹陷 sunken</span><span class="sw-val">#1e1f22</span></div>
+			<div class="swatch" style="background:#5865f2;color:#fff"><span class="sw-name">主色 brand</span><span class="sw-val">#5865f2</span></div>
+			<div class="swatch" style="background:#23a55a;color:#fff"><span class="sw-name">成功/添加 ok</span><span class="sw-val">#23a55a</span></div>
+			<div class="swatch" style="background:#f0b232;color:#3b2f00"><span class="sw-name">提醒 warn</span><span class="sw-val">#f0b232</span></div>
+			<div class="swatch" style="background:#f23f43;color:#fff"><span class="sw-name">危险/删除 danger</span><span class="sw-val">#f23f43</span></div>
+			<div class="swatch" style="background:#313338;color:#f2f3f5;border:1px dashed rgba(255,255,255,.2)"><span class="sw-name">文字三级</span><span class="sw-val" style="color:#f2f3f5">强 #f2f3f5</span><span class="sw-val" style="color:#dbdee1">常 #dbdee1</span><span class="sw-val" style="color:#949ba4">弱 #949ba4</span></div>
+		</div>
+	</section>
+
+	<!-- ======================= PART 2 ======================= -->
+	<section class="part" id="p2">
+		<div class="part-eyebrow">PART 02 · 现状</div>
+		<h2>我们现在差在哪</h2>
+		<div class="ba-grid">
+			<div class="ba-card">
+				<div class="ba-kicker">现状 · 一条折叠长页</div>
+				<div class="wire">
+					<div class="wr" style="width:52%"></div>
+					<div class="wr deep"></div>
+					<div class="wr deep"></div>
+					<div class="wr" style="width:70%"></div>
+					<div class="wr deep"></div>
+					<div class="wr" style="width:40%"></div>
+					<div class="wr deep"></div>
+					<div class="wr deep"></div>
+				</div>
+				<div class="ba-note">四个折叠区上下堆叠，说明文字铺满页面，层级还有错位（补翻藏在「判断方式」里面）。</div>
+			</div>
+			<div class="ba-card">
+				<div class="ba-kicker after">目标 · 五个标签页</div>
+				<div class="wire">
+					<div class="wtabs"><span class="on"></span><span></span><span></span><span></span><span></span></div>
+					<div class="wr" style="width:34%"></div>
+					<div class="wr deep brand" style="opacity:.55"></div>
+					<div class="wr" style="width:58%"></div>
+					<div class="wr deep brand" style="opacity:.35"></div>
+				</div>
+				<div class="ba-note">每页一个主题；说明进 ⓘ；子项跟着父项走。</div>
+			</div>
+		</div>
+		<ul class="flat prose">
+			<li><b>界面库老化</b>：面板搭在 BDFDB 旧库上，长相无法控制，还养着约 200 行「防页面乱跳」补丁。</li>
+			<li><b>层级错位</b>：补翻、语言检测都嵌在「自动翻译判断方式」里；「高亮开关」藏在「颜色」标题下。</li>
+			<li><b>选择缺依据</b>：十家服务商平铺一个下拉，看不出谁免费、谁要密钥；基础/AI 两个按钮看不出差别和代价。</li>
+			<li><b>反馈缺失</b>：检测结果只弹一次 toast；哪家配好了要挨个展开；模型列表重启就丢。</li>
+		</ul>
+	</section>
+
+	<!-- ======================= PART 3 ======================= -->
+	<section class="part" id="p3">
+		<div class="part-eyebrow">PART 03 · 信息架构</div>
+		<h2>回到你原本的四大分类，再加一页诊断</h2>
+		<div class="map-grid">
+			<div>
+				<div class="map-col-title">现在 · 折叠长页</div>
+				<div class="map-item"><b>翻译服务</b><span>主服务商 + 密钥 + 备用服务 + 其他服务商密钥</span></div>
+				<div class="map-item"><b>语言设置</b><span>收发语言 + 来源过滤 + 判定方式 + 检测策略 + 补翻范围</span></div>
+				<div class="map-item"><b>显示与交互</b><span>原文开关 ×5 + 译文颜色 + 界面语言</span></div>
+				<div class="map-item"><b>高级功能</b><span>保护词 + 包裹符 + 前缀规则</span></div>
+				<div class="map-item"><b>顶部小字</b><span>版本号 · 构建号 · 重绘统计</span></div>
+			</div>
+			<div class="map-arrow">→</div>
+			<div>
+				<div class="map-col-title">重构后 · 五个标签页</div>
+				<div class="map-item new-home"><b>1 服务商</b><span>分组轨道 + 表单；主/备在这里指定；空状态有引导</span></div>
+				<div class="map-item new-home"><b>2 翻译策略</b><span>翻译方向（句式）、来源过滤、判定选择卡 + 提示词库、语言检测、历史补翻</span></div>
+				<div class="map-item new-home"><b>3 通用</b><span>界面语言、原文展示（父子联动）、译文外观（实时预览）</span></div>
+				<div class="map-item new-home"><b>4 高级</b><span>保护词 / 包裹符 / 前缀，作用域用勾选小片</span></div>
+				<div class="map-item new-home"><b>5 诊断</b><span>关于卡 + 更新 + 诊断表 + 一键复制（删除插件同款）</span></div>
+			</div>
+		</div>
+	</section>
+
+	<!-- ======================= PART 4 ======================= -->
+	<section class="part" id="p4">
+		<div class="part-eyebrow">PART 04 · 界面稿</div>
+		<h2>可交互设计稿</h2>
+		<p class="part-lede">这一版的每处改动都对应下面四条 UX 原则；虚线黄框是设计标注，表示「什么条件下才显示」，不是真实控件。</p>
+		<div class="ux-grid">
+			<div class="ux-card"><div class="ux-no">UX 01</div><div class="ux-t">句式化</div><div class="ux-b">设置读起来像一句话：「收到的消息：从 __ 翻成 __」，而不是四个孤立的下拉。</div></div>
+			<div class="ux-card"><div class="ux-no">UX 02</div><div class="ux-t">后果前置</div><div class="ux-b">要用户选的地方，把代价写在选项上：免费还是耗额度、要不要密钥，选之前就知道。</div></div>
+			<div class="ux-card"><div class="ux-no">UX 03</div><div class="ux-t">依赖联动</div><div class="ux-b">子设置缩进挂在父开关下，父项一关子项变灰——用户永远不会调一个不生效的设置。</div></div>
+			<div class="ux-card"><div class="ux-no">UX 04</div><div class="ux-t">状态引导</div><div class="ux-b">空状态告诉你第一步做什么；配置状态用绿点常驻可见；操作结果留在原地不消失。</div></div>
+		</div>
+
+		<!-- ============ 画板 A0 · 主稿：真实模态 602×663 ============ -->
+		<div class="artboard">
+			<div class="artboard-bar">
+				<span class="ab-id">画板 A0 · 主稿</span>
+				<span class="ab-title">自定义 AI「模型 → 思考设置 → 状态/动作 → 高级设置」（真实模态 602×663，现状 ⇄ 优化后）</span>
+				<span class="ab-hint">↓ 先切「现状/优化后」，优化后里所有下拉、按钮可真实互点</span>
+			</div>
+			<div class="pmbar" id="pm-bar">
+				<span class="pmbar-t">视图：</span>
+				<button class="pmbar-btn" data-view="cur">现状（当前插件 v0.3.41）</button>
+				<button class="pmbar-btn on" data-view="new">优化后（本稿）</button>
+				<span class="pmbar-sep" aria-hidden="true"></span>
+				<span class="pmbar-t">场景：</span>
+				<button class="pmbar-btn on" data-scn="A">A 待检测</button>
+				<button class="pmbar-btn" data-scn="B">B 确认关闭</button>
+				<button class="pmbar-btn" data-scn="C">C 跟随上游</button>
+				<button class="pmbar-btn" data-scn="D">D 上游→开启</button>
+				<button class="pmbar-btn" data-scn="E">E 五档</button>
+				<button class="pmbar-btn" data-scn="F">F 二值</button>
+				<button class="pmbar-btn" data-scn="G">G 预算</button>
+				<button class="pmbar-btn" data-scn="H">H 自定义档位</button>
+				<button class="pmbar-btn" data-scn="I">I 设置未生效</button>
+				<button class="pmbar-btn" data-scn="J">J 切模型恢复</button>
+				<span class="pmbar-sep" aria-hidden="true"></span>
+				<span class="pmbar-t">视口：</span>
+				<button class="pmbar-btn on" data-vp="K">K 桌面 602</button>
+				<button class="pmbar-btn" data-vp="L">L 窄宽 &lt;430</button>
+				<span class="pmbar-note" id="pm-note">载入中…</span>
+			</div>
+			<div class="canvas"><div class="canvas-inner" id="pm-stage">
+				<div class="pm-modal" id="pm-modal">
+					<div class="pm-head">
+						<span class="pm-title">DiscordAITranslator Settings</span>
+					</div>
+					<div class="pm-tabs">
+						<button class="pm-tab on">服务商</button>
+						<button class="pm-tab" title="本稿聚焦服务商页；整体五页见下方参考稿">翻译策略</button>
+						<button class="pm-tab" title="本稿聚焦服务商页；整体五页见下方参考稿">通用</button>
+						<button class="pm-tab" title="本稿聚焦服务商页；整体五页见下方参考稿">高级</button>
+						<button class="pm-tab" title="本稿聚焦服务商页；整体五页见下方参考稿">诊断</button>
+					</div>
+					<div class="pm-body">
+						<div class="pm-rail">
+							<div class="pm-rail-h">AI 服务</div>
+							<div class="pm-prov"><span class="pm-prov-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#5786FE" d="M23.748 4.651c-.254-.124-.364.113-.512.233-.051.04-.094.09-.137.137-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.155-.708-.311-.955-.65-.172-.24-.219-.509-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.094.172.187.129.323-.082.28-.18.553-.266.833-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836.27-.098.094-.433-.778-.428-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136 9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653 1.857 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.132-.284 4.994-1.86.47.234.962.328 1.78.398.629.058 1.235-.031 1.705-.129.735-.155.684-.836.418-.961-2.155-1.004-1.682-.595-2.112-.926 1.095-1.295 2.768-3.598 3.284-6.733.05-.346.115-.834.108-1.114-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16-.39.024-.32.472-.234.763.09.288.207.487.371.74.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.168-1.361-.801-2.5-1.86-3.301-3.306-.775-1.393-1.225-2.888-1.299-4.482-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774.868.86 1.525 1.887 2.202 2.89.72 1.066 1.494 2.082 2.48 2.915.348.291.626.513.892.677-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287.3.3 0 0 1 .113.074.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078.253.253 0 0 1-.114-.358 1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.392.451.462.576.685.915.176.264.336.536.446.848.066.194-.02.353-.25.45"/></svg></span><span class="pm-prov-name">DeepSeek</span></div>
+							<div class="pm-prov"><span class="pm-prov-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="gemGradPm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5684F7"/><stop offset="1" stop-color="#9168C9"/></linearGradient></defs><path fill="url(#gemGradPm)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg></span><span class="pm-prov-name">Gemini</span></div>
+							<div class="pm-prov"><span class="pm-prov-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg></span><span class="pm-prov-name">OpenAI</span></div>
+							<div class="pm-prov sel"><span class="pm-prov-ic"><span class="pm-mono" style="background:#4752c4;border-color:#4752c4;color:#fff"><svg style="width:10px;height:10px;fill:currentColor" aria-hidden="true"><use href="#i-translate"/></svg></span><span class="pm-dot"></span></span><span class="pm-prov-name">GG</span><span class="pm-mark-main">主</span></div>
+							<div class="pm-rail-h">机器翻译</div>
+							<div class="pm-prov"><span class="pm-prov-ic"><span class="pm-mono">G</span><span class="pm-dot"></span></span><span class="pm-prov-name">Google</span><span class="pm-mark-bak">备</span></div>
+							<div class="pm-prov"><span class="pm-prov-ic"><span class="pm-mono">Az</span></span><span class="pm-prov-name">Azure</span></div>
+							<div class="pm-prov"><span class="pm-prov-ic"><span class="pm-mono">百</span></span><span class="pm-prov-name">Baidu</span></div>
+							<div class="pm-prov"><span class="pm-prov-ic"><span class="pm-mono">DL</span></span><span class="pm-prov-name">DeepL</span></div>
+							<div class="pm-prov"><span class="pm-prov-ic"><span class="pm-mono">GC</span></span><span class="pm-prov-name">Google Cloud</span></div>
+							<div class="pm-prov"><span class="pm-prov-ic"><span class="pm-mono">P</span></span><span class="pm-prov-name">Papago</span></div>
+							<button class="pm-add">＋ 添加自定义平台</button>
+						</div>
+						<div class="pm-detail" id="pm-detail">
+							<div class="pm-card">
+								<span class="pm-tile"><svg aria-hidden="true"><use href="#i-translate"/></svg></span>
+								<div class="pm-card-copy">
+									<div class="pm-card-t"><span>GG</span><svg class="ic" style="width:12px;height:12px;color:#949ba4"><use href="#i-pencil"/></svg></div>
+									<div class="pm-card-s">已获取 10 个可用模型</div>
+								</div>
+								<span class="pm-badge">主服务中</span>
+								<button class="pm-btn sec">备用</button>
+								<button class="pm-minibtn" title="删除平台" aria-label="删除平台"><svg class="ic"><use href="#i-trash"/></svg></button>
+							</div>
+
+							<div class="pm-label">API 地址
+								<span class="pm-tipd" title="填写上游基地址或完整端点。改动地址后，各模型旧检测结果自动过期。"><svg class="ic"><use href="#i-info"/></svg></span>
+							</div>
+							<input class="pm-input" value="http://localhost:7078/v1/chat/completions" spellcheck="false" aria-label="API 地址" id="pm-endpoint">
+							<div class="pm-label">API 密钥</div>
+							<div class="pm-iwrap">
+								<input class="pm-input" type="password" value="TOKEN_PLACEHOLDER" spellcheck="false" aria-label="API 密钥">
+								<button class="pm-eye" aria-label="显示密钥"><svg class="ic"><use href="#i-eye"/></svg></button>
+							</div>
+
+							<!-- ▼▼ 现状复刻（问题圈号 ①–⑥，视觉按当前插件 v0.3.41） ▼▼ -->
+							<div id="pm-cur" style="display:none">
+								<div class="pm-label">模型
+									<span class="pm-tipd" title="现状：主动作「检测模型」不在模型行，被移到思考设置下方。"><svg class="ic"><use href="#i-info"/></svg></span>
+								</div>
+								<div class="pm-model-row">
+									<div class="pm-iwrap">
+										<input class="pm-input" value="gpt-5.4" readonly>
+										<button class="pm-eye" aria-label="展开模型列表"><svg class="ic"><use href="#i-chev"/></svg></button>
+									</div>
+									<button class="pm-iconbtn" title="获取模型列表"><svg class="ic"><use href="#i-refresh"/></svg></button>
+								</div>
+								<div class="pm-row pm-cur-tight" style="margin-top:6px">
+									<span class="pm-label">思考设置
+										<span class="pm-tipd" title="现状选项与安装版一致：自动适配（推荐）/ 跟随上游 / 手动设置"><svg class="ic"><use href="#i-info"/></svg></span>
+										<span class="pm-issue" title="问题①：思考设置行贴着模型行（6px），分组感缺失，整块拥挤">1</span>
+										<span class="pm-issue" title="问题②：三态切换有死路——「跟随上游」下高级区没有强度行，想调强度必须先切「手动设置」再回高级区两跳完成，真机曾出现切换无效（S1 已修状态词序，S2 转换链未实施）">2</span>
+									</span>
+									<div class="pm-ctrl"><button class="pm-select" style="width:160px"><span class="sel-label">手动设置</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+								</div>
+								<div class="pm-caption warn">思考设置已变化 · 请检测模型</div>
+								<div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+									<button class="pm-btn sec">检测模型</button>
+									<button class="pm-btn sec">高级设置 <svg class="ic" style="width:12px;height:12px;transform:rotate(180deg)"><use href="#i-chev"/></svg></button>
+									<span class="pm-issue" title="问题③：验证主动作从模型行漂移到这里并改名，用户以为「验证配置」消失了；按钮与状态、强度的从属关系不清">3</span>
+								</div>
+								<div class="pm-cur-adv">
+									<div class="pm-adv-row">
+										<div class="pm-adv-label">接口类型
+											<span class="pm-tipd" title="现状 tip：定义与上游交互的传输协议"><svg class="ic"><use href="#i-info"/></svg></span>
+											<span class="pm-issue" title="问题⑥：196px 选择器里「OpenAI Chat Completi…」截断；3 个选项的下拉也带搜索框">6</span>
+										</div>
+										<div class="pm-ctrl"><button class="pm-select" style="width:100%"><span class="sel-label">自动识别</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+									</div>
+									<div class="pm-adv-row">
+										<div class="pm-adv-label">兼容方式
+											<span class="pm-tipd" title="现状 tip：选择思考参数字段族"><svg class="ic"><use href="#i-info"/></svg></span>
+											<span class="pm-issue" title="问题④：正常路径裸露 OpenAI/DeepSeek/Qwen 品牌枚举，用户误认为要选第二套协议">4</span>
+										</div>
+										<div class="pm-ctrl"><button class="pm-select" style="width:100%"><span class="sel-label">OpenAI</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+									</div>
+									<div class="pm-adv-row">
+										<div class="pm-adv-label">思考强度
+											<span class="pm-issue" title="问题⑤：档位封顶「高」，max/xhigh/数值预算无法表达；未知档位一律折算成 low 发送">5</span>
+										</div>
+										<div class="pm-ctrl"><button class="pm-select" style="width:100%"><span class="sel-label">高</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+									</div>
+									<div class="pm-speed">
+										<button class="pm-speed-toggle" type="button"><span>速度测试</span><svg class="ic" style="width:12px;height:12px"><use href="#i-chev"/></svg></button>
+									</div>
+								</div>
+							</div>
+							<!-- ▲▲ 现状复刻结束 ▲▲ -->
+
+							<!-- ▼▼ 优化后（可交互） ▼▼ -->
+							<div id="pm-new">
+								<div class="pm-group">
+									<div class="pm-group-h">
+										<span>模型与思考设置</span>
+										<span class="pm-cap" id="pm-cap">能力：待检测</span>
+									</div>
+									<div class="pm-label" style="margin-top:8px">模型
+										<span class="pm-tipd" title="「获取模型列表」拉取可选模型（保存，重启不重拉）；「验证配置」发一条试翻：验证地址、密钥、模型连通，并确认当前思考指令是否生效。"><svg class="ic"><use href="#i-info"/></svg></span>
+									</div>
+									<div class="pm-model-row">
+										<div class="pm-iwrap pm-dd" id="pm-dd-model">
+											<input class="pm-input" id="pm-model" value="gpt-5.4" spellcheck="false" aria-label="模型 ID">
+											<button class="pm-eye" id="pm-model-menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="展开模型列表"><svg class="ic"><use href="#i-chev"/></svg></button>
+											<div class="pm-menu" id="pm-menu-model" role="listbox" aria-label="可用模型"></div>
+										</div>
+										<button class="pm-iconbtn" title="获取模型列表" aria-label="获取模型列表"><svg class="ic"><use href="#i-refresh"/></svg></button>
+										<button class="pm-btn sec" id="pm-verify">验证配置</button>
+									</div>
+									<div class="pm-split"></div>
+									<div class="pm-row">
+										<span class="pm-label">思考模式
+											<span class="pm-tipd" title="跟随上游：不发送任何思考指令；关闭思考：自动选用该模型有效的关闭/最低档指令，翻译更快；开启思考：按你选的强度发送指令。"><svg class="ic"><use href="#i-info"/></svg></span>
+										</span>
+										<div class="pm-ctrl pm-dd" id="pm-dd-mode">
+											<button class="pm-select" id="pm-mode-btn" aria-haspopup="listbox" aria-expanded="false"><span class="sel-label" id="pm-mode-lbl">关闭思考（推荐）</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+											<div class="pm-menu right" id="pm-menu-mode" role="listbox" aria-label="思考模式"></div>
+										</div>
+									</div>
+									<div class="pm-caption" id="pm-mode-note">自动选用该模型的关闭指令（如 none），无需手选。</div>
+									<div class="pm-row" id="pm-strength-row" style="display:none">
+										<span class="pm-label">思考强度
+											<span class="pm-tipd" title="直接显示上游原始档位值（如 minimal / high / 数值预算），不翻译、不合并、不归一；中文说明见菜单副行。每档检测结果按模型分别记住，未检测的档位不会被隐藏。"><svg class="ic"><use href="#i-info"/></svg></span>
+										</span>
+										<div class="pm-ctrl pm-dd" id="pm-dd-strength">
+											<button class="pm-select" id="pm-strength-btn" aria-haspopup="listbox" aria-expanded="false"><span class="sel-label" id="pm-strength-lbl">自动</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+											<div class="pm-menu right" id="pm-menu-strength" role="listbox" aria-label="思考强度"></div>
+										</div>
+									</div>
+									<div class="pm-custom-row" id="pm-custom-row" style="display:none">
+										<input class="pm-input" id="pm-custom" spellcheck="false" placeholder="例如 12000 或 ultra">
+										<button class="pm-btn sec" id="pm-custom-apply" style="height:32px">应用</button>
+										<span class="pm-custom-hint" id="pm-custom-hint">原样发送，不做改写。</span>
+									</div>
+									<div class="pm-status-row">
+										<div class="pm-status neutral" id="pm-status" role="status">
+											<span class="dot"></span>
+											<span class="txt" id="pm-status-txt">未检测 · 点击「验证配置」</span>
+											<span class="pm-raw" id="pm-status-raw" style="display:none">none</span>
+										</div>
+										<div class="pm-actions">
+											<button class="pm-link" id="pm-act-reverify" style="display:none">重新验证</button>
+											<button class="pm-link" id="pm-act-diag" style="display:none" title="打开诊断页查看该次请求的详细结果（本稿示意）">查看诊断</button>
+											<button class="pm-btn sec" id="pm-adv-btn" aria-expanded="false">高级设置 <svg class="ic" id="pm-adv-chev" style="width:12px;height:12px;transition:transform 120ms ease"><use href="#i-chev"/></svg></button>
+										</div>
+									</div>
+									<div class="pm-adv" id="pm-adv">
+										<div class="pm-adv-row">
+											<div class="pm-adv-label">
+												<div>
+													<div>接口类型</div>
+													<div class="pm-adv-sub">只决定请求怎么发送；思考字段按模型自动匹配。</div>
+												</div>
+												<span class="pm-tipd" title="按地址与响应特征自动识别；识别错误时才需要手选。改动后各档旧检测结果自动过期。"><svg class="ic"><use href="#i-info"/></svg></span>
+											</div>
+											<div class="pm-ctrl pm-dd" id="pm-dd-format">
+												<button class="pm-select" id="pm-format-btn" aria-haspopup="listbox" aria-expanded="false"><span class="sel-label" id="pm-format-lbl">自动识别 · OpenAI Chat</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+												<div class="pm-menu right" id="pm-menu-format" role="listbox" aria-label="接口类型"></div>
+											</div>
+										</div>
+										<div class="pm-speed" id="pm-speed">
+											<button class="pm-speed-toggle" id="pm-speed-toggle" aria-expanded="false" type="button">
+												<span>速度测试（A/B 耗时对比）</span>
+												<span style="display:inline-flex;align-items:center;gap:4px;color:#949ba4;font-size:12px;font-weight:400"><span id="pm-speed-hint">未测速</span><svg class="ic" style="width:12px;height:12px"><use href="#i-chev"/></svg></span>
+											</button>
+											<div class="pm-speed-content" id="pm-speed-content">
+												<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+													<div style="font-size:12px;color:#949ba4;flex:1 1 180px">用 6 条固定语料做 12 次 AB/BA 对冲测速，对比「当前思考设置」与「跟随上游」的延迟差。</div>
+													<button class="pm-btn sec" style="height:26px;padding:0 10px;font-size:12px" id="pm-speed-run">开始测速</button>
+												</div>
+												<div class="pm-speed-results" id="pm-speed-running" style="display:none">
+													<div class="pm-speed-row"><span id="pm-speed-prog">正在测速：第 3/12 组（AB 顺序）…</span><span style="color:#949ba4">缓存已绕开</span></div>
+													<div style="margin-top:6px;height:4px;border-radius:2px;background:rgba(255,255,255,0.08);overflow:hidden"><div id="pm-speed-bar" style="height:100%;width:25%;background:#5865f2;transition:width 400ms ease"></div></div>
+												</div>
+												<div class="pm-speed-results" id="pm-speed-done" style="display:none">
+													<div class="pm-speed-row"><span>基线（跟随上游）</span><span>6/6 · P50 3.82s</span></div>
+													<div class="pm-speed-row"><span>当前设置</span><span id="pm-speed-mine">6/6 · P50 1.14s</span></div>
+													<div class="pm-speed-row" style="margin-top:4px;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.1);font-weight:700"><span>耗时对比</span><span class="pm-speed-ok" id="pm-speed-delta">P50 ↓70%</span></div>
+													<div class="pm-caption" id="pm-speed-advice" style="margin-top:6px">建议：保持「关闭思考」——比跟随上游快约 70%。</div>
+												</div>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+							<!-- ▲▲ 优化后结束 ▲▲ -->
+						</div>
+					</div>
+					<div class="pm-foot"><button class="pm-done">完成</button></div>
+				</div>
+			</div></div>
+			<p class="caption"><b>现状问题清单（红圈 ①–⑥，证据 = 真机截图 + 源码；状态词序 stale/upstream 已在安装链 S1 修复，不再列为问题）：</b>① 模型行与思考设置行贴排、状态/按钮/高级区 6–8px 内堆叠，分组感缺失；② 三态切换有死路——「跟随上游」下高级区没有强度行，想调强度必须先切「手动设置」再回高级区两跳完成，真机曾出现「跟随上游→手动设置」切换无效（S2 转换链未实施）；③ 验证主动作从模型行漂移到思考区并改名「检测模型」，用户以为旧「验证配置」消失；④ 手动设置下「兼容方式」裸露 OpenAI/DeepSeek/Qwen 品牌枚举，像在选第二套协议；⑤ 思考强度封顶「高」（源码 REASONING_EFFORTS 仅 minimal/low/medium/high，未知档位一律折算成 low 发送），max/xhigh/数值预算无法表达；⑥ 196px 选择器截断「OpenAI Chat Completi…」，3 个选项的下拉还带搜索框。现状视图的选项文案与安装版一致（自动适配/跟随上游/手动设置）；「关闭/开启」三态仅在优化后视图提出。</p>
+			<p class="caption"><b>优化原则与定案（简化裁决版）：</b>动作归位——「验证配置」回到模型行三合一（下拉+获取列表+验证），是唯一主验证动作，下方状态行只被它驱动；自上而下的操作顺序 = 选模型 → 验证 → 选模式 → 选强度。普通路径只有「思考模式」三选一（跟随上游 / 关闭思考·推荐 / 开启思考），开启后才出现「思考强度」，切模式保留上次强度。强度主标签直接显示上游原始值（auto / dynamic (-1) / minimal / low / medium / high / max / xhigh / 数值预算 / Custom…），绝不把 max 与 xhigh 合并成中文档名、未知值不归一；中文解释只在菜单副行与提示；状态句 =「已确认开启思考 · high」这类人话+raw，选项集合按「地址+接口类型+模型」记忆、切模型即时恢复。验证失败只给单一下一步：设置未生效 →「重新验证」（插件内部自动换用其他已知写法）；接口拒绝 →「查看诊断」——用户永远不选 OpenAI/DeepSeek/Qwen 字段族，字段写法与自定义映射全部退为 adapter 内部能力（见 notes 内部架构附录，极端网关的自定义映射只作为诊断/开发者选项概念，本轮不实现）。高级设置仅两项：接口类型（默认自动识别）+ 速度测试（跟随上游隐藏、配置确认后可用）。窄宽 &lt;430 为独立副稿（容器类 .pm-narrow，不用全局 @media），模型行换行后「验证配置」仍完整可见。</p>
+		</div>
+
+		<!-- ============ 画板 A ============ -->
+		<div class="artboard">
+			<div class="artboard-bar">
+				<span class="ab-id">画板 A</span>
+				<span class="ab-title">全局设置面板（整体五页参考稿，非本轮主稿）</span>
+				<span class="ab-hint">↓ 悬停 ⓘ、点标签页 / 选择卡 / 开关（注意父子联动）</span>
+			</div>
+			<div class="canvas"><div class="canvas-inner">
+				<div class="mk mk-shell">
+					<div class="mk-shell-head">
+						<span class="mk-shell-title">DiscordAITranslator</span>
+						<span class="mk-shell-sub">插件设置</span>
+						<button class="mk-x" aria-label="关闭">✕</button>
+					</div>
+					<div class="mk-body">
+						<div class="mk-tabbar" role="tablist" id="tabbar">
+							<button class="mk-tab on" role="tab" aria-selected="true" data-tab="pg-prov">服务商</button>
+							<button class="mk-tab" role="tab" aria-selected="false" data-tab="pg-strat">翻译策略</button>
+							<button class="mk-tab" role="tab" aria-selected="false" data-tab="pg-gen">通用</button>
+							<button class="mk-tab" role="tab" aria-selected="false" data-tab="pg-adv">高级</button>
+							<button class="mk-tab" role="tab" aria-selected="false" data-tab="pg-diag">诊断</button>
+						</div>
+
+						<!-- ===== 页 1 服务商 ===== -->
+						<div class="mk-page on" id="pg-prov">
+							<div class="mk-intro">
+								<span class="mk-intro-ic"><svg><use href="#i-translate"/></svg></span>
+								<div>
+									<div class="mk-intro-t">当前可使用 Google 免费翻译 <span class="mk-cond">标注：尚未配置 AI 或付费服务时显示</span></div>
+									<div class="mk-intro-b"><b>Google（免费）</b>无需密钥，开箱即用。想要更高质量，推荐配一家 AI 服务（如 <b>DeepSeek</b>）：填入 API 密钥，点「设为主服务」即可。</div>
+								</div>
+							</div>
+							<div class="mk-prov-grid">
+								<div class="mk-rail">
+									<div class="mk-rail-h">AI 服务</div>
+									<div class="mk-prov sel"><span class="mk-prov-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#5786FE" d="M23.748 4.651c-.254-.124-.364.113-.512.233-.051.04-.094.09-.137.137-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.155-.708-.311-.955-.65-.172-.24-.219-.509-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.094.172.187.129.323-.082.28-.18.553-.266.833-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836.27-.098.094-.433-.778-.428-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136 9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653 1.857 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.132-.284 4.994-1.86.47.234.962.328 1.78.398.629.058 1.235-.031 1.705-.129.735-.155.684-.836.418-.961-2.155-1.004-1.682-.595-2.112-.926 1.095-1.295 2.768-3.598 3.284-6.733.05-.346.115-.834.108-1.114-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16-.39.024-.32.472-.234.763.09.288.207.487.371.74.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.168-1.361-.801-2.5-1.86-3.301-3.306-.775-1.393-1.225-2.888-1.299-4.482-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774.868.86 1.525 1.887 2.202 2.89.72 1.066 1.494 2.082 2.48 2.915.348.291.626.513.892.677-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287.3.3 0 0 1 .113.074.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078.253.253 0 0 1-.114-.358 1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.392.451.462.576.685.915.176.264.336.536.446.848.066.194-.02.353-.25.45"/></svg><span class="mk-dot-ok"></span></span><span class="mk-prov-name">DeepSeek</span><span class="mk-prov-mark primary">✓ 主</span></div>
+									<div class="mk-prov"><span class="mk-prov-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg><span class="mk-dot-ok"></span></span><span class="mk-prov-name">OpenAI</span><span class="mk-prov-mark backup">备</span></div>
+									<div class="mk-prov"><span class="mk-prov-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="gemGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5684F7"/><stop offset="1" stop-color="#9168C9"/></linearGradient></defs><path fill="url(#gemGrad)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg></span><span class="mk-prov-name">Gemini</span></div>
+									<div class="mk-prov"><span class="mk-prov-ic"><span class="mono-ic">OC</span></span><span class="mk-prov-name">OpenAI 兼容</span></div>
+									<div class="mk-rail-h">机器翻译</div>
+									<div class="mk-prov"><span class="mk-prov-ic"><span class="mono-ic">G</span><span class="mk-dot-ok"></span></span><span class="mk-prov-name">Google</span><span class="mk-prov-mark backup">备</span></div>
+									<div class="mk-prov"><span class="mk-prov-ic"><span class="mono-ic">GC</span></span><span class="mk-prov-name">Google Cloud</span></div>
+									<div class="mk-prov"><span class="mk-prov-ic"><span class="mono-ic">Az</span></span><span class="mk-prov-name">Azure 翻译</span></div>
+									<div class="mk-prov"><span class="mk-prov-ic"><span class="mono-ic">DL</span></span><span class="mk-prov-name">DeepL</span></div>
+									<div class="mk-prov"><span class="mk-prov-ic"><span class="mono-ic">P</span></span><span class="mk-prov-name">Papago</span></div>
+									<div class="mk-prov"><span class="mk-prov-ic"><span class="mono-ic">百</span></span><span class="mk-prov-name">百度翻译</span></div>
+								</div>
+								<div>
+									<div class="mk-prov-card">
+										<span class="mk-tile"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#5786FE" d="M23.748 4.651c-.254-.124-.364.113-.512.233-.051.04-.094.09-.137.137-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.155-.708-.311-.955-.65-.172-.24-.219-.509-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.094.172.187.129.323-.082.28-.18.553-.266.833-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836.27-.098.094-.433-.778-.428-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136 9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653 1.857 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.132-.284 4.994-1.86.47.234.962.328 1.78.398.629.058 1.235-.031 1.705-.129.735-.155.684-.836.418-.961-2.155-1.004-1.682-.595-2.112-.926 1.095-1.295 2.768-3.598 3.284-6.733.05-.346.115-.834.108-1.114-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16-.39.024-.32.472-.234.763.09.288.207.487.371.74.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.168-1.361-.801-2.5-1.86-3.301-3.306-.775-1.393-1.225-2.888-1.299-4.482-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774.868.86 1.525 1.887 2.202 2.89.72 1.066 1.494 2.082 2.48 2.915.348.291.626.513.892.677-.802.09-2.14.109-3.055-.615z"/></svg></span>
+										<div class="mk-prov-copy">
+											<div class="mk-prov-title">DeepSeek</div>
+											<div class="mk-prov-sub">已配置 · 高性价比 AI 翻译，需 API 密钥</div>
+										</div>
+										<span class="mk-badge">主服务中</span>
+										<span class="mk-tip tip-left" data-tip="备用只在主服务失败时接手。再点一次取消（=不用备用）。主备相同时会自动清为「无」并提示。"><button class="mk-btn sec">设为备用</button></span>
+									</div>
+									<div class="mk-field-label">API 密钥</div>
+									<div class="mk-input-wrap">
+									<input class="mk-input" type="password" value="TOKEN_PLACEHOLDER" readonly>
+										<button class="mk-eye" aria-label="显示密钥"><svg class="ic"><use href="#i-eye"/></svg></button>
+									</div>
+									<div class="mk-field-label">接口地址</div>
+									<input class="mk-input" value="https://api.deepseek.com" readonly>
+									<div class="mk-split"></div>
+									<div class="mk-field-label">模型名
+										<span class="mk-tip" data-tip="「获取模型列表」从服务商拉取可选模型（结果会保存，重启不用重拉）；「检测模型」发一条试翻验证配置可用。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span>
+									</div>
+									<div class="mk-model-row">
+										<div class="mk-input-wrap">
+											<input class="mk-input" value="deepseek-chat" readonly>
+											<button class="mk-eye" aria-label="展开模型列表"><svg class="ic"><use href="#i-chev"/></svg></button>
+										</div>
+										<button class="mk-iconbtn" aria-label="获取模型列表" title="获取模型列表"><svg class="ic"><use href="#i-refresh"/></svg></button>
+										<button class="mk-btn sec">检测模型</button>
+									</div>
+									<div class="mk-status ok">验证通过 · deepseek-chat 可用</div>
+									<div class="mk-portal-row">
+										<a class="mk-portal"><svg class="ic"><use href="#i-open"/></svg>获取 API 密钥</a>
+										<a class="mk-portal"><svg class="ic"><use href="#i-open"/></svg>用量控制台</a>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- ===== 页 2 翻译策略 ===== -->
+						<div class="mk-page" id="pg-strat">
+							<div class="mk-group">收到的消息（别人发来的）</div>
+							<div class="mk-row">
+								<span class="mk-label">翻译方向</span>
+								<span class="mk-dir">
+									<button class="mk-select" style="width:150px"><span class="sel-label">自动检测</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+									<span class="arr">→</span>
+									<button class="mk-select" style="width:150px"><span class="sel-label">中文（简体）</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+									<button class="mk-swap" title="交换两边语言"><svg class="ic"><use href="#i-swap"/></svg></button>
+								</span>
+							</div>
+							<div class="mk-row"><span class="mk-label">只翻这些来源语言
+								<span class="mk-tip" data-tip="留空 = 全部语言都翻。填了以后，只有这些语言的消息会被自动翻译。每个频道还可在频道弹窗单独覆盖。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<span class="mk-chips" style="justify-content:flex-end">
+									<span class="mk-chip">English <span class="x">✕</span></span>
+									<button class="mk-chip-add">＋ 添加</button>
+								</span>
+							</div>
+							<div class="mk-split"></div>
+							<div class="mk-group">发送的消息（你打出去的）</div>
+							<div class="mk-row">
+								<span class="mk-label">翻译方向</span>
+								<span class="mk-dir">
+									<button class="mk-select" style="width:150px"><span class="sel-label">自动检测</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+									<span class="arr">→</span>
+									<button class="mk-select" style="width:150px"><span class="sel-label">English</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+									<button class="mk-swap" title="交换两边语言"><svg class="ic"><use href="#i-swap"/></svg></button>
+								</span>
+							</div>
+							<div class="mk-row"><span class="mk-label">只翻这些来源语言
+								<span class="mk-tip" data-tip="留空 = 任何语言都翻。填了以后，只有这些语言写的消息才会翻译后发送。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<span class="mk-chips" style="justify-content:flex-end">
+									<span class="mk-chip">中文 <span class="x">✕</span></span>
+									<span class="mk-chip">日本語 <span class="x">✕</span></span>
+									<button class="mk-chip-add">＋ 添加</button>
+								</span>
+							</div>
+							<div class="mk-split"></div>
+							<div class="mk-group">收到消息时，怎么决定翻不翻</div>
+							<div class="mk-choice-grid" data-group="decision">
+								<button class="mk-choice" type="button">
+									<span class="ch-t"><span class="ch-radio"></span>基础规则</span>
+									<span class="ch-d"><b>免费 · 快。</b>按上面的语言过滤和相似度判断，够用且零成本。</span>
+								</button>
+								<button class="mk-choice on" type="button">
+									<span class="ch-t"><span class="ch-radio"></span>AI 智能判断</span>
+									<span class="ch-d"><b>更聪明 · 耗少量额度。</b>能识别黑话、表情刷屏等不值得翻的消息。需已配置一家 AI 服务商。</span>
+								</button>
+							</div>
+							<div class="mk-row" style="margin-top:4px">
+								<span class="mk-label">当前使用的提示词 <span class="mk-cond">标注：仅选 AI 智能判断时显示</span></span>
+								<button class="mk-select"><span class="sel-label">我的：游戏频道版</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+							</div>
+							<div class="mk-policy editable">
+								<div class="mk-policy-head">
+									<span class="mk-policy-name">游戏频道版 <svg class="ic"><use href="#i-pencil"/></svg></span>
+									<span class="mk-tip" data-tip="提示词决定 AI 怎么判断一条消息该不该翻。点名字改名；正文直接编辑，自动保存。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span>
+									<div class="mk-policy-actions">
+										<button class="mk-minibtn" title="新建提示词"><svg class="ic"><use href="#i-add"/></svg></button>
+										<button class="mk-minibtn" title="复制为新提示词"><svg class="ic"><use href="#i-copy"/></svg></button>
+										<button class="mk-minibtn danger" title="删除此提示词"><svg class="ic"><use href="#i-trash"/></svg></button>
+									</div>
+								</div>
+								<textarea class="mk-policy-body" spellcheck="false">你是翻译前的守门员。判断这条消息是否值得翻译：纯表情、纯链接、代码片段、游戏黑话缩写（gg / afk / brb）、和目标语言相同的消息回答 skip，其余回答 translate。</textarea>
+							</div>
+							<div class="mk-policy" style="margin-top:6px">
+								<div class="mk-policy-head">
+									<span class="mk-policy-name" style="cursor:default">内置模板</span>
+									<span class="mk-policy-lock"><svg class="ic"><use href="#i-lock"/></svg>只读</span>
+									<div class="mk-policy-actions">
+										<button class="mk-minibtn" title="复制为我的提示词"><svg class="ic"><use href="#i-copy"/></svg></button>
+										<button class="mk-minibtn" title="新建提示词"><svg class="ic"><use href="#i-add"/></svg></button>
+									</div>
+								</div>
+							</div>
+							<div class="mk-split"></div>
+							<div class="mk-group">语言检测</div>
+							<div class="mk-row"><span class="mk-label">语言检测策略
+								<span class="mk-tip" data-tip="本地检测只在很有把握时给结论，拿不准就交给免密钥的 Google 检测；也可以强制只用其中一种。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<button class="mk-select mk-select-w"><span class="sel-label">本地优先，失败用 Google Free</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+							<div class="mk-row"><span class="mk-label">本地预检测：同语言消息直接跳过
+								<span class="mk-tip" data-tip="翻译前先在本机识别语言，和目标语言相同就不再请求翻译，省额度。只在高置信时跳过。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<span class="mk-switch on" role="switch" aria-checked="true" tabindex="0"></span></div>
+							<div class="mk-split"></div>
+							<div class="mk-group">历史补翻</div>
+							<div class="mk-row"><span class="mk-label">开启频道翻译时，补翻已加载的历史消息
+								<span class="mk-tip" data-tip="关闭 = 只翻新消息。开启后按下方上限一次性补翻最近已加载的历史，进度显示在悬浮胶囊上。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<span class="mk-switch on" role="switch" aria-checked="true" tabindex="0" data-dep="#dep-backfill"></span></div>
+							<div class="mk-dep" id="dep-backfill">
+								<div class="mk-row"><span class="mk-label">补翻数量上限</span><button class="mk-select"><span class="sel-label">最多补翻 50 条</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+							</div>
+						</div>
+
+						<!-- ===== 页 3 通用 ===== -->
+						<div class="mk-page" id="pg-gen">
+							<div class="mk-group">界面</div>
+							<div class="mk-row"><span class="mk-label">插件界面语言
+								<span class="mk-tip" data-tip="支持 中文 / English / Русский；「跟随系统」按 Discord 的显示语言自动选择。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<button class="mk-select"><span class="sel-label">跟随系统</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+							<div class="mk-split"></div>
+							<div class="mk-group">原文展示 · 发送</div>
+							<div class="mk-row"><span class="mk-label">发送译文时同时附带原文</span><span class="mk-switch on" role="switch" aria-checked="true" tabindex="0" data-dep="#dep-sent-spoiler"></span></div>
+							<div class="mk-dep" id="dep-sent-spoiler">
+								<div class="mk-row"><span class="mk-label">附带的原文用剧透遮盖（点一下才显形）</span><span class="mk-switch" role="switch" aria-checked="false" tabindex="0"></span></div>
+							</div>
+							<div class="mk-group">原文展示 · 接收</div>
+							<div class="mk-row"><span class="mk-label">查看收到的译文时同时显示原文</span><span class="mk-switch on" role="switch" aria-checked="true" tabindex="0" data-dep="#dep-recv-spoiler"></span></div>
+							<div class="mk-dep" id="dep-recv-spoiler">
+								<div class="mk-row"><span class="mk-label">显示的原文用剧透遮盖（点一下才显形）</span><span class="mk-switch" role="switch" aria-checked="false" tabindex="0"></span></div>
+							</div>
+							<div class="mk-row"><span class="mk-label">别人引用这条消息时只显示译文</span><span class="mk-switch on" role="switch" aria-checked="true" tabindex="0"></span></div>
+							<div class="mk-split"></div>
+							<div class="mk-group">译文外观</div>
+							<div class="mk-row"><span class="mk-label">给译文消息添加更显眼的左侧色条与背景</span><span class="mk-switch on" role="switch" aria-checked="true" tabindex="0"></span></div>
+							<div class="mk-row"><span class="mk-label">译文模块颜色
+								<span class="mk-tip" data-tip="点色票即可切换；＋ 可添加自定义颜色，自定义色可删除。下方消息实时预览。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span></div>
+							<div class="mk-colors" id="palette">
+								<button class="mk-color on" data-c="#00ff40"><span class="dot" style="background:#00ff40"></span>#00ff40</button>
+								<button class="mk-color" data-c="#00f5ff"><span class="dot" style="background:#00f5ff"></span>#00f5ff</button>
+								<button class="mk-color" data-c="#3399ff"><span class="dot" style="background:#3399ff"></span>#3399ff</button>
+								<button class="mk-color" data-c="#fff200"><span class="dot" style="background:#fff200"></span>#fff200</button>
+								<button class="mk-color" data-c="#ff8a00"><span class="dot" style="background:#ff8a00"></span>#ff8a00</button>
+								<button class="mk-color" data-c="#ff3b81"><span class="dot" style="background:#ff3b81"></span>#ff3b81</button>
+								<button class="mk-color" data-c="#b85cff"><span class="dot" style="background:#b85cff"></span>#b85cff</button>
+								<button class="mk-color-add" title="自定义颜色">＋</button>
+							</div>
+							<div class="mk-msg" id="preview-msg" style="--tc:#00ff40">
+								<span class="mk-avatar"></span>
+								<div class="mk-msg-body">
+									<div class="mk-msg-head"><span class="mk-msg-name">Sakura</span><span class="mk-msg-time">今天 21:47</span></div>
+									<div class="mk-msg-text">今夜ランクやらない？</div>
+									<div class="mk-trans"><div class="mk-msg-text">今晚要不要一起打排位？</div><div class="mk-trans-mark">已翻译 · 点上方色票实时预览</div></div>
+								</div>
+							</div>
+						</div>
+
+						<!-- ===== 页 4 高级 ===== -->
+						<div class="mk-page" id="pg-adv">
+							<div class="mk-group">保护规则（这些内容不会被翻译）</div>
+							<div class="mk-row"><span class="mk-label">保护词 / 保护短语
+								<span class="mk-tip" data-tip="名单里的词句翻译时原样保留。右侧勾选决定发消息、收消息时是否生效。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<span class="mk-scope-chips">
+									<button class="mk-scope-chip on">发送时</button>
+									<button class="mk-scope-chip on">接收时</button>
+								</span>
+							</div>
+							<div class="mk-chips">
+								<span class="mk-chip">ExampleName <span class="x">✕</span></span>
+								<span class="mk-chip">Nice boat <span class="x">✕</span></span>
+								<button class="mk-chip-add">＋ 输入后回车添加</button>
+							</div>
+							<div class="mk-split"></div>
+							<div class="mk-row"><span class="mk-label">自动保护包裹符规则
+								<span class="mk-tip" data-tip="被这些成对符号包住的内容原样保留并高亮。Discord 剧透符 || || 始终受保护，不可删除。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<span class="mk-scope-chips">
+									<button class="mk-scope-chip on">发送时</button>
+									<button class="mk-scope-chip">接收时</button>
+								</span>
+							</div>
+							<div class="mk-chips">
+								<span class="mk-chip mono">{{ }} <span class="x">✕</span></span>
+								<span class="mk-chip mono">「 」 <span class="x">✕</span></span>
+								<button class="mk-chip-add">＋ 添加一对符号</button>
+							</div>
+							<div class="mk-split"></div>
+							<div class="mk-group">前缀（写消息时的快捷指令）</div>
+							<div class="mk-row"><span class="mk-label">跳过翻译前缀
+								<span class="mk-tip" data-tip="消息以这些开头时不翻译，原样发送。例：!!原样发这句。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<span class="mk-chips" style="justify-content:flex-end">
+									<span class="mk-chip mono">!! <span class="x">✕</span></span>
+									<span class="mk-chip mono">/ <span class="x">✕</span></span>
+									<button class="mk-chip-add">＋ 添加</button>
+								</span>
+							</div>
+							<div class="mk-field-label" style="margin-top:14px">指定目标语言前缀
+								<span class="mk-tip" data-tip="例：输入「$en 晚上好」会强制翻成英语发送，前缀本身不会发出去。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span>
+							</div>
+							<div class="mk-row">
+								<input class="mk-input mono" style="width:110px;flex:0 0 auto" value="$en" readonly>
+								<button class="mk-select" style="flex:1 1 auto;width:auto"><span class="sel-label">English</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+								<button class="mk-iconbtn danger" title="删除"><svg class="ic"><use href="#i-trash"/></svg></button>
+							</div>
+							<div class="mk-row">
+								<input class="mk-input mono" style="width:110px;flex:0 0 auto" value="$ja" readonly>
+								<button class="mk-select" style="flex:1 1 auto;width:auto"><span class="sel-label">日本語</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+								<button class="mk-iconbtn danger" title="删除"><svg class="ic"><use href="#i-trash"/></svg></button>
+							</div>
+							<button class="mk-btn grn" style="margin-top:6px"><svg class="ic" style="width:13px;height:13px"><use href="#i-add"/></svg>添加前缀</button>
+						</div>
+
+						<!-- ===== 页 5 诊断 ===== -->
+						<div class="mk-page" id="pg-diag">
+							<div class="mk-group">关于</div>
+							<div class="mk-about">
+								<div class="mk-about-id">
+									<span class="mk-about-ic"><svg><use href="#i-translate"/></svg></span>
+									<div style="flex:1 1 auto;min-width:0">
+										<div class="mk-about-name">DiscordAITranslator</div>
+										<div class="mk-about-desc">自动翻译收发消息 · 支持 10 家翻译服务与 AI 判定</div>
+									</div>
+									<span class="mk-ver">v0.3.41</span>
+								</div>
+								<div class="mk-about-split"></div>
+								<div class="mk-portal-row" style="margin-top:0">
+									<a class="mk-portal"><svg class="ic"><use href="#i-github"/></svg>GitHub 仓库</a>
+									<a class="mk-portal"><svg class="ic"><use href="#i-refresh"/></svg>检查更新</a>
+									<a class="mk-portal"><svg class="ic"><use href="#i-feedback"/></svg>问题反馈</a>
+								</div>
+								<div class="mk-update-line mk-status ok" style="margin-top:10px">当前已是最新版本 v0.3.41</div>
+							</div>
+							<div class="mk-group">诊断
+								<span class="mk-tip" data-tip="反馈问题时把这张表一起复制发出，能大幅加快定位。绿色 = 正常。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span>
+							</div>
+							<div class="mk-diag" style="margin-top:0">
+								<div class="mk-diag-row"><span class="mk-diag-key">BetterDiscord</span><span class="mk-diag-val dim">1.13.x</span></div>
+								<div class="mk-diag-row"><span class="mk-diag-key">构建号</span><span class="mk-diag-val dim mono" style="background:none">888308bed3551076</span></div>
+								<div class="mk-diag-row"><span class="mk-diag-key">消息入口</span><span class="mk-diag-val ok">正常</span></div>
+								<div class="mk-diag-row"><span class="mk-diag-key">Store 订阅</span><span class="mk-diag-val ok">正常</span></div>
+								<div class="mk-diag-row"><span class="mk-diag-key">渲染挂钩</span><span class="mk-diag-val ok">正常</span></div>
+								<div class="mk-diag-row"><span class="mk-diag-key">重绘统计</span><span class="mk-diag-val dim">17L / 0R · full 0</span></div>
+								<div class="mk-diag-row"><span class="mk-diag-key">补翻胶囊</span><span class="mk-diag-val ok">正常</span></div>
+							</div>
+							<button class="mk-btn sec" style="margin-top:12px"><svg class="ic" style="width:13px;height:13px"><use href="#i-copy"/></svg>复制诊断信息</button>
+						</div>
+					</div>
+				</div>
+			</div></div>
+			<p class="caption"><b>看点一（服务商页）：</b>轨道按「AI 服务 / 机器翻译」分组，Google 固定在机器翻译首位；免费属性由右侧状态卡说明，不占用窄轨道空间。<b>看点二（翻译策略页）：</b>翻译方向读起来是一句话；补翻改成开关+数量，关掉开关就是原来的「仅新消息」。<b>看点三（通用页）：</b>父子设置保持联动，避免出现「调了没反应」。</p>
+		</div>
+
+		<!-- ============ 画板 B ============ -->
+		<div class="artboard">
+			<div class="artboard-bar">
+				<span class="ab-id">画板 B</span>
+				<span class="ab-title">频道弹窗（点输入框的翻译图标）</span>
+				<span class="ab-hint">↓ 作用域小标签可以点：全局 → 服务器 → 频道</span>
+			</div>
+			<div class="canvas"><div class="canvas-inner">
+				<div class="mk mk-pop-shell">
+					<div class="mk-shell-head">
+						<span class="mk-shell-title" style="font-size:16px"># 日常闲聊 · 翻译设置</span>
+						<button class="mk-x" aria-label="关闭">✕</button>
+					</div>
+					<div class="mk-body">
+						<div class="mk-zone">
+							<div class="mk-zone-row">
+								<span class="mk-zone-label">本频道翻译服务
+									<span class="mk-tip" data-tip="只影响当前频道；选「跟随全局」即恢复全局主服务。" tabindex="0"><span class="mk-info"><svg class="ic"><use href="#i-info"/></svg></span></span></span>
+								<button class="mk-select" style="width:190px"><span class="sel-label">DeepSeek（全局）</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button>
+							</div>
+						</div>
+						<div class="mk-zone">
+							<div class="mk-zone-head">收到的消息
+								<button class="mk-swap" title="交换源/目标语言"><svg class="ic"><use href="#i-swap"/></svg></button>
+							</div>
+							<div class="mk-zone-row"><span class="mk-zone-label">源语言</span><button class="mk-select" style="width:180px"><span class="sel-label">自动检测</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+							<div class="mk-zone-row"><span class="mk-zone-label">目标语言</span><button class="mk-scope" data-scope="全局">跟随全局</button><button class="mk-select" style="width:180px"><span class="sel-label">中文（简体）</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+						</div>
+						<div class="mk-zone">
+							<div class="mk-zone-head">发送的消息
+								<button class="mk-swap" title="交换源/目标语言"><svg class="ic"><use href="#i-swap"/></svg></button>
+							</div>
+							<div class="mk-zone-row"><span class="mk-zone-label">源语言</span><button class="mk-select" style="width:180px"><span class="sel-label">自动检测</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+							<div class="mk-zone-row"><span class="mk-zone-label">目标语言</span><button class="mk-scope" data-scope="频道">本频道</button><button class="mk-select" style="width:180px"><span class="sel-label">日本語</span><span class="sel-arrow"><svg class="ic"><use href="#i-chev"/></svg></span></button></div>
+						</div>
+						<div class="mk-zone">
+							<div class="mk-zone-head">语言识别助手</div>
+							<div class="mk-zone-row">
+								<input class="mk-input" placeholder="粘贴一段文字，识别它是什么语言" style="flex:1 1 auto">
+								<button class="mk-btn">识别</button>
+							</div>
+							<div class="mk-zone-row" style="padding-top:0">
+								<span class="mk-status ok" style="margin:0;flex:1 1 auto">识别结果：日语 (ja)</span>
+								<button class="mk-btn sec">设为发送目标语言</button>
+							</div>
+						</div>
+						<div class="mk-note" style="margin-bottom:4px">小提示：右键输入框的翻译图标 = 开关本频道自动翻译。全局设置请到 BetterDiscord 插件设置页。</div>
+					</div>
+				</div>
+			</div></div>
+			<p class="caption"><b>变化点：</b>功能与现在完全一致。作用域锁改为文字标签（跟随全局 / 跟随服务器 / 本频道）：灰=全局、黄=服务器、青蓝=频道，红色只留给删除与失败，点击轮换。「识别结果」这类操作反馈保留行内显示，不进 ⓘ。</p>
+		</div>
+
+		<!-- ============ 画板 C ============ -->
+		<div class="artboard">
+			<div class="artboard-bar">
+				<span class="ab-id">画板 C</span>
+				<span class="ab-title">聊天区元素：补翻胶囊 + 译文样式</span>
+			</div>
+			<div class="canvas"><div class="canvas-inner" style="flex-direction:column;gap:22px;align-items:center">
+				<div class="mk" style="display:flex;gap:28px;flex-wrap:wrap;align-items:center;justify-content:center">
+					<div class="mk-pill">
+						<svg viewBox="0 0 24 24"><path d="M12.9 15.1 10.8 13l.1-.1a14.7 14.7 0 0 0 3.1-5.4h2.4V5.4h-5.2V3.3H9.1v2.1H3.9v2.1H12a12.5 12.5 0 0 1-2.6 4.1 12.4 12.4 0 0 1-1.9-2.7H5.4a14.8 14.8 0 0 0 2.5 4.1l-4.2 4.1 1.5 1.5 4.2-4.2 2.6 2.7.9-2Zm5.9-3.4h-2.1L12 22.2h2.2l1.2-3.1h4.8l1.2 3.1h2.2l-4.8-10.5Zm-2.6 5.3 1.6-4.2 1.6 4.2h-3.2Z"/></svg>
+						<span>已加载 128 · 已译 96</span>
+						<button class="px" title="关闭">✕</button>
+					</div>
+					<div class="mk" style="width:420px;max-width:100%;background:var(--mk-bg);border-radius:12px;padding:6px 14px 12px;box-shadow:0 14px 40px rgba(0,0,0,.42)">
+						<div class="mk-msg" style="--tc:#00ff40">
+							<span class="mk-avatar" style="background:linear-gradient(135deg,#23a55a,#0ea5e9)"></span>
+							<div class="mk-msg-body">
+								<div class="mk-msg-head"><span class="mk-msg-name" style="color:#7fd0a0">Miguel</span><span class="mk-msg-time">今天 21:52</span></div>
+								<div class="mk-trans"><div class="mk-msg-text">大家好，新赛季的攻略我写完了！</div></div>
+								<div class="mk-msg-text"><span class="mk-spoiler">Hola a todos, ¡terminé la guía de la nueva temporada!</span></div>
+								<div class="mk-trans-mark">译文在上、原文剧透遮盖在下 —— 依当前设置渲染</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div></div>
+			<p class="caption"><b>变化点：</b>胶囊文案与统计逻辑不动，外壳换成删除插件的悬浮胶囊样式。聊天里的译文块、剧透遮盖、回复预览行为不变，颜色统一读令牌。右键菜单、消息工具栏按钮、划词翻译：<b>零改动</b>。</p>
+		</div>
+	</section>
+
+	<!-- ======================= PART 5 ======================= -->
+	<section class="part" id="p5">
+		<div class="part-eyebrow">PART 05 · 功能对照</div>
+		<h2>每个功能的新家（一项不少）</h2>
+		<p class="part-lede"><span class="tag tag-keep">不变</span>= 功能与交互都不动；<span class="tag tag-move">搬家</span>= 功能不动、位置或长相变了；<span class="tag tag-new">新增/修正</span>= 本次顺带补上的能力或行为修正。</p>
+		<div class="tbl-wrap">
+			<table class="spec">
+				<thead><tr><th style="width:34%">现在的功能</th><th style="width:26%">新位置</th><th>说明</th></tr></thead>
+				<tbody>
+					<tr class="grp"><td colspan="3">翻译服务（现「翻译服务」折叠区）</td></tr>
+					<tr><td>主服务商下拉（10 家）</td><td>服务商页 · 卡片「主服务」</td><td><span class="tag tag-move">搬家</span> 轨道按 AI/机器翻译分组，Google 固定置顶</td></tr>
+					<tr><td>备用服务（可选）下拉</td><td>服务商页 · 卡片「设为备用」</td><td><span class="tag tag-move">搬家</span> 再点一次取消 = 不用备用</td></tr>
+					<tr><td>API 密钥 / 接口地址 / 模型 / 付费版 / Azure 地区</td><td>服务商页 · 各服务表单</td><td><span class="tag tag-keep">不变</span> 卡片副标题写明该服务特点与门槛</td></tr>
+					<tr><td>验证配置（原「检测模型」）/ 获取模型列表 / 已获取模型下拉</td><td>服务商页 · 模型行</td><td><span class="tag tag-move">搬家</span> 三合一留在模型行；验证配置同时驱动下方思考状态行（见画板 A0 主稿）</td></tr>
+					<tr><td>自定义 AI 思考控制</td><td>服务商页 · 模型与思考设置分组</td><td><span class="tag tag-new">新增</span> 思考模式三态（跟随上游 / 关闭 / 开启）+ 人话档位映射真实原始值，检测结果按「地址 + 接口类型 + 模型」分别记忆；字段未生效时经「排查思考控制字段」二级面板换写法，接口类型不变（画板 A0）</td></tr>
+					<tr><td>「获取 API 密钥」等官网链接</td><td>服务商页 · 底部徽章</td><td><span class="tag tag-keep">不变</span></td></tr>
+					<tr><td>「其他服务商密钥」折叠区</td><td>取消（并入轨道）</td><td><span class="tag tag-move">搬家</span> 每家密钥都在自己表单里</td></tr>
+					<tr class="grp"><td colspan="3">翻译策略（现「语言设置」折叠区，整区平移）</td></tr>
+					<tr><td>收/发 源+目标语言下拉 ×4</td><td>翻译策略页 · 两句「翻译方向」</td><td><span class="tag tag-move">搬家</span> 句式化：从 __ 翻成 __，带交换按钮</td></tr>
+					<tr><td>来源语言过滤 ×2（增删列表）</td><td>翻译策略页 · 词条 chips</td><td><span class="tag tag-move">搬家</span> 说明进 ⓘ</td></tr>
+					<tr><td>自动翻译判断方式（基础 / AI）</td><td>翻译策略页 · 对比选择卡</td><td><span class="tag tag-move">搬家</span> 卡上写明 免费/耗额度/前置条件</td></tr>
+					<tr><td>AI 判定提示词（单个文本框）</td><td>翻译策略页 · 提示词库</td><td><span class="tag tag-new">新增</span> 多套：内置只读可复制，自定义可改名/删</td></tr>
+					<tr><td>语言检测策略 + 本地预检测开关</td><td>翻译策略页 · 语言检测分组</td><td><span class="tag tag-keep">不变</span></td></tr>
+					<tr><td>补翻范围（两档）+ 数量上限</td><td>翻译策略页 · 开关 + 数量</td><td><span class="tag tag-move">搬家</span> 开关关闭 = 原「仅新消息」；数量跟随父开关联动</td></tr>
+					<tr class="grp"><td colspan="3">通用（现「显示与交互」折叠区）</td></tr>
+					<tr><td>插件界面语言（中/英/俄）</td><td>通用页 · 界面分组（第一项）</td><td><span class="tag tag-move">搬家</span></td></tr>
+					<tr><td>原文展示开关 ×5</td><td>通用页 · 发送/接收两组</td><td><span class="tag tag-move">搬家</span> 剧透遮盖改为缩进子项，父关子灰；文案微调更口语</td></tr>
+					<tr><td>译文高亮开关 + 颜色色板</td><td>通用页 · 译文外观分组</td><td><span class="tag tag-keep">不变</span> 加实时预览消息</td></tr>
+					<tr class="grp"><td colspan="3">高级（现「高级功能」折叠区）</td></tr>
+					<tr><td>保护词 / 包裹符 + 收发生效开关</td><td>高级页 · 保护规则</td><td><span class="tag tag-move">搬家</span> 两个开关行改为「发送时/接收时」勾选小片，同行可见</td></tr>
+					<tr><td>跳过翻译前缀 / 指定目标语言前缀</td><td>高级页 · 前缀分组</td><td><span class="tag tag-keep">不变</span> 添加绿、删除红</td></tr>
+					<tr class="grp"><td colspan="3">诊断（现挤在设置顶部的小字）</td></tr>
+					<tr><td>版本号 · 构建号 · 重绘/补翻统计</td><td>诊断页 · 诊断表</td><td><span class="tag tag-move">搬家</span> 删除插件同款结构，加一键复制</td></tr>
+					<tr><td>——</td><td>诊断页 · 检查更新</td><td><span class="tag tag-new">新增</span> 复用删除插件的更新检查实现</td></tr>
+					<tr class="grp"><td colspan="3">行为修正（随界面重构一并做，上轮审查发现）</td></tr>
+					<tr><td>获取的模型列表只存内存，重启即丢</td><td>服务商页</td><td><span class="tag tag-new">修正</span> 列表写入设置持久化</td></tr>
+					<tr><td>主备撞车时备用被静默改成第一家</td><td>服务商页</td><td><span class="tag tag-new">修正</span> 改为清成「无」并提示</td></tr>
+					<tr><td>密钥/地址/模型逐键写盘</td><td>服务商页</td><td><span class="tag tag-new">修正</span> 失焦或停顿后保存</td></tr>
+					<tr><td>语言下拉一百多项无搜索</td><td>所有语言下拉</td><td><span class="tag tag-new">修正</span> 自绘下拉自带输入过滤</td></tr>
+					<tr><td>AI 判定不可用只置灰不引导</td><td>翻译策略页 · 选择卡</td><td><span class="tag tag-new">修正</span> 卡上写明「需已配置 AI 服务商」并可跳转</td></tr>
+					<tr class="grp"><td colspan="3">频道弹窗与聊天区（画板 B / C）</td></tr>
+					<tr><td>频道专属服务 / 4 语言选择 + 作用域锁 + 交换 / 识别助手</td><td>频道弹窗</td><td><span class="tag tag-keep">不变</span> 锁图标改文字标签</td></tr>
+					<tr><td>语言收藏星标 + 不支持警告</td><td>各语言下拉内</td><td><span class="tag tag-keep">不变</span></td></tr>
+					<tr><td>输入框按钮 / 右键菜单全部入口 / 划词翻译</td><td>原位</td><td><span class="tag tag-keep">不变</span></td></tr>
+					<tr><td>补翻胶囊 / 译文块 / 剧透原文 / 回复预览 / 论坛标题</td><td>原位</td><td><span class="tag tag-keep">不变</span> 仅换壳、统一颜色令牌</td></tr>
+				</tbody>
+			</table>
+		</div>
+		<p class="caption"><b>数据零迁移：</b>设置存储格式不动，升级后配置原样保留。仅两处新增存储：自定义提示词列表（旧提示词自动转为第一条）、各服务商的已获取模型列表。中 / 英 / 俄三套界面文案同步翻新；「原文展示」的子项文案有小幅口语化调整，含义不变。</p>
+	</section>
+
+	<!-- ======================= PART 6 ======================= -->
+	<section class="part" id="p6">
+		<div class="part-eyebrow">PART 06 · 落地</div>
+		<h2>怎么改：三步走，每步可单独发版</h2>
+		<div class="phase-grid">
+			<div class="phase">
+				<div class="ph-no">壹</div>
+				<div class="ph-title">设置面板换骨</div>
+				<div class="ph-body">引入 <span class="mono">dat-</span> 令牌和自绘控件（含带搜索的语言下拉、选择卡、依赖联动行），5 个标签页替换折叠长页，提示词库落地；同批完成 5 条行为修正（模型列表持久化、备用清「无」、失焦保存、下拉搜索、AI 置灰引导）。</div>
+				<div class="ph-gain">✓ 删掉约 200 行滚动补丁；设置页不再乱跳</div>
+			</div>
+			<div class="phase">
+				<div class="ph-no">贰</div>
+				<div class="ph-title">频道弹窗换壳</div>
+				<div class="ph-body">弹窗换同族外壳与分区卡片，作用域锁改文字标签。功能与数据照旧。</div>
+				<div class="ph-gain">✓ 两个插件的弹窗从此长得像一家人</div>
+			</div>
+			<div class="phase">
+				<div class="ph-no">叁</div>
+				<div class="ph-title">周边统一收尾</div>
+				<div class="ph-body">胶囊、加载动画、译文色条统一读令牌；诊断页上线（关于卡 + 诊断表 + 一键复制 + 检查更新）。</div>
+				<div class="ph-gain">✓ 报障从「截图一行小字」变成「一键复制诊断」</div>
+			</div>
+		</div>
+		<h3>质量保障</h3>
+		<ul class="flat prose">
+			<li>每一步完成都跑 <span class="mono">npm run verify</span>，涉及的 UI 测试同步更新。</li>
+			<li>设置数据结构不动（仅新增提示词列表与模型列表两处，自动迁移），只换「长相」不碰「记忆」。</li>
+			<li>翻译流水线（队列、缓存、重绘、胶囊统计）零改动。</li>
+		</ul>
+		<div class="settled">
+			<b>已定：</b>5 个标签页 · ⓘ 悬停提示 · 提示词库 · 删除插件同款诊断页 · 添加绿/删除红 · 检查更新纳入 · 轨道分组（AI/机器翻译，Google 免费置顶）· 句式化语言方向 · 补翻开关化 · 父子联动。
+		</div>
+		<div class="qa">
+			<div class="qa-title">v4 实施决策</div>
+			<ol class="qs">
+				<li>服务商轨道按「AI 服务 / 机器翻译」分组，Google 固定在机器翻译首位；10 家常驻并显示配置、主服务和备用状态。</li>
+				<li>交互色继续使用 Discord 蓝紫；翻译插件以青蓝 #58b9f2 作为图标、版本徽章和补翻胶囊的署名色。</li>
+			</ol>
+		</div>
+	</section>
+
+	<footer class="doc-foot">
+		<span>DiscordAITranslator · 界面统一实现记录 · 修订 v4</span>
+		<span>基准 v0.3.41 · 参考 DiscordAIMessageCleaner 样式表与设置面板源码</span>
+		<span>壹、贰、叁阶段均已实现并通过 npm run verify</span>
+	</footer>
+</div>
+
+<script>
+(function () {
+	// 标签页切换
+	var tabbar = document.getElementById("tabbar");
+	if (tabbar) tabbar.addEventListener("click", function (e) {
+		var tab = e.target.closest(".mk-tab");
+		if (!tab) return;
+		tabbar.querySelectorAll(".mk-tab").forEach(function (t) {
+			t.classList.toggle("on", t === tab);
+			t.setAttribute("aria-selected", t === tab ? "true" : "false");
+		});
+		document.querySelectorAll(".mk-page").forEach(function (p) {
+			p.classList.toggle("on", p.id === tab.dataset.tab);
+		});
+	});
+	// 开关（含依赖联动：data-dep 指向的子块随父开关灰显）
+	document.addEventListener("click", function (e) {
+		var sw = e.target.closest(".mk-switch");
+		if (!sw) return;
+		sw.classList.toggle("on");
+		sw.setAttribute("aria-checked", sw.classList.contains("on") ? "true" : "false");
+		if (sw.dataset.dep) {
+			var dep = document.querySelector(sw.dataset.dep);
+			if (dep) dep.classList.toggle("dep-off", !sw.classList.contains("on"));
+		}
+	});
+	document.addEventListener("keydown", function (e) {
+		if ((e.key === " " || e.key === "Enter") && e.target.classList && e.target.classList.contains("mk-switch")) {
+			e.preventDefault();
+			e.target.click();
+		}
+	});
+	// 选择卡（单选组）
+	document.addEventListener("click", function (e) {
+		var choice = e.target.closest(".mk-choice");
+		if (!choice) return;
+		var grid = choice.closest(".mk-choice-grid");
+		grid.querySelectorAll(".mk-choice").forEach(function (c) { c.classList.toggle("on", c === choice); });
+	});
+	// 作用域勾选小片
+	document.addEventListener("click", function (e) {
+		var chip = e.target.closest(".mk-scope-chip");
+		if (chip) chip.classList.toggle("on");
+	});
+	// 色票 → 预览
+	var palette = document.getElementById("palette");
+	var preview = document.getElementById("preview-msg");
+	if (palette) palette.addEventListener("click", function (e) {
+		var chip = e.target.closest(".mk-color");
+		if (!chip) return;
+		palette.querySelectorAll(".mk-color").forEach(function (c) { c.classList.toggle("on", c === chip); });
+		if (preview) preview.style.setProperty("--tc", chip.dataset.c);
+	});
+	// 作用域小标签轮换：全局 → 服务器 → 频道
+	var scopes = ["全局", "服务器", "频道"];
+	var scopeLabel = { "全局": "跟随全局", "服务器": "跟随服务器", "频道": "本频道" };
+	document.addEventListener("click", function (e) {
+		var pill = e.target.closest(".mk-scope");
+		if (!pill) return;
+		var next = scopes[(scopes.indexOf(pill.dataset.scope) + 1) % scopes.length];
+		pill.dataset.scope = next;
+		pill.textContent = scopeLabel[next];
+	});
+})();
+</script>
+<script>
+/* ============ 画板 A0 控制器：现状⇄优化后、状态机、自绘下拉、场景/视口 ============ */
+(function () {
+	"use strict";
+	function $(id) { return document.getElementById(id); }
+	if (!$("pm-modal")) return;
+
+	/* —— 能力档案（endpoint+接口类型+model 维度示例） —— */
+	/* 强度主标签直接显示上游 raw；中文只作次级说明（tooltip / 菜单副行） */
+	var TIER_SUB = { auto: "由模型动态决定", minimal: "最低强度", low: "低强度", medium: "中等强度", high: "高强度", max: "上游最高档" };
+	var MODELS = {
+		"gpt-5.4": {
+			sub: "能力未检测 · 先按标准档位表展示",
+			capTag: "能力：待检测（档位不隐藏）",
+			offRaw: "none", format: "openai_chat",
+			tiers: [
+				{ key: "minimal", raw: "minimal" }, { key: "low", raw: "low" }, { key: "medium", raw: "medium" },
+				{ key: "high", raw: "high" }, { key: "max", raw: "max" }
+			],
+			custom: "enum", customHint: "原样发送（档位名或数值），不做改写、不降档。"
+		},
+		"gpt-5.6-sol": {
+			sub: "五档强度（已检测）",
+			capTag: "能力：五档强度（检测得知）",
+			offRaw: "none", format: "openai_chat",
+			tiers: [
+				{ key: "minimal", raw: "minimal" }, { key: "low", raw: "low" }, { key: "medium", raw: "medium" },
+				{ key: "high", raw: "high" }, { key: "max", raw: "max" }
+			],
+			custom: "enum", customHint: "原样发送，不做改写、不降档。"
+		},
+		"o5-mini": {
+			sub: "四档强度（Responses 接口）",
+			capTag: "能力：四档强度（上游声明）",
+			offRaw: "none", format: "openai_responses",
+			tiers: [
+				{ key: "minimal", raw: "minimal" }, { key: "low", raw: "low" },
+				{ key: "medium", raw: "medium" }, { key: "high", raw: "high" }
+			],
+			custom: "enum", customHint: "原样发送，不做改写。"
+		},
+		"qwen3-32b": {
+			sub: "思考开/关（不分档）",
+			capTag: "能力：开/关二值（检测得知）",
+			offRaw: "false", format: "openai_chat",
+			tiers: [ { key: "on2", raw: "true", sub: "该模型思考不分档" } ],
+			custom: null
+		},
+		"qwen3:8b-local": {
+			sub: "开/关 + 低档（Ollama 本地）",
+			capTag: "能力：开/关 + 低档",
+			offRaw: "false", format: "ollama",
+			tiers: [
+				{ key: "on2", raw: "true", sub: "开启（默认强度）" },
+				{ key: "low", raw: "low", sub: "低强度（新版本支持）" }
+			],
+			custom: "enum", customHint: "原样发送（true / false 或档位名）。"
+		},
+		"gemini-3.0-flash": {
+			sub: "思考预算 0–24576",
+			capTag: "能力：数值预算 0–24576（上游声明）",
+			offRaw: "0", format: "gemini",
+			tiers: [
+				{ key: "auto", label: "dynamic (-1)", raw: "-1", sub: "由模型按需动态分配" },
+				{ key: "minimal", raw: "128" }, { key: "low", raw: "1024" }, { key: "medium", raw: "4096" },
+				{ key: "high", raw: "8192" }, { key: "max", raw: "24576" }
+			],
+			custom: "number", customHint: "0–24576 的整数，原样发送。"
+		},
+		"gemini-3.0-pro": {
+			sub: "档位枚举（无法完全关闭）",
+			capTag: "能力：档位枚举 · 最低只到 minimal",
+			offRaw: "minimal", format: "gemini",
+			tiers: [
+				{ key: "minimal", raw: "minimal" }, { key: "low", raw: "low" },
+				{ key: "medium", raw: "medium" }, { key: "high", raw: "high" }
+			],
+			custom: "enum", customHint: "原样发送，不做改写。"
+		},
+		"claude-haiku-4.5": {
+			sub: "思考预算（自动联动输出上限）",
+			capTag: "能力：数值预算 1024–32768",
+			offRaw: "disabled", format: "anthropic",
+			tiers: [
+				{ key: "minimal", raw: "1024" }, { key: "low", raw: "2048" }, { key: "medium", raw: "4096" },
+				{ key: "high", raw: "8192" }, { key: "max", raw: "16384" }
+			],
+			custom: "number", customHint: "1024–32768 的整数，原样发送；输出上限由插件自动联动。"
+		},
+		"claude-fable-5": {
+			sub: "四档自适应",
+			capTag: "能力：四档自适应（上游声明）",
+			offRaw: "disabled", format: "anthropic",
+			tiers: [
+				{ key: "low", raw: "low" }, { key: "medium", raw: "medium" },
+				{ key: "high", raw: "high" }, { key: "max", raw: "max" }
+			],
+			custom: "enum", customHint: "原样发送，不做改写。"
+		},
+		"grok-5-code": {
+			sub: "自定义档位 ×3（上游声明）",
+			capTag: "能力：自定义档位 ×3（原样保留，不降档）",
+			offRaw: "none", format: "openai_chat",
+			tiers: [
+				{ key: "low", raw: "low" }, { key: "high", raw: "high" },
+				{ key: "xhigh", raw: "xhigh", sub: "上游自定义最高档，原样发送、绝不折算" }
+			],
+			custom: "enum", customHint: "原样发送（如 ultra），未知档位不会被改写或归一。"
+		}
+	};
+	var FALLBACK = MODELS["gpt-5.4"];
+	/* 字段写法（reasoning_effort / thinking.type / enable_thinking / thinkingBudget…）是 adapter 内部能力，
+	   不进入用户界面；完整模板矩阵见 design-notes 内部架构附录。 */
+	var FORMATS = [
+		{ key: "auto", zh: "自动识别（推荐）", sub: "按地址与响应特征判断，当前识别为 OpenAI Chat" },
+		{ key: "openai_chat", zh: "OpenAI Chat", sub: "/v1/chat/completions" },
+		{ key: "openai_responses", zh: "OpenAI Responses", sub: "/v1/responses" },
+		{ key: "ollama", zh: "Ollama", sub: "/api/chat" },
+		{ key: "gemini", zh: "Gemini", sub: ":generateContent" },
+		{ key: "anthropic", zh: "Claude（Anthropic）", sub: "/v1/messages" }
+	];
+	var TS_LABEL = { pending: "未检测", sent: "待验证", confirmed: "已确认", ignored: "未生效", rejected: "被拒绝" };
+	var TS_CLASS = { pending: "wait", sent: "wait", confirmed: "ok", ignored: "warn", rejected: "fail" };
+
+	var store = {};
+	var currentModel = "gpt-5.4";
+	function cap(m) { return MODELS[m] || FALLBACK; }
+	function rec(m) {
+		if (!store[m]) store[m] = { mode: "off", strength: null, custom: "", format: "auto", stale: false, verifiedUpstream: false, nextOutcome: null, tierStates: {}, speed: "idle", speedProg: 0 };
+		return store[m];
+	}
+	function tierKey(r) {
+		if (r.mode === "off") return "__off";
+		if (r.mode !== "on") return null;
+		return r.strength === "custom" ? "custom:" + r.custom : r.strength;
+	}
+	function tierState(r, k) { return (k && r.tierStates[k]) || "pending"; }
+	function tierLabel(t) { return t.label || t.raw; }
+	function tierSub(t) { return t.sub || TIER_SUB[t.key] || ""; }
+	function strengthLabel(r, c) {
+		if (r.strength === "custom") return r.custom || "Custom…";
+		for (var i = 0; i < c.tiers.length; i++) if (c.tiers[i].key === r.strength) return tierLabel(c.tiers[i]);
+		return "请选择";
+	}
+	function strengthRaw(r, c) {
+		if (r.strength === "custom") return r.custom || null;
+		for (var i = 0; i < c.tiers.length; i++) if (c.tiers[i].key === r.strength) return c.tiers[i].raw;
+		return null;
+	}
+	function resolveStatus(r, c) {
+		if (r.mode === "upstream") {
+			if (r.verifiedUpstream) return { tone: "ok", text: "验证通过 · 接口连通 · 未发送思考指令", raw: null };
+			return { tone: "neutral", text: "跟随上游 · 不干预思考", raw: null };
+		}
+		if (r.mode === "on" && r.strength === "custom" && !r.custom) return { tone: "warn", text: "请输入自定义值并点「应用」", raw: null };
+		if (r.mode === "on" && !r.strength) return { tone: "warn", text: "请先选择思考强度", raw: null };
+		if (r.stale) return { tone: "warn", text: "配置已变化 · 请重新验证", raw: null, action: "reverify" };
+		var k = tierKey(r), st = tierState(r, k);
+		var intent = r.mode === "off" ? "关闭思考 · " + c.offRaw : "开启思考 · " + strengthLabel(r, c);
+		if (st === "pending") return { tone: "warn", text: "已选 " + intent + " · 待验证，点「验证配置」", raw: null };
+		if (st === "sent") return { tone: "neutral", text: "已发送 " + intent + " · 生效待验证", raw: null };
+		if (st === "confirmed") return { tone: "ok", text: "已确认" + intent + " · 响应 " + (r.mode === "off" ? "1.1s" : "3.4s"), raw: null };
+		if (st === "reduced") return { tone: "ok", text: "已降至最低档 · " + ((c.tiers[0] && c.tiers[0].raw) || "") + " · 该模型无法完全关闭", raw: null };
+		if (st === "ignored") return { tone: "warn", text: "思考设置未生效 · 点「重新验证」，插件会自动换用其他已知写法", raw: null, action: "reverify" };
+		if (st === "rejected") return { tone: "fail", text: "接口拒绝了思考设置 · 已回退为不发送", raw: null, action: "diag" };
+		return { tone: "neutral", text: "—", raw: null };
+	}
+
+	/* —— 模板解析、patch 构建与排查面板渲染 —— */
+	function resolvedFormat(r, c) { return r.format === "auto" ? (c.format || "openai_chat") : r.format; }
+	function fmtZh(key) { for (var i = 0; i < FORMATS.length; i++) if (FORMATS[i].key === key) return FORMATS[i].zh; return key; }
+	/* —— 弹层 —— */
+	var openMenu = null, openTrigger = null;
+	function closeMenus() {
+		if (openMenu) { openMenu.classList.remove("open"); openMenu = null; }
+		if (openTrigger) { openTrigger.setAttribute("aria-expanded", "false"); openTrigger = null; }
+	}
+	function toggleMenu(trigger, menu, build) {
+		if (openMenu === menu) { closeMenus(); return; }
+		closeMenus();
+		build();
+		menu.classList.remove("up");
+		menu.classList.add("open");
+		trigger.setAttribute("aria-expanded", "true");
+		openMenu = menu; openTrigger = trigger;
+		var host = trigger.closest(".pm-detail") || document.body;
+		var mR = menu.getBoundingClientRect(), hR = host.getBoundingClientRect(), tR = trigger.getBoundingClientRect();
+		if (mR.bottom > hR.bottom - 6 && tR.top - hR.top > mR.height + 10) menu.classList.add("up");
+	}
+	document.addEventListener("click", function (e) {
+		if (openMenu && !e.target.closest(".pm-dd")) closeMenus();
+	});
+	document.addEventListener("keydown", function (e) {
+		if (!openMenu) return;
+		var items = Array.prototype.slice.call(openMenu.querySelectorAll(".pm-menu-item"));
+		if (!items.length) return;
+		var idx = items.indexOf(document.activeElement);
+		if (e.key === "Escape") { closeMenus(); return; }
+		if (e.key === "ArrowDown") { e.preventDefault(); items[Math.min(items.length - 1, idx + 1)].focus(); }
+		if (e.key === "ArrowUp") { e.preventDefault(); items[Math.max(0, idx - 1)].focus(); }
+		if (e.key === "Enter" && idx >= 0) { e.preventDefault(); items[idx].click(); }
+	});
+	function menuItem(o) {
+		var b = document.createElement("button");
+		b.type = "button";
+		b.className = "pm-menu-item" + (o.on ? " is-on" : "");
+		b.setAttribute("role", "option");
+		b.setAttribute("aria-selected", o.on ? "true" : "false");
+		var main = document.createElement("span"); main.className = "mi-main";
+		var lab = document.createElement("span"); lab.className = "mi-label"; lab.textContent = o.label;
+		main.appendChild(lab);
+		if (o.sub) { var s = document.createElement("span"); s.className = "mi-sub"; s.textContent = o.sub; main.appendChild(s); }
+		b.appendChild(main);
+		if (o.raw) { var rw = document.createElement("span"); rw.className = "pm-raw"; rw.textContent = o.raw; rw.title = o.raw; b.appendChild(rw); }
+		if (o.state) { var st = document.createElement("span"); st.className = "pm-chip " + TS_CLASS[o.state]; st.textContent = TS_LABEL[o.state]; b.appendChild(st); }
+		b.addEventListener("click", function () { closeMenus(); o.pick(); });
+		return b;
+	}
+	function menuNote(t) { var n = document.createElement("div"); n.className = "pm-menu-note"; n.textContent = t; return n; }
+
+	/* —— 渲染 —— */
+	var narrow = false, scnNote = "", view = "new";
+	function render() {
+		var r = rec(currentModel), c = cap(currentModel);
+		$("pm-cap").textContent = c.capTag;
+		if ($("pm-model").value !== currentModel) $("pm-model").value = currentModel;
+		$("pm-mode-lbl").textContent = r.mode === "upstream" ? "跟随上游" : r.mode === "off" ? "关闭思考（推荐）" : "开启思考";
+		var showStrength = r.mode === "on";
+		$("pm-strength-row").style.display = showStrength ? "" : "none";
+		$("pm-mode-note").style.display = showStrength ? "none" : "";
+		$("pm-mode-note").textContent = r.mode === "upstream"
+			? "不发送任何思考指令，一切按上游默认行为。"
+			: "自动选用该模型的关闭指令（如 " + c.offRaw + "），无需手选。";
+		$("pm-strength-lbl").textContent = strengthLabel(r, c);
+		var curTier = null;
+		for (var ti = 0; ti < c.tiers.length; ti++) if (c.tiers[ti].key === r.strength) curTier = c.tiers[ti];
+		$("pm-strength-btn").title = r.strength === "custom" ? "自定义原始值，原样发送" : (curTier ? tierSub(curTier) : "");
+		var showCustom = showStrength && r.strength === "custom";
+		$("pm-custom-row").style.display = showCustom ? "" : "none";
+		if (showCustom) {
+			$("pm-custom-hint").textContent = c.customHint || "原样发送，不做改写。";
+			if ($("pm-custom").value !== r.custom) $("pm-custom").value = r.custom;
+		}
+		var s = resolveStatus(r, c);
+		$("pm-status").className = "pm-status " + s.tone;
+		$("pm-status-txt").textContent = s.text;
+		$("pm-status-raw").style.display = s.raw ? "" : "none";
+		if (s.raw) $("pm-status-raw").textContent = s.raw;
+		$("pm-act-reverify").style.display = s.action === "reverify" ? "" : "none";
+		$("pm-act-diag").style.display = s.action === "diag" ? "" : "none";
+		var f = null;
+		for (var i = 0; i < FORMATS.length; i++) if (FORMATS[i].key === r.format) f = FORMATS[i];
+		$("pm-format-lbl").textContent = r.format === "auto" ? "自动识别 · " + fmtZh(resolvedFormat(r, c)) : (f ? f.zh : r.format);
+		/* 速度测试显隐与四态：跟随上游整块隐藏；关闭/开启显示，当前档已确认才可跑 */
+		if (r.mode === "upstream") {
+			$("pm-speed").style.display = "none";
+		} else {
+			$("pm-speed").style.display = "";
+			var spSt = tierState(r, tierKey(r));
+			var canRun = spSt === "confirmed" && !r.stale;
+			var runBtn = $("pm-speed-run");
+			runBtn.disabled = !canRun || r.speed === "running";
+			runBtn.title = canRun ? "" : "先点「验证配置」确认当前思考设置生效，再测速";
+			runBtn.textContent = r.speed === "done" ? "重新测速" : r.speed === "running" ? "测速中…" : "开始测速";
+			$("pm-speed-running").style.display = r.speed === "running" ? "" : "none";
+			$("pm-speed-done").style.display = r.speed === "done" ? "" : "none";
+			$("pm-speed-hint").textContent = r.speed === "done" ? (r.mode === "on" ? "P50 +58%" : "P50 ↓70%") : r.speed === "running" ? "测速中…" : (canRun ? "未测速" : "待验证后可测");
+			if (r.speed === "running") {
+				var pg = [["第 3/12 组（AB 顺序）", "25%"], ["第 7/12 组（BA 对照）", "58%"], ["第 11/12 组（BA 对照）", "90%"]][r.speedProg || 0];
+				$("pm-speed-prog").textContent = "正在测速：" + pg[0] + "…";
+				$("pm-speed-bar").style.width = pg[1];
+			}
+			if (r.speed === "done") {
+				var slower = r.mode === "on";
+				$("pm-speed-mine").textContent = slower ? "6/6 · P50 6.04s" : "6/6 · P50 1.14s";
+				var delta = $("pm-speed-delta");
+				delta.textContent = slower ? "P50 +58%（更慢）" : "P50 ↓70%";
+				delta.style.background = slower ? "rgba(240,178,50,0.2)" : "";
+				delta.style.color = slower ? "#f0b232" : "";
+				$("pm-speed-advice").textContent = slower
+					? "提示：开启思考（" + strengthLabel(r, c) + "）比跟随上游慢约 2.2s；如只做翻译，可改回「关闭思考」。"
+					: "建议：保持「关闭思考」——比跟随上游快约 70%。";
+			}
+		}
+		$("pm-note").textContent = scnNote + (narrow ? " ｜ 视口：窄宽 <430px（容器类，不影响主稿）" : "") + (view === "cur" ? " ｜ 当前视图：现状复刻（红圈=问题标注，见画板下方清单）" : "");
+	}
+
+	/* —— 控件 —— */
+	$("pm-model-menu-btn").addEventListener("click", function () {
+		toggleMenu(this, $("pm-menu-model"), function () {
+			var m = $("pm-menu-model"); m.textContent = "";
+			Object.keys(MODELS).forEach(function (k) {
+				m.appendChild(menuItem({ label: k, sub: MODELS[k].sub, on: k === currentModel, pick: function () { currentModel = k; render(); } }));
+			});
+			m.appendChild(menuNote("列表来自「获取模型列表」并持久保存；每个模型的思考设置与检测结果分别记忆。"));
+		});
+	});
+	$("pm-model").addEventListener("change", function () {
+		var v = this.value.trim();
+		if (!v) { this.value = currentModel; return; }
+		currentModel = v; render();
+	});
+	$("pm-mode-btn").addEventListener("click", function () {
+		var self = this;
+		toggleMenu(self, $("pm-menu-mode"), function () {
+			var r = rec(currentModel), c = cap(currentModel), m = $("pm-menu-mode"); m.textContent = "";
+			m.appendChild(menuItem({ label: "跟随上游", sub: "不发送任何思考指令，按上游默认行为运行", on: r.mode === "upstream", pick: function () { r.mode = "upstream"; r.speed = "idle"; render(); } }));
+			m.appendChild(menuItem({ label: "关闭思考（推荐）", sub: "自动选用该模型有效的关闭/最低档指令，翻译更快", raw: c.offRaw, on: r.mode === "off", pick: function () { r.mode = "off"; r.speed = "idle"; render(); } }));
+			m.appendChild(menuItem({ label: "开启思考", sub: "需要更好效果时使用；强度在下方选择", on: r.mode === "on", pick: function () {
+				r.mode = "on"; r.speed = "idle";
+				if (!r.strength) r.strength = c.tiers.some(function (t) { return t.key === "medium"; }) ? "medium" : c.tiers[0].key;
+				render();
+			} }));
+		});
+	});
+	$("pm-strength-btn").addEventListener("click", function () {
+		var self = this;
+		toggleMenu(self, $("pm-menu-strength"), function () {
+			var r = rec(currentModel), c = cap(currentModel), m = $("pm-menu-strength"); m.textContent = "";
+			c.tiers.forEach(function (t) {
+				m.appendChild(menuItem({ label: tierLabel(t), sub: tierSub(t), state: tierState(r, t.key), on: r.strength === t.key, pick: function () { r.strength = t.key; r.mode = "on"; r.speed = "idle"; render(); } }));
+			});
+			if (c.custom) m.appendChild(menuItem({ label: "Custom…", sub: c.custom === "number" ? "自定义数值预算，原样发送" : "自定义原始值（档位名或数值），原样发送", on: r.strength === "custom", pick: function () { r.strength = "custom"; r.mode = "on"; r.speed = "idle"; render(); $("pm-custom").focus(); } }));
+			m.appendChild(menuNote("主标签即上游原始值，不翻译、不合并、不归一；徽章是该档检测结果，按模型记住，未检测的档位不会被隐藏。"));
+		});
+	});
+	$("pm-custom-apply").addEventListener("click", function () {
+		var r = rec(currentModel);
+		r.custom = $("pm-custom").value.trim();
+		r.speed = "idle";
+		render();
+	});
+	$("pm-format-btn").addEventListener("click", function () {
+		var self = this;
+		toggleMenu(self, $("pm-menu-format"), function () {
+			var r = rec(currentModel), c = cap(currentModel), m = $("pm-menu-format"); m.textContent = "";
+			FORMATS.forEach(function (f) {
+				var sub = f.key === "auto" ? "按地址与响应特征判断，当前识别为 " + fmtZh(c.format || "openai_chat") : f.sub;
+				m.appendChild(menuItem({ label: f.zh, sub: sub, on: r.format === f.key, pick: function () {
+					if (r.format !== f.key) { r.format = f.key; r.stale = true; r.speed = "idle"; }
+					render();
+				} }));
+			});
+			m.appendChild(menuNote("改动接口类型后，该模型各档位的旧检测结果自动过期，需重新验证。"));
+		});
+	});
+	$("pm-endpoint").addEventListener("change", function () {
+		Object.keys(store).forEach(function (k) { store[k].stale = true; store[k].verifiedUpstream = false; store[k].speed = "idle"; });
+		render();
+	});
+	var verifying = false;
+	$("pm-verify").addEventListener("click", function () {
+		if (verifying) return;
+		var r = rec(currentModel);
+		if (r.mode === "on" && (!r.strength || (r.strength === "custom" && !r.custom))) { render(); return; }
+		verifying = true;
+		$("pm-verify").disabled = true;
+		$("pm-status").className = "pm-status neutral";
+		$("pm-status-txt").textContent = "正在验证：地址 / 密钥 / 模型连通，思考指令是否生效…";
+		$("pm-status-raw").style.display = "none";
+		setTimeout(function () {
+			verifying = false;
+			$("pm-verify").disabled = false;
+			if (r.mode === "upstream") { r.verifiedUpstream = true; }
+			else {
+				var k = tierKey(r);
+				var outcome = r.nextOutcome || "confirmed";
+				r.nextOutcome = null;
+				r.stale = false;
+				if (k) r.tierStates[k] = outcome;
+			}
+			render();
+		}, 700);
+	});
+	/* 失败恢复次动作：重新验证 = 复用唯一主验证；查看诊断 = 跳转诊断页（本稿示意） */
+	$("pm-act-reverify").addEventListener("click", function () { $("pm-verify").click(); });
+	$("pm-act-diag").addEventListener("click", function () {
+		$("pm-note").textContent = "「查看诊断」跳转诊断页：显示该次请求的接口类型、发送的思考设置与上游响应摘要（本稿示意，不在服务商页展开技术细节）。";
+	});
+	function setAdv(open) {
+		$("pm-adv").classList.toggle("open", open);
+		$("pm-adv-btn").setAttribute("aria-expanded", open ? "true" : "false");
+		$("pm-adv-chev").style.transform = open ? "rotate(180deg)" : "";
+	}
+	$("pm-adv-btn").addEventListener("click", function () { setAdv(!$("pm-adv").classList.contains("open")); });
+	$("pm-speed-toggle").addEventListener("click", function () {
+		var open = $("pm-speed-content").classList.toggle("open");
+		this.setAttribute("aria-expanded", open ? "true" : "false");
+	});
+	var speedRunToken = 0;
+	$("pm-speed-run").addEventListener("click", function () {
+		var r = rec(currentModel);
+		if (this.disabled || r.speed === "running") return;
+		var token = ++speedRunToken, model = currentModel;
+		r.speed = "running"; r.speedProg = 0;
+		render();
+		[1, 2].forEach(function (step) {
+			setTimeout(function () {
+				if (token !== speedRunToken || currentModel !== model) return;
+				var rr = rec(model);
+				if (rr.speed !== "running") return;
+				rr.speedProg = step;
+				render();
+			}, step * 700);
+		});
+		setTimeout(function () {
+			if (token !== speedRunToken || currentModel !== model) return;
+			var rr = rec(model);
+			if (rr.speed !== "running") return;
+			rr.speed = "done"; rr.speedProg = 0;
+			render();
+		}, 2100);
+	});
+	/* —— 场景（A–J 状态，仅优化后视图） —— */
+	var SCN = {
+		A: function () {
+			store = {}; currentModel = "gpt-5.4"; setAdv(false);
+			return "新模型默认「关闭思考」（推荐）：能力未检测、档位不隐藏；点模型行「验证配置」得出结论，思考模式三态随时互切。";
+		},
+		B: function () {
+			store = {}; currentModel = "gpt-5.6-sol";
+			rec(currentModel).tierStates.__off = "confirmed";
+			setAdv(false);
+			return "验证通过：状态行「已确认关闭思考 · none」直接展示实际发送值；此后任何改动都会转回待验证，绝不冒充已生效。";
+		},
+		C: function () {
+			store = {}; currentModel = "gpt-5.6-sol";
+			rec(currentModel).mode = "upstream";
+			setAdv(false);
+			return "跟随上游是中性状态：不发送思考指令、永远不要求检测；「验证配置」仍可用（只验证地址/密钥/模型连通）；高级设置里不出现无意义的测速。";
+		},
+		D: function () {
+			store = {}; currentModel = "gpt-5.6-sol";
+			var r = rec(currentModel); r.mode = "on"; r.strength = "high";
+			setAdv(false);
+			return "从「跟随上游」直接切到「开启思考 · high」：立即成为可验证的草稿——三态六向来回切没有死路，且保留上次强度。";
+		},
+		E: function () {
+			store = {}; currentModel = "gpt-5.6-sol";
+			var r = rec(currentModel); r.mode = "on"; r.strength = "high";
+			r.tierStates = { high: "confirmed", medium: "pending", __off: "confirmed" };
+			setAdv(false);
+			return "五档模型：强度菜单主标签直接显示上游原始值 minimal / low / medium / high / max（中文只作副行说明），每档带检测徽章（high=已确认，其余=未检测）。";
+		},
+		F: function () {
+			store = {}; currentModel = "qwen3-32b";
+			var r = rec(currentModel); r.mode = "on"; r.strength = "on2";
+			r.tierStates = { on2: "confirmed" };
+			setAdv(false);
+			return "二值模型：强度只剩 true（该模型不分档）；「关闭思考」自动映射为 false，无需用户理解任何字段。";
+		},
+		G: function () {
+			store = {}; currentModel = "gemini-3.0-flash";
+			var r = rec(currentModel); r.mode = "on"; r.strength = "medium";
+			r.tierStates = { medium: "confirmed" };
+			setAdv(false);
+			return "数值预算模型：dynamic (-1) 动态分配，其余档位就是预算数字本身（128–24576）；Custom… 输入任意整数原样发送。";
+		},
+		H: function () {
+			store = {}; currentModel = "grok-5-code";
+			var r = rec(currentModel); r.mode = "on"; r.strength = "xhigh";
+			r.tierStates = { xhigh: "confirmed" };
+			setAdv(false);
+			return "上游自定义档位 low / high / xhigh：xhigh 原样直出，绝不合并成中文档名、不折算、不归一。";
+		},
+		I: function () {
+			store = {}; currentModel = "gpt-5.4";
+			var r = rec(currentModel); r.tierStates.__off = "ignored"; r.nextOutcome = "confirmed";
+			var g2 = rec("grok-5-code"); g2.mode = "on"; g2.strength = "xhigh"; g2.tierStates.xhigh = "rejected";
+			setAdv(false);
+			return "验证失败（设置未生效）：状态行给出唯一下一步「重新验证」——插件内部自动换用其他已知写法重试，普通用户不需要选任何字段。切到 grok-5-code 可看「接口拒绝」态：次动作为「查看诊断」。";
+		},
+		J: function () {
+			store = {};
+			var a = rec("gpt-5.6-sol"); a.tierStates.__off = "confirmed";
+			var b = rec("gemini-3.0-flash"); b.mode = "on"; b.strength = "medium"; b.tierStates = { medium: "confirmed" };
+			currentModel = "gpt-5.6-sol";
+			setAdv(false);
+			return "打开模型下拉在 gpt-5.6-sol 与 gemini-3.0-flash 之间往返切换：思考模式、强度 raw 集合、检测状态即刻恢复，互不影响。";
+		}
+	};
+
+	/* —— 工具条：视图 / 场景 / 视口 —— */
+	var bar = $("pm-bar");
+	function setView(v) {
+		view = v;
+		$("pm-cur").style.display = v === "cur" ? "" : "none";
+		$("pm-new").style.display = v === "new" ? "" : "none";
+		bar.querySelectorAll("[data-view]").forEach(function (b) { b.classList.toggle("on", b.dataset.view === v); });
+		bar.querySelectorAll("[data-scn]").forEach(function (b) { b.disabled = v !== "new"; });
+		closeMenus();
+		render();
+	}
+	bar.addEventListener("click", function (e) {
+		var btn = e.target.closest(".pmbar-btn");
+		if (!btn) return;
+		if (btn.dataset.view) { setView(btn.dataset.view); return; }
+		if (btn.dataset.vp) {
+			narrow = btn.dataset.vp === "L";
+			$("pm-stage").classList.toggle("pm-narrow", narrow);
+			bar.querySelectorAll("[data-vp]").forEach(function (b) { b.classList.toggle("on", b === btn); });
+			closeMenus();
+			render();
+			return;
+		}
+		var fn = SCN[btn.dataset.scn];
+		if (!fn || btn.disabled) return;
+		bar.querySelectorAll("[data-scn]").forEach(function (b) { b.classList.toggle("on", b === btn); });
+		closeMenus();
+		$("pm-speed-content").classList.remove("open");
+		$("pm-speed-toggle").setAttribute("aria-expanded", "false");
+		scnNote = "场景 " + btn.dataset.scn + "：" + fn();
+		render();
+	});
+
+	scnNote = "场景 A：" + SCN.A();
+	setView("new");
+})();
+</script>
+</body>
+</html>

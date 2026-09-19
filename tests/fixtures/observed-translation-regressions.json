@@ -1,0 +1,579 @@
+{
+  "schemaVersion": "observed-translation-regressions-v1",
+  "targetLanguageId": "zh-CN",
+  "inputLanguageId": "en",
+  "engineAdapter": "oaicompat",
+  "scope": {
+    "syntheticSourceOnly": true,
+    "actualHistoricalProviderResponses": true,
+    "newProviderRequests": 0,
+    "aiReview": true,
+    "humanReview": false,
+    "professionalTranslationReview": false,
+    "arbitraryOutputEvaluator": false,
+    "passingReplayResolvesSemanticRisk": false
+  },
+  "provenance": {
+    "review": {
+      "path": "<PRIVATE_ARCHIVE>/independent-resume-ten-output-review.json",
+      "sha256": "B13D080090760F72414BE25FC26CC4C6600C4ECDD77CDB909B5C527753BB34AE",
+      "schemaVersion": "w4-independent-resume-semantic-review-1",
+      "reviewer": "Independent AI standards reviewer",
+      "createdAt": "2026-09-05T13:05:30.848Z"
+    },
+    "result": {
+      "path": "<PRIVATE_ARCHIVE>/gemini-w4-multitype-resume-result.json",
+      "sha256": "ED3AF5C49C87D6801D8B76FEA6C67B5683044C102859A30C86AAA6201F200E5C",
+      "schemaVersion": "w4-multitype-resume-public-pipeline-probe-1"
+    },
+    "observedBundleBuildId": "005a6852cc85835f",
+    "observedBundleSha256": "2F4FA808DEC38067995645842FB083E3F330DD20ED846A35C1ED4A631E51DAD3",
+    "providerModel": "gemini-3.6-flash-high",
+    "entry": "translateMessage-manual-received-body",
+    "selectedSequences": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "pathsAreHistoricalMetadataOnly": true,
+    "explanation": "Self-contained copies of fixed synthetic source, retained real provider choices and final outputs. Historical AI judgments are evidence, not an automatic evaluator. New model outcomes require new evidence; successful offline replay does not resolve the original semantic risks."
+  },
+  "rows": [
+    {
+      "sequence": 1,
+      "fixtureId": "f06-markdown-structure",
+      "mode": "typed",
+      "finalWireFamily": "typed-json",
+      "sourceSha256": "27A2D7B733773B1594DE72CC72894373415C704C5917E91A0DDBCA223929D69B",
+      "outputSha256": "616FDE165B3D1CAF858F8AAD5D8D7553DF084D63CB02528D9ACBA55C50A3F07B",
+      "source": "## Synthetic release notes\n\n> Translate the explanation but keep the structure.\n\n- First checklist item\n- Second checklist item with ||spoiler text||\n\n| Field | Value |\n| --- | --- |\n| Status | Ready for review |\n\n[Read the synthetic guide](https://docs.example.invalid/guide)\n\n```js\nconst syntheticVersion = \"v2.4.1\";\n```\n\nThe fenced code and link destination must remain unchanged.",
+      "output": "## 综合发行说明\n\n> 翻译说明，但保留结构。\n\n- 第一个检查清单项目\n- 第二个检查清单项目，带有 ||剧透文本||\n\n| 字段 | 值 |\n| --- | --- |\n| 状态 | 准备好接受审查 |\n\n[阅读综合指南](https://docs.example.invalid/guide)\n\n```js\nconst syntheticVersion = \"v2.4.1\";\n```\n\n围栏代码和链接目标必须保持不变。",
+      "verdict": "localized-semantic-error",
+      "severity": "minor",
+      "confidence": "high",
+      "issues": [
+        {
+          "source": "Synthetic release notes / Read the synthetic guide",
+          "output": "综合发行说明 / 阅读综合指南",
+          "kind": "word-sense-deviation",
+          "severity": "minor",
+          "explanation": "本合成测试语境的 synthetic 表示合成/模拟，不是综合性/全面；两处综合延续同一词义偏移。真实 typed choices 已含这些词，空白重组仅恢复边界，不负责改词。"
+        }
+      ],
+      "acceptableVariants": [
+        "发行说明对应 release notes 是合理表达，不因固定 releaseNotes regex 未包含发行而判错。",
+        "准备好接受审查对应 Ready for review；检查清单项目、剧透文本、字段/值与末句保持不变均表达完整。"
+      ],
+      "notes": [
+        "标题、引用、列表及表格边界本轮恢复；代码和链接目标无变化。",
+        "无整句漏译；局部词义偏移仍使其不满足完整语义通过。"
+      ],
+      "protection": {
+        "hardLiteralMultisetPass": true,
+        "literalChecks": [
+          {
+            "literal": "https://docs.example.invalid/guide",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "const syntheticVersion = \"v2.4.1\";",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          }
+        ]
+      },
+      "structure": {
+        "lineEndingsExact": true,
+        "sourceLineCount": 18,
+        "outputLineCount": 18,
+        "noResidualMarkers": true,
+        "sourceMarkdownPrefixChecks": [
+          {
+            "oneBasedLine": 1,
+            "sourcePrefix": "## ",
+            "outputPrefix": "## "
+          },
+          {
+            "oneBasedLine": 3,
+            "sourcePrefix": "> ",
+            "outputPrefix": "> "
+          },
+          {
+            "oneBasedLine": 5,
+            "sourcePrefix": "- ",
+            "outputPrefix": "- "
+          },
+          {
+            "oneBasedLine": 6,
+            "sourcePrefix": "- ",
+            "outputPrefix": "- "
+          },
+          {
+            "oneBasedLine": 8,
+            "sourcePrefix": "| ",
+            "outputPrefix": "| "
+          },
+          {
+            "oneBasedLine": 9,
+            "sourcePrefix": "| ",
+            "outputPrefix": "| "
+          },
+          {
+            "oneBasedLine": 10,
+            "sourcePrefix": "| ",
+            "outputPrefix": "| "
+          }
+        ]
+      },
+      "providerEvidence": [
+        {
+          "physicalOrdinal": 1,
+          "wireFamily": "typed-json",
+          "status": 200,
+          "choices": [
+            {
+              "index": 0,
+              "content": "{\"segments\":[{\"id\":\"m3i-v2|received|body|2:26|b5b5fe02\",\"translation\":\"综合发行说明\"},{\"id\":\"m3i-v2|received|body|29:79|38f635cb\",\"translation\":\"翻译说明，但保留结构。\"},{\"id\":\"m3i-v2|received|body|82:103|624d6fca\",\"translation\":\"第一个检查清单项目\"},{\"id\":\"m3i-v2|received|body|105:133|4baf0452\",\"translation\":\"第二个检查清单项目，带有\"},{\"id\":\"m3i-v2|received|body|135:147|30c0e70c\",\"translation\":\"剧透文本\"},{\"id\":\"m3i-v2|received|body|152:159|2c5f7973\",\"translation\":\"字段 \"},{\"id\":\"m3i-v2|received|body|160:167|ff3e6d5c\",\"translation\":\"值 \"},{\"id\":\"m3i-v2|received|body|184:192|77b1f7cb\",\"translation\":\"状态 \"},{\"id\":\"m3i-v2|received|body|193:211|93c22ad9\",\"translation\":\"准备好接受审查 \"},{\"id\":\"m3i-v2|received|body|215:239|df929119\",\"translation\":\"阅读综合指南\"},{\"id\":\"m3i-v2|received|body|252:311|1a74add9\",\"translation\":\"围栏代码和链接目标必须保持不变。\"}]}",
+              "contentSha256": "B5039F1D748F55A4B9449345AA5692204C99F2406CF5BD84C4988C5686F662AB"
+            }
+          ]
+        }
+      ],
+      "accounting": {
+        "firstAnswerAccepted": true,
+        "firstAnswerBasis": "delegated-production-validator-result",
+        "repairDispatches": 0,
+        "fallbackDispatches": 0,
+        "keptSegments": 0,
+        "keptReasons": {},
+        "canaryRepairs": 0,
+        "canaryTypedFallbacks": 0,
+        "applicationCalls": 1,
+        "actualPhysicalRequests": 1,
+        "simulatedPhysicalRequests": 0
+      },
+      "attribution": "Real retained synthetic provider choices were read along with final committed values; no private provider payloads or endpoint/credential values are included.",
+      "id": "w4-resume-1-f06-markdown-structure-typed",
+      "riskState": "open",
+      "replaySettings": {
+        "wordStart": [
+          "!"
+        ],
+        "protectedTerms": [],
+        "wrapperPairs": [],
+        "protectedTermsForReceived": true,
+        "wrapperPairsForReceived": true
+      },
+      "expectedReplay": {
+        "finalAccepted": true,
+        "keptCount": 0,
+        "attemptAccepted": [
+          true
+        ],
+        "attemptReasons": [
+          null
+        ]
+      }
+    },
+    {
+      "sequence": 2,
+      "fixtureId": "f06-markdown-structure",
+      "mode": "canary",
+      "finalWireFamily": "whole-marker",
+      "sourceSha256": "27A2D7B733773B1594DE72CC72894373415C704C5917E91A0DDBCA223929D69B",
+      "outputSha256": "131ED3661BB2751A80C12B1BDE609BA89932DF135751F83CC0DE2B430921E3CD",
+      "source": "## Synthetic release notes\n\n> Translate the explanation but keep the structure.\n\n- First checklist item\n- Second checklist item with ||spoiler text||\n\n| Field | Value |\n| --- | --- |\n| Status | Ready for review |\n\n[Read the synthetic guide](https://docs.example.invalid/guide)\n\n```js\nconst syntheticVersion = \"v2.4.1\";\n```\n\nThe fenced code and link destination must remain unchanged.",
+      "output": "## 综合发布说明\n\n> 翻译说明文字，但保持原有结构。\n\n- 第一个清单项目\n- 第二个清单项目，带有 ||剧透文本||\n\n| 字段 | 值 |\n| --- | --- |\n| 状态 | 等待审核 |\n\n[阅读综合指南](https://docs.example.invalid/guide)\n\n```js\nconst syntheticVersion = \"v2.4.1\";\n```\n\n围栏代码和链接目标必须保持不变。",
+      "verdict": "localized-semantic-error",
+      "severity": "minor",
+      "confidence": "high",
+      "issues": [
+        {
+          "source": "Synthetic release notes / Read the synthetic guide",
+          "output": "综合发布说明 / 阅读综合指南",
+          "kind": "word-sense-deviation",
+          "severity": "minor",
+          "explanation": "与 seq1 相同，synthetic 的合成/模拟含义被替成综合；真实 D choices 直接包含该偏移。"
+        }
+      ],
+      "acceptableVariants": [
+        "清单项目、翻译说明文字和保持原有结构是合理表达。",
+        "等待审核在该状态表中可视为 Ready for review 的待处理状态表达；其待审核与已准备可审核有细微语气差异，不另判严重事实变化。"
+      ],
+      "notes": [
+        "结构及硬保护保留；不因 D 首答被接受就认定所有词义正确。"
+      ],
+      "protection": {
+        "hardLiteralMultisetPass": true,
+        "literalChecks": [
+          {
+            "literal": "https://docs.example.invalid/guide",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "const syntheticVersion = \"v2.4.1\";",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          }
+        ]
+      },
+      "structure": {
+        "lineEndingsExact": true,
+        "sourceLineCount": 18,
+        "outputLineCount": 18,
+        "noResidualMarkers": true,
+        "sourceMarkdownPrefixChecks": [
+          {
+            "oneBasedLine": 1,
+            "sourcePrefix": "## ",
+            "outputPrefix": "## "
+          },
+          {
+            "oneBasedLine": 3,
+            "sourcePrefix": "> ",
+            "outputPrefix": "> "
+          },
+          {
+            "oneBasedLine": 5,
+            "sourcePrefix": "- ",
+            "outputPrefix": "- "
+          },
+          {
+            "oneBasedLine": 6,
+            "sourcePrefix": "- ",
+            "outputPrefix": "- "
+          },
+          {
+            "oneBasedLine": 8,
+            "sourcePrefix": "| ",
+            "outputPrefix": "| "
+          },
+          {
+            "oneBasedLine": 9,
+            "sourcePrefix": "| ",
+            "outputPrefix": "| "
+          },
+          {
+            "oneBasedLine": 10,
+            "sourcePrefix": "| ",
+            "outputPrefix": "| "
+          }
+        ]
+      },
+      "providerEvidence": [
+        {
+          "physicalOrdinal": 1,
+          "wireFamily": "whole-marker",
+          "status": 200,
+          "choices": [
+            {
+              "index": 0,
+              "content": "⟪1⟫综合发布说明\n⟪2⟫翻译说明文字，但保持原有结构。\n⟪3⟫第一个清单项目\n⟪4⟫第二个清单项目，带有\n⟪5⟫剧透文本\n⟪6⟫字段\n⟪7⟫值\n⟪8⟫状态\n⟪9⟫等待审核\n⟪10⟫阅读综合指南\n⟪11⟫围栏代码和链接目标必须保持不变。",
+              "contentSha256": "15EB7B97AAB86E1F06E98A4C2804D526DC44FCA9BAEA2CD788CC324C50153C2E"
+            }
+          ]
+        }
+      ],
+      "accounting": {
+        "firstAnswerAccepted": true,
+        "firstAnswerBasis": "inferred-from-production-D-branch-and-final-commit",
+        "repairDispatches": 0,
+        "fallbackDispatches": 0,
+        "keptSegments": 0,
+        "keptReasons": {},
+        "canaryRepairs": 0,
+        "canaryTypedFallbacks": 0,
+        "applicationCalls": 1,
+        "actualPhysicalRequests": 1,
+        "simulatedPhysicalRequests": 0
+      },
+      "attribution": "Real retained synthetic provider choices were read along with final committed values; no private provider payloads or endpoint/credential values are included.",
+      "id": "w4-resume-2-f06-markdown-structure-canary",
+      "riskState": "open",
+      "replaySettings": {
+        "wordStart": [
+          "!"
+        ],
+        "protectedTerms": [],
+        "wrapperPairs": [],
+        "protectedTermsForReceived": true,
+        "wrapperPairsForReceived": true
+      },
+      "expectedReplay": {
+        "finalAccepted": true,
+        "keptCount": 0,
+        "attemptAccepted": [
+          true
+        ],
+        "attemptReasons": [
+          null
+        ]
+      }
+    },
+    {
+      "sequence": 3,
+      "fixtureId": "f07-academic-technical",
+      "mode": "typed",
+      "finalWireFamily": "typed-json",
+      "sourceSha256": "43F26DBD6B39DED7EAD1657381198347F9E80CAE65063C1252492748C32DCB53",
+      "outputSha256": "56052FC299AEAA76ADF178DB09D876220AF5790C3168F37872BDA9B3C5FFA152",
+      "source": "Translate these academic choices: GED, Non-Degree, Spouse/Dependent, In-state tuition, Out-of-state tuition, and Self-Pay.\nKeep these narrow technical literals unchanged: Windows 11, API, HTTP 429, v2.4.1, and “4-3”.",
+      "output": "翻译以下学术选项：GED（普通教育学业证书）、非学位、配偶/抚养人、州内学费、州外学费以及自费。\n保持这些狭义技术字面量不变：Windows 11、API、HTTP 429、v2.4.1 和 “4-3”。",
+      "verdict": "localized-semantic-error",
+      "severity": "moderate",
+      "confidence": "high",
+      "issues": [
+        {
+          "source": "Spouse/Dependent",
+          "output": "配偶/抚养人",
+          "kind": "semantic-role-reversal",
+          "severity": "moderate",
+          "explanation": "Dependent 在此人员身份选项指受他人扶养的人；抚养人指提供抚养的人，角色方向相反。不是同义词变体，也不是单纯漏了术语扩展。实际模型 typed choice 与最终译文一致，错误不是保护恢复或重组产生。"
+        }
+      ],
+      "acceptableVariants": [
+        "非学位、州内学费、州外学费、自费准确；五个技术字面量完整。",
+        "GED 缩写保留，括注普通教育学业证书较泛；本审查不凭唯一中文证书名称再追加确定错误。"
+      ],
+      "notes": [
+        "输出含汉字且通过 validator，仍存在角色含义错误；需要语义回归风险登记，不应为本合成句加生产替换特例。"
+      ],
+      "protection": {
+        "hardLiteralMultisetPass": true,
+        "literalChecks": [
+          {
+            "literal": "Windows 11",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "API",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "HTTP 429",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "v2.4.1",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "“4-3”",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          }
+        ]
+      },
+      "structure": {
+        "lineEndingsExact": true,
+        "sourceLineCount": 2,
+        "outputLineCount": 2,
+        "noResidualMarkers": true
+      },
+      "providerEvidence": [
+        {
+          "physicalOrdinal": 1,
+          "wireFamily": "typed-json",
+          "status": 200,
+          "choices": [
+            {
+              "index": 0,
+              "content": "{\"segments\":[{\"id\":\"m3i-v2|received|body|0:122|c1e0a657\",\"translation\":\"翻译以下学术选项：GED（普通教育学业证书）、非学位、配偶/抚养人、州内学费、州外学费以及自费。\"},{\"id\":\"m3i-v2|received|body|123:213|f6092d2d\",\"translation\":\"保持这些狭义技术字面量不变：⟦C0⟧、⟦C1⟧、⟦C2⟧、⟦0⟧ 和 ⟦C3⟧。\"}]}",
+              "contentSha256": "A7A0A57E778F4807BEA96FE9A01CEF2D4A48458C0A4471E30A4C2DC3EBD80061"
+            }
+          ]
+        }
+      ],
+      "accounting": {
+        "firstAnswerAccepted": true,
+        "firstAnswerBasis": "delegated-production-validator-result",
+        "repairDispatches": 0,
+        "fallbackDispatches": 0,
+        "keptSegments": 0,
+        "keptReasons": {},
+        "canaryRepairs": 0,
+        "canaryTypedFallbacks": 0,
+        "applicationCalls": 1,
+        "actualPhysicalRequests": 1,
+        "simulatedPhysicalRequests": 0
+      },
+      "attribution": "Real retained synthetic provider choices were read along with final committed values; no private provider payloads or endpoint/credential values are included.",
+      "id": "w4-resume-3-f07-academic-technical-typed",
+      "riskState": "open",
+      "replaySettings": {
+        "wordStart": [
+          "!"
+        ],
+        "protectedTerms": [
+          "v2.4.1"
+        ],
+        "wrapperPairs": [],
+        "protectedTermsForReceived": true,
+        "wrapperPairsForReceived": true
+      },
+      "expectedReplay": {
+        "finalAccepted": true,
+        "keptCount": 0,
+        "attemptAccepted": [
+          true
+        ],
+        "attemptReasons": [
+          null
+        ]
+      }
+    },
+    {
+      "sequence": 4,
+      "fixtureId": "f07-academic-technical",
+      "mode": "canary",
+      "finalWireFamily": "typed-json",
+      "sourceSha256": "43F26DBD6B39DED7EAD1657381198347F9E80CAE65063C1252492748C32DCB53",
+      "outputSha256": "1C4A1F893A18DA3416DD151642DAACD519C11BCA4DD3620FA99F009B3D1F619D",
+      "source": "Translate these academic choices: GED, Non-Degree, Spouse/Dependent, In-state tuition, Out-of-state tuition, and Self-Pay.\nKeep these narrow technical literals unchanged: Windows 11, API, HTTP 429, v2.4.1, and “4-3”.",
+      "output": "翻译以下学术选项：GED（普通教育发展证书）、非学位课程、配偶/抚养亲属、州内学费、州外学费以及自费。\n保持以下狭义技术字面量不变：Windows 11、API、HTTP 429、v2.4.1 和 “4-3”。",
+      "verdict": "terminology-ambiguity-needs-review",
+      "severity": "minor-uncertain",
+      "confidence": "medium",
+      "issues": [
+        {
+          "source": "Spouse/Dependent",
+          "output": "配偶/抚养亲属",
+          "kind": "ambiguous-dependent-role",
+          "severity": "minor-uncertain",
+          "explanation": "抚养亲属可被理解为需抚养的亲属，未必与 dependent 矛盾，但缺少受抚养关系的明确表达，也可能被读为抚养他人的亲属。不给它与抚养人同等的确定角色反转裁决；保留待人工术语确认。"
+        }
+      ],
+      "acceptableVariants": [
+        "GED（普通教育发展证书）、非学位课程、州内/州外学费及自费在该学术选项中可接受。",
+        "最终第二行保留技术字面量，保持不变的要求也译出。"
+      ],
+      "notes": [
+        "该行标作 canary 但最终输出来自 typed fallback，不是 D 首答成功。",
+        "初次 D 根结构含重复 ⟪2⟫，第二行英文原样返回，第一行省略了 Translate these academic choices 的引导文字；这些首答问题未提交到最终显示。",
+        "fallback 最终补回引导语并译出第二行；只保留词项表达疑点，不把首答漏译累计成最终漏译。"
+      ],
+      "protection": {
+        "hardLiteralMultisetPass": true,
+        "literalChecks": [
+          {
+            "literal": "Windows 11",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "API",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "HTTP 429",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "v2.4.1",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          },
+          {
+            "literal": "“4-3”",
+            "sourceCount": 1,
+            "outputCount": 1,
+            "exactCount": true
+          }
+        ]
+      },
+      "structure": {
+        "lineEndingsExact": true,
+        "sourceLineCount": 2,
+        "outputLineCount": 2,
+        "noResidualMarkers": true
+      },
+      "providerEvidence": [
+        {
+          "physicalOrdinal": 1,
+          "wireFamily": "whole-marker",
+          "status": 200,
+          "choices": [
+            {
+              "index": 0,
+              "content": "⟪1⟫GED（高中同等学力证书）、非学位课程、配偶/抚养亲属、州内学费率、州外学费率，以及自费。\n⟪2⟫⟪2⟫Keep these narrow technical literals unchanged: ⟦C0⟧, ⟦C1⟧, ⟦C2⟧, ⟦0⟧, and ⟦C3⟧.",
+              "contentSha256": "85E84225E726E22FC2B3D50E9D65A5982E4575BCF0EC990E7D8972C53A865231"
+            }
+          ]
+        },
+        {
+          "physicalOrdinal": 2,
+          "wireFamily": "typed-json",
+          "status": 200,
+          "choices": [
+            {
+              "index": 0,
+              "content": "{\"segments\":[{\"id\":\"m3i-v2|received|body|0:122|c1e0a657\",\"translation\":\"翻译以下学术选项：GED（普通教育发展证书）、非学位课程、配偶/抚养亲属、州内学费、州外学费以及自费。\"},{\"id\":\"m3i-v2|received|body|123:213|f6092d2d\",\"translation\":\"保持以下狭义技术字面量不变：⟦C0⟧、⟦C1⟧、⟦C2⟧、⟦0⟧ 和 ⟦C3⟧。\"}]}",
+              "contentSha256": "64DD8B63E9977D6EE10D387BBCA284E3F30CBEE586D44EA5556BBBF1841EA84E"
+            }
+          ]
+        }
+      ],
+      "accounting": {
+        "firstAnswerAccepted": false,
+        "firstAnswerBasis": "inferred-from-production-D-branch-and-final-commit",
+        "repairDispatches": 0,
+        "fallbackDispatches": 1,
+        "keptSegments": 0,
+        "keptReasons": {},
+        "canaryRepairs": 0,
+        "canaryTypedFallbacks": 1,
+        "applicationCalls": 2,
+        "actualPhysicalRequests": 2,
+        "simulatedPhysicalRequests": 0
+      },
+      "attribution": "Real retained synthetic provider choices were read along with final committed values; no private provider payloads or endpoint/credential values are included.",
+      "id": "w4-resume-4-f07-academic-technical-canary",
+      "riskState": "needs-review",
+      "replaySettings": {
+        "wordStart": [
+          "!"
+        ],
+        "protectedTerms": [
+          "v2.4.1"
+        ],
+        "wrapperPairs": [],
+        "protectedTermsForReceived": true,
+        "wrapperPairsForReceived": true
+      },
+      "expectedReplay": {
+        "finalAccepted": true,
+        "keptCount": 0,
+        "attemptAccepted": [
+          false,
+          true
+        ],
+        "attemptReasons": [
+          "duplicate-marker",
+          null
+        ]
+      }
+    }
+  ]
+}

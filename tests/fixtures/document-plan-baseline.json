@@ -1,0 +1,392 @@
+[
+  {
+    "input": {},
+    "options": {
+      "direction": "received",
+      "targetLanguageId": "zh-CN"
+    },
+    "sha256": "275f08abca38fa06d859e96b5ae98d751d9d8d80bd94cb55b476d74925fcdbc6"
+  },
+  {
+    "input": {},
+    "options": {
+      "direction": "sent",
+      "targetLanguageId": "en"
+    },
+    "sha256": "c4f3b962b9ee2a0d7b843589b31946af40296d88cca1d5864d0c47abf73d7bed"
+  },
+  {
+    "input": {},
+    "options": {
+      "direction": 0,
+      "targetLanguageId": 0
+    },
+    "sha256": "275f08abca38fa06d859e96b5ae98d751d9d8d80bd94cb55b476d74925fcdbc6"
+  },
+  {
+    "input": {
+      "body": "Hello **world**"
+    },
+    "options": {
+      "direction": "received",
+      "targetLanguageId": "zh-CN"
+    },
+    "sha256": "ec131a1a052c05dd77275b4769c9aa8a76e5f4f0376aa9d358db7efbe3e73ce7"
+  },
+  {
+    "input": {
+      "body": "Hello **world**"
+    },
+    "options": {
+      "direction": "sent",
+      "targetLanguageId": "en"
+    },
+    "sha256": "223a83b95f2be90c839d9a445af1797b405b3771015a8a8e1754adc6c73bd6f4"
+  },
+  {
+    "input": {
+      "body": "Hello **world**"
+    },
+    "options": {
+      "direction": 0,
+      "targetLanguageId": 0
+    },
+    "sha256": "ec131a1a052c05dd77275b4769c9aa8a76e5f4f0376aa9d358db7efbe3e73ce7"
+  },
+  {
+    "input": {
+      "body": null,
+      "content": "Fallback content",
+      "embeds": [
+        null,
+        {
+          "title": 0,
+          "description": "",
+          "footer": {
+            "text": 0
+          },
+          "fields": [
+            null,
+            {
+              "name": false,
+              "value": null
+            },
+            {
+              "name": "",
+              "value": 123
+            }
+          ]
+        }
+      ],
+      "forwarded": [
+        null,
+        {
+          "body": "",
+          "content": "Forward fallback"
+        },
+        {
+          "body": 0,
+          "content": 7
+        }
+      ],
+      "reply": {
+        "body": 0,
+        "documentIdentity": ""
+      },
+      "sent": {
+        "body": false
+      }
+    },
+    "options": {
+      "direction": "received",
+      "targetLanguageId": "zh-CN"
+    },
+    "sha256": "a8dfdabbb21cbc27188bc3dd6e443713613f1216e3d40e495e3495c5e55f6c7d"
+  },
+  {
+    "input": {
+      "body": null,
+      "content": "Fallback content",
+      "embeds": [
+        null,
+        {
+          "title": 0,
+          "description": "",
+          "footer": {
+            "text": 0
+          },
+          "fields": [
+            null,
+            {
+              "name": false,
+              "value": null
+            },
+            {
+              "name": "",
+              "value": 123
+            }
+          ]
+        }
+      ],
+      "forwarded": [
+        null,
+        {
+          "body": "",
+          "content": "Forward fallback"
+        },
+        {
+          "body": 0,
+          "content": 7
+        }
+      ],
+      "reply": {
+        "body": 0,
+        "documentIdentity": ""
+      },
+      "sent": {
+        "body": false
+      }
+    },
+    "options": {
+      "direction": "sent",
+      "targetLanguageId": "en"
+    },
+    "sha256": "45ba58630cfed2150a88f18458620736b3d9f3c6b0f75f8729a555cf158939aa"
+  },
+  {
+    "input": {
+      "body": null,
+      "content": "Fallback content",
+      "embeds": [
+        null,
+        {
+          "title": 0,
+          "description": "",
+          "footer": {
+            "text": 0
+          },
+          "fields": [
+            null,
+            {
+              "name": false,
+              "value": null
+            },
+            {
+              "name": "",
+              "value": 123
+            }
+          ]
+        }
+      ],
+      "forwarded": [
+        null,
+        {
+          "body": "",
+          "content": "Forward fallback"
+        },
+        {
+          "body": 0,
+          "content": 7
+        }
+      ],
+      "reply": {
+        "body": 0,
+        "documentIdentity": ""
+      },
+      "sent": {
+        "body": false
+      }
+    },
+    "options": {
+      "direction": 0,
+      "targetLanguageId": 0
+    },
+    "sha256": "a8dfdabbb21cbc27188bc3dd6e443713613f1216e3d40e495e3495c5e55f6c7d"
+  },
+  {
+    "input": {
+      "body": "Root",
+      "content": "Ignored content",
+      "embeds": [
+        {
+          "title": "Title",
+          "description": "Description",
+          "footer": {
+            "text": "Footer"
+          },
+          "fields": [
+            {
+              "name": "Name",
+              "value": "Value"
+            }
+          ]
+        }
+      ],
+      "forwarded": [
+        {
+          "body": "Forward body",
+          "content": "Ignored"
+        }
+      ],
+      "reply": {
+        "body": "Reply",
+        "documentIdentity": "dp1:reference"
+      },
+      "sent": {
+        "body": "Sent"
+      },
+      "attachments": [
+        {
+          "name": "excluded"
+        }
+      ]
+    },
+    "options": {
+      "direction": "received",
+      "targetLanguageId": "zh-CN"
+    },
+    "sha256": "86081d88ea4643c77db8719754630e2f6353fc153801798ef004babe3e8f6a91"
+  },
+  {
+    "input": {
+      "body": "Root",
+      "content": "Ignored content",
+      "embeds": [
+        {
+          "title": "Title",
+          "description": "Description",
+          "footer": {
+            "text": "Footer"
+          },
+          "fields": [
+            {
+              "name": "Name",
+              "value": "Value"
+            }
+          ]
+        }
+      ],
+      "forwarded": [
+        {
+          "body": "Forward body",
+          "content": "Ignored"
+        }
+      ],
+      "reply": {
+        "body": "Reply",
+        "documentIdentity": "dp1:reference"
+      },
+      "sent": {
+        "body": "Sent"
+      },
+      "attachments": [
+        {
+          "name": "excluded"
+        }
+      ]
+    },
+    "options": {
+      "direction": "sent",
+      "targetLanguageId": "en"
+    },
+    "sha256": "9642462fdf30220303cf66d7af5f122c94ef098dfcbd0e84d83c91a8364b56ee"
+  },
+  {
+    "input": {
+      "body": "Root",
+      "content": "Ignored content",
+      "embeds": [
+        {
+          "title": "Title",
+          "description": "Description",
+          "footer": {
+            "text": "Footer"
+          },
+          "fields": [
+            {
+              "name": "Name",
+              "value": "Value"
+            }
+          ]
+        }
+      ],
+      "forwarded": [
+        {
+          "body": "Forward body",
+          "content": "Ignored"
+        }
+      ],
+      "reply": {
+        "body": "Reply",
+        "documentIdentity": "dp1:reference"
+      },
+      "sent": {
+        "body": "Sent"
+      },
+      "attachments": [
+        {
+          "name": "excluded"
+        }
+      ]
+    },
+    "options": {
+      "direction": 0,
+      "targetLanguageId": 0
+    },
+    "sha256": "86081d88ea4643c77db8719754630e2f6353fc153801798ef004babe3e8f6a91"
+  },
+  {
+    "input": {
+      "body": "",
+      "content": "Ignored",
+      "reply": {
+        "body": "",
+        "documentIdentity": 0
+      },
+      "sent": {
+        "body": 0
+      }
+    },
+    "options": {
+      "direction": "received",
+      "targetLanguageId": "zh-CN"
+    },
+    "sha256": "a74f2ab4c807fa8c48a1567d08311da7facb1500fc81e7807b25dc190d968857"
+  },
+  {
+    "input": {
+      "body": "",
+      "content": "Ignored",
+      "reply": {
+        "body": "",
+        "documentIdentity": 0
+      },
+      "sent": {
+        "body": 0
+      }
+    },
+    "options": {
+      "direction": "sent",
+      "targetLanguageId": "en"
+    },
+    "sha256": "1a54bfead8283fe2f218adfa63e57a6dfed5a9adbfeddacf3b941205976aa602"
+  },
+  {
+    "input": {
+      "body": "",
+      "content": "Ignored",
+      "reply": {
+        "body": "",
+        "documentIdentity": 0
+      },
+      "sent": {
+        "body": 0
+      }
+    },
+    "options": {
+      "direction": 0,
+      "targetLanguageId": 0
+    },
+    "sha256": "a74f2ab4c807fa8c48a1567d08311da7facb1500fc81e7807b25dc190d968857"
+  }
+]

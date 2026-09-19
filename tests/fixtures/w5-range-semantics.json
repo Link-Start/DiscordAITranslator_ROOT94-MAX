@@ -1,0 +1,133 @@
+{
+  "description": "Independent span-level literal controls; provider responses must preserve each source key meaning. Literal controls validate mapping/formatting, not live model quality.",
+  "cases": [
+    {
+      "id": "bold-action-post-time",
+      "source": "Please **check the schedule** before the meeting tomorrow.",
+      "rangeSources": [
+        "Please",
+        "check the schedule",
+        "before the meeting tomorrow."
+      ],
+      "translations": [
+        "请",
+        "核对日程表",
+        "，在明天开会前。"
+      ],
+      "expectedDisplay": "请 **核对日程表** ，在明天开会前。",
+      "meaning": "Bold remains the checking action and schedule object; tomorrow/before-the-meeting remains outside bold."
+    },
+    {
+      "id": "bold-action-pre-time",
+      "source": "Before the meeting tomorrow, please **check the schedule**.",
+      "rangeSources": [
+        "Before the meeting tomorrow, please",
+        "check the schedule"
+      ],
+      "translations": [
+        "明天开会前，请",
+        "核对日程表"
+      ],
+      "expectedDisplay": "明天开会前，请 **核对日程表**.",
+      "meaning": "The time clause stays in range 1; bold remains the checking action and schedule object."
+    },
+    {
+      "id": "link-label-post-time",
+      "source": "Please read [the updated schedule](https://example.com/schedule) before the meeting tomorrow.",
+      "rangeSources": [
+        "Please read",
+        "the updated schedule",
+        "before the meeting tomorrow."
+      ],
+      "translations": [
+        "请阅读",
+        "更新后的日程表",
+        "，在明天开会前。"
+      ],
+      "expectedDisplay": "请阅读 [更新后的日程表](https://example.com/schedule) ，在明天开会前。",
+      "meaning": "The link label is the updated schedule, not the time clause. Destination is byte-identical."
+    },
+    {
+      "id": "bold-time",
+      "source": "Please check the schedule **before the meeting tomorrow**.",
+      "rangeSources": [
+        "Please check the schedule",
+        "before the meeting tomorrow"
+      ],
+      "translations": [
+        "请核对日程表",
+        "在明天开会前"
+      ],
+      "expectedDisplay": "请核对日程表 **在明天开会前**.",
+      "meaning": "The time condition, not checking the schedule, is bold."
+    },
+    {
+      "id": "bold-negation",
+      "source": "Please **do not publish** the draft before Friday.",
+      "rangeSources": [
+        "Please",
+        "do not publish",
+        "the draft before Friday."
+      ],
+      "translations": [
+        "请",
+        "不要发布",
+        "这份草稿，在星期五之前。"
+      ],
+      "expectedDisplay": "请 **不要发布** 这份草稿，在星期五之前。",
+      "meaning": "Negation stays with publish in the bold range; draft and before-Friday restriction stay outside."
+    },
+    {
+      "id": "bold-action-subordinate-time",
+      "source": "We will **send the final report** after the review is complete.",
+      "rangeSources": [
+        "We will",
+        "send the final report",
+        "after the review is complete."
+      ],
+      "translations": [
+        "我们会",
+        "发送最终报告",
+        "，待审核完成后。"
+      ],
+      "expectedDisplay": "我们会 **发送最终报告** ，待审核完成后。",
+      "meaning": "Action and report remain bold; review completion stays outside as the preceding condition."
+    },
+    {
+      "id": "repeat-range-keys",
+      "source": "Please **check the schedule** and then **check the schedule** again.",
+      "rangeSources": [
+        "Please",
+        "check the schedule",
+        "and then",
+        "check the schedule",
+        "again."
+      ],
+      "translations": [
+        "请",
+        "核对日程表",
+        "然后",
+        "核对日程表",
+        "，再来一次。"
+      ],
+      "expectedDisplay": "请 **核对日程表** 然后 **核对日程表** ，再来一次。",
+      "meaning": "Repeated source text has distinct range IDs and both bold occurrences survive without deduplication."
+    },
+    {
+      "id": "pronoun-scope",
+      "source": "She said **her report is ready** before she left.",
+      "rangeSources": [
+        "She said",
+        "her report is ready",
+        "before she left."
+      ],
+      "translations": [
+        "她说",
+        "她的报告已经准备好了",
+        "在她离开之前。"
+      ],
+      "expectedDisplay": "她说 **她的报告已经准备好了** 在她离开之前。",
+      "meaning": "Her possessive report remains inside bold; outer speaking and departure clauses retain she, with no person/ownership swap."
+    }
+  ]
+}

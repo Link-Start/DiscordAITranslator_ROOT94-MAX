@@ -1,0 +1,9 @@
+{
+  "name": "DiscordAITranslator",
+  "author": "ROOT94",
+  "authorLink": "https://github.com/ROOT94-MAX/DiscordAITranslator",
+  "version": "1.0.0",
+  "description": "自动翻译收发消息，支持多家翻译服务与 AI 判定 / Auto-translates Discord messages with multiple providers and AI.",
+  "source": "https://github.com/ROOT94-MAX/DiscordAITranslator",
+  "license": "GPL-2.0"
+}

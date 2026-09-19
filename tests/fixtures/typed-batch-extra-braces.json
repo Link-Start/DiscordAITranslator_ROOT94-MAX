@@ -1,0 +1,27 @@
+{
+  "provenance": "Synthetic messages; two responses captured from the configured local provider on 2026-09-15. No user messages or credentials. Each of the first five message objects is followed by an extra closing brace.",
+  "cases": [
+    {
+      "content": "{\"messages\":[{\"id\":\"m1\",\"segments\":[{\"id\":\"s1\",\"translation\":\"我每次进语音频道都会掉线。\"}]}},{\"id\":\"m2\",\"segments\":[{\"id\":\"s1\",\"translation\":\"显示的是“连接失败”还是“无路由”？\"}]}},{\"id\":\"m3\",\"segments\":[{\"id\":\"s1\",\"translation\":\"显示的是无路由。不过文字消息还是正常的。\"}]}},{\"id\":\"m4\",\"segments\":[{\"id\":\"s1\",\"translation\":\"试试 ⟦C0⟧，然后再重连。记得保留备份文件。\"}]}},{\"id\":\"m5\",\"segments\":[{\"id\":\"s1\",\"translation\":\"⟦0⟧ 你能看一下服务器状态吗？\"}]}},{\"id\":\"m6\",\"segments\":[{\"id\":\"s1\",\"translation\":\"现在可以了！\"},{\"id\":\"s2\",\"translation\":\"第一次尝试失败了，但第二次连上了。\"}]}]}",
+      "expected": {
+        "m1": ["我每次进语音频道都会掉线。"],
+        "m2": ["显示的是“连接失败”还是“无路由”？"],
+        "m3": ["显示的是无路由。不过文字消息还是正常的。"],
+        "m4": ["试试 ⟦C0⟧，然后再重连。记得保留备份文件。"],
+        "m5": ["⟦0⟧ 你能看一下服务器状态吗？"],
+        "m6": ["现在可以了！", "第一次尝试失败了，但第二次连上了。"]
+      }
+    },
+    {
+      "content": "{\"messages\":[{\"id\":\"m1\",\"segments\":[{\"id\":\"s1\",\"translation\":\"我一进语音频道就老掉线。\"}]}},{\"id\":\"m2\",\"segments\":[{\"id\":\"s1\",\"translation\":\"提示的是“连接失败”还是“无路由”？\"}]}},{\"id\":\"m3\",\"segments\":[{\"id\":\"s1\",\"translation\":\"提示的是无路由。不过文字消息发着还挺正常的。\"}]}},{\"id\":\"m4\",\"segments\":[{\"id\":\"s1\",\"translation\":\"试试⟦C0⟧，然后重连一下。备份文件先留着。\"}]}},{\"id\":\"m5\",\"segments\":[{\"id\":\"s1\",\"translation\":\"⟦0⟧ 能查一下服务器状态吗？\"}]}},{\"id\":\"m6\",\"segments\":[{\"id\":\"s1\",\"translation\":\"现在可以了！\"},{\"id\":\"s2\",\"translation\":\"第一次试失败了，但第二次连上了。\"}]}]}",
+      "expected": {
+        "m1": ["我一进语音频道就老掉线。"],
+        "m2": ["提示的是“连接失败”还是“无路由”？"],
+        "m3": ["提示的是无路由。不过文字消息发着还挺正常的。"],
+        "m4": ["试试⟦C0⟧，然后重连一下。备份文件先留着。"],
+        "m5": ["⟦0⟧ 能查一下服务器状态吗？"],
+        "m6": ["现在可以了！", "第一次试失败了，但第二次连上了。"]
+      }
+    }
+  ]
+}

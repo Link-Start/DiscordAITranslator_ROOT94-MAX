@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "buildId": "5efe9302a36e3d90",
+    "bundleSha256": "f1d3eba681c389ccffb83fe51a6f30b4d321bc86799f553014a32e83381c2117",
+    "capture": "Original M1c bundle, synthetic request transport; frozen before changing the tests. Not generated from current code.",
+    "sourceTestSha256": "39028ab9dbad81239edfaf8a5c37651505e903593902ec9132942262f384c2ed",
+    "sourceTestCommit": "b330b89c46819813945b4ce3a021466b66e0895e",
+    "captureNodeVersion": "v24.16.0",
+    "inputFixtureSha256": "b635c70bd263eeafbca6573974ac0c64bebf3c05642f5120a67ab51896126318",
+    "manualBaselineSucceeded": true,
+    "manualBaselineRequestCount": 1,
+    "refreezes": [
+      {
+        "date": "2026-09-13",
+        "reason": "protectAutoTechnicalTerms no longer guesses all-caps tokens as acronyms; the legacy manual-compatibility body of the exact fixture lost one placeholder (GED now travels as text, 4619 -> 4615 bytes). serializerBudgetFallback is unchanged because its input has no all-caps token.",
+        "buildId": "6f4e50f547eae867",
+        "bundleSha256": "719dfa987c22556f58945518dd1abacfb8e5f89ad92fc539cf783d78b5d68a12",
+        "captureNodeVersion": "v24.16.0"
+      },
+      {
+        "date": "2026-09-14",
+        "reason": "The user translation preferences now travel with every AI request. Both legacy bodies gained the fixed preference block carrying the English default preferences of the test interface language (+664 bytes each: serializerBudgetFallback 57652 -> 58316, manualCompatibilityFallback 4615 -> 5279). The legacy decision rules moved from the editable template into fixed code; neither body uses AI decision mode, so only the preference block changed.",
+        "buildId": "8040a0a65ebfdd95",
+        "bundleSha256": "98a79670854650b81318e186e5a8c888827519dec9c8ac03d33e9808eca20abc",
+        "captureNodeVersion": "v24.16.0"
+      }
+    ]
+  },
+  "requests": {
+    "serializerBudgetFallback": {
+      "bodySha256": "bd3583926b7f115f86fa603b0ff97f3e752359c3e4319f508e19820a25cd06d7",
+      "bodyUtf8Bytes": 58316
+    },
+    "manualCompatibilityFallback": {
+      "bodySha256": "723860258ec560cb0f9f2ed434427c7482d0e92c768323e11e29efdd16262cd9",
+      "bodyUtf8Bytes": 5279
+    }
+  }
+}

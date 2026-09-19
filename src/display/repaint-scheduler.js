@@ -1,0 +1,274 @@
+// Decides WHEN committed translations become visible. A commit always lands in the
+// store immediately; only the repaint is scheduled here, so deferring never loses a
+// translation - it only delays the paint.
+//
+// The transaction path (schedule/flush) coalesces ID-scoped Store repaints, keeps
+// rows single-flight, and bounds retries without widening ordinary messages into a
+// whole-chat rebuild. The retained scheduleFullRepaint path is channel/lifecycle
+// compatibility work and defers around open settings and a focused text area.
+// 120ms is a pinned product ceiling, not a tuning knob: the throughput contract
+// asserts live translations add no more than 200ms display delay. A 2026-08-19
+// attempt to raise it for startup-bounce smoothing was reverted for that reason.
+const LIVE_REPAINT_DELAY_MS = 120;
+const CALM_REPAINT_DELAY_MS = 1500;
+const BUSY_RETRY_DELAY_MS = 450;
+const SETTINGS_RETRY_DELAY_MS = 1000;
+const MAX_TARGETED_REPAINT_ATTEMPTS = 3;
+
+function createDisplayRepaintScheduler({
+	renderMessages,
+	onRenderOutcome = () => {},
+	canRepaintNow,
+	isViewingHistory = () => false,
+	// The full-list repaint path needs the two predicates separately, because it may
+	// be told to ignore one of them.
+	isSettingsSurfaceOpen = () => false,
+	isTextAreaFocused = () => false,
+	repaintAll = () => {},
+	// Pass BDFDB.TimeUtils.timeout/clear here, never the globals these default to.
+	// Every timer below ends in a full-list repaint, and a raw timer outlives the plugin
+	// instance that armed it, so after a reload a dead instance keeps repainting
+	// alongside the live one. The defaults exist only so a unit test can drive the
+	// scheduler without BDFDB; the managed-timer contract test pins the real wiring.
+	setTimeout: scheduleTimer = setTimeout,
+	clearTimeout: cancelTimer = clearTimeout
+}) {
+	const queues = new Map();
+	const activeRequests = new Map();
+	let timer = null;
+	// Cadence audit 2026-08-19: five lanes (live, cached, historical, manual, retry)
+	// share the one visible rebuild symptom. Every request carries its lane so the
+	// transaction can report per-source counts, and path B's full repaints - which
+	// bypass the adapter's counters entirely - are counted here.
+	let fullRepaints = 0;
+	// F0 observation counters. Increment-only bookkeeping on existing control-flow
+	// sites; they never influence scheduling decisions.
+	const counters = {scheduled: 0, flushes: 0, renderBatches: 0, confirmed: 0, deferred: 0, retries: 0, exhausted: 0};
+
+	function getActiveRequest(channelId, messageId) {
+		const channel = activeRequests.get(String(channelId));
+		return channel && channel.get(String(messageId)) || null;
+	}
+
+	function releaseActiveRequests(channelId, messageIds) {
+		const key = String(channelId);
+		const channel = activeRequests.get(key);
+		if (!channel) return;
+		for (const messageId of messageIds) channel.delete(String(messageId));
+		if (!channel.size) activeRequests.delete(key);
+	}
+
+	function removeQueuedRequest(channelId, messageId, maximumAttempt) {
+		const key = String(channelId);
+		const channel = queues.get(key);
+		if (!channel) return;
+		const queued = channel.get(String(messageId));
+		if (queued && queued.attempt <= maximumAttempt) channel.delete(String(messageId));
+		if (!channel.size) queues.delete(key);
+	}
+
+	function arm(delay) {
+		if (timer) return;
+		timer = scheduleTimer(() => {
+			timer = null;
+			flush();
+		}, delay);
+	}
+
+	function flush() {
+		if (!queues.size) return;
+		if (!canRepaintNow()) {
+			// Re-check rather than paint over the user; the commit is already stored.
+			arm(BUSY_RETRY_DELAY_MS);
+			return;
+		}
+		const pending = [...queues.entries()];
+		queues.clear();
+		counters.flushes++;
+		for (const [channelId, queuedRequests] of pending) {
+			const requestsByMessageId = new Map();
+			const blockedRequests = new Map();
+			for (const [messageId, request] of queuedRequests) (getActiveRequest(channelId, messageId) ? blockedRequests : requestsByMessageId).set(messageId, request);
+			if (blockedRequests.size) {
+				if (!queues.has(channelId)) queues.set(channelId, new Map());
+				const waiting = queues.get(channelId);
+				for (const [messageId, request] of blockedRequests) waiting.set(messageId, request);
+			}
+			if (!requestsByMessageId.size) continue;
+			const messageIds = [...requestsByMessageId.keys()];
+			if (!activeRequests.has(channelId)) activeRequests.set(channelId, new Map());
+			const activeChannel = activeRequests.get(channelId);
+			for (const [messageId, request] of requestsByMessageId) activeChannel.set(messageId, request);
+			const sources = {};
+			for (const request of requestsByMessageId.values()) for (const source of request.sources) sources[source] = (sources[source] || 0) + 1;
+			counters.renderBatches++;
+			const rendering = renderMessages(messageIds, {sources});
+			if (rendering && rendering.then) rendering.then(outcome => {
+				const normalizedOutcome = Object.assign({}, outcome || {});
+				const exhaustedIds = [];
+				releaseActiveRequests(channelId, messageIds);
+				for (const messageId of normalizedOutcome.retryIds || []) {
+					const request = requestsByMessageId.get(String(messageId)) || {attempt: 1, trackingKeys: new Set()};
+					if (request.attempt < MAX_TARGETED_REPAINT_ATTEMPTS) {
+						counters.retries++;
+						const trackingKeys = [...request.trackingKeys];
+						if (!trackingKeys.length) schedule(channelId, messageId, BUSY_RETRY_DELAY_MS, request.attempt + 1, null, "retry");
+						else for (const trackingKey of trackingKeys) schedule(channelId, messageId, BUSY_RETRY_DELAY_MS, request.attempt + 1, trackingKey, "retry");
+					}
+					else {
+						counters.exhausted++;
+						exhaustedIds.push(String(messageId));
+						removeQueuedRequest(channelId, messageId, request.attempt);
+					}
+				}
+				counters.confirmed += (normalizedOutcome.confirmedIds || []).length;
+				counters.deferred += (normalizedOutcome.deferredIds || []).length;
+				for (const messageId of [].concat(normalizedOutcome.confirmedIds || [], normalizedOutcome.deferredIds || [])) {
+					const request = requestsByMessageId.get(String(messageId));
+					if (request) removeQueuedRequest(channelId, messageId, request.attempt);
+				}
+				if (exhaustedIds.length) normalizedOutcome.exhaustedIds = exhaustedIds;
+				const trackingKeysByMessageId = {};
+				for (const [messageId, request] of requestsByMessageId) if (request.trackingKeys.size) trackingKeysByMessageId[messageId] = [...request.trackingKeys];
+				const report = {channelId, messageIds, outcome: normalizedOutcome};
+				if (Object.keys(trackingKeysByMessageId).length) report.trackingKeysByMessageId = trackingKeysByMessageId;
+				try {onRenderOutcome(report);}
+				catch (error) {}
+				if (queues.size) arm(LIVE_REPAINT_DELAY_MS);
+			}).catch(() => {
+				releaseActiveRequests(channelId, messageIds);
+				if (queues.size) arm(LIVE_REPAINT_DELAY_MS);
+			});
+		}
+	}
+
+	function schedule(channelId, messageId, delay = null, attempt = 1, trackingKey = null, source = null) {
+		if (!channelId || messageId == null) return;
+		counters.scheduled++;
+		const key = String(channelId);
+		if (!queues.has(key)) queues.set(key, new Map());
+		const requestsByMessageId = queues.get(key);
+		const messageKey = String(messageId);
+		const queued = requestsByMessageId.get(messageKey) || {attempt: 0, trackingKeys: new Set(), sources: new Set()};
+		const active = getActiveRequest(key, messageKey);
+		// Duplicate row events join the most advanced retry already queued. Moving the
+		// counter backwards here would turn a bounded retry into an endless loop.
+		queued.attempt = Math.max(queued.attempt, active && active.attempt || 0, Math.max(1, attempt || 1));
+		if (active) for (const activeTrackingKey of active.trackingKeys) queued.trackingKeys.add(activeTrackingKey);
+		if (trackingKey != null && String(trackingKey)) queued.trackingKeys.add(String(trackingKey));
+		queued.sources.add(source ? String(source) : "live");
+		requestsByMessageId.set(messageKey, queued);
+		if (!active) arm(delay == null ? LIVE_REPAINT_DELAY_MS : delay);
+	}
+
+	// The legacy full-list repaint, kept for the paths that still own their display
+	// through the old maps (manual translation, reply previews, embeds, titles). It
+	// obeys the same two rules as the targeted flush, and additionally remembers a
+	// repaint deferred by an open settings surface so closing the panel can flush it.
+	let fullRepaintTimer = null;
+	let settingsRetryTimer = null;
+	let textAreaRetryTimer = null;
+	let deferredFullRepaintPending = false;
+
+	function scheduleFullRepaint(options = {}) {
+		const config = typeof options == "boolean" ? {batched: options} : Object.assign({batched: false, allowWhileSettings: false, allowWhileTyping: false}, options);
+		if (!config.allowWhileSettings && isSettingsSurfaceOpen()) {
+			deferredFullRepaintPending = true;
+			if (!settingsRetryTimer) settingsRetryTimer = scheduleTimer(() => {
+				settingsRetryTimer = null;
+				scheduleFullRepaint({batched: true});
+			}, SETTINGS_RETRY_DELAY_MS);
+			return;
+		}
+		if (!config.allowWhileTyping && isTextAreaFocused()) {
+			if (textAreaRetryTimer) cancelTimer(textAreaRetryTimer);
+			textAreaRetryTimer = scheduleTimer(() => {
+				textAreaRetryTimer = null;
+				scheduleFullRepaint(Object.assign({}, config, {batched: true}));
+			}, BUSY_RETRY_DELAY_MS);
+			return;
+		}
+		if (textAreaRetryTimer) {
+			cancelTimer(textAreaRetryTimer);
+			textAreaRetryTimer = null;
+		}
+		deferredFullRepaintPending = false;
+		if (!config.batched) {
+			if (fullRepaintTimer) cancelTimer(fullRepaintTimer);
+			fullRepaintTimer = null;
+			fullRepaints++;
+			repaintAll();
+			return;
+		}
+		if (fullRepaintTimer) return;
+		const delay = isViewingHistory() ? CALM_REPAINT_DELAY_MS : LIVE_REPAINT_DELAY_MS;
+		fullRepaintTimer = scheduleTimer(() => {
+			fullRepaintTimer = null;
+			fullRepaints++;
+			repaintAll();
+		}, delay);
+	}
+
+	function countQueuedMessages(byChannel) {
+		let total = 0;
+		for (const channel of byChannel.values()) total += channel.size;
+		return total;
+	}
+
+	return Object.freeze({
+		scheduleFullRepaint,
+		getDiagnostics: () => ({
+			fullRepaints,
+			scheduled: counters.scheduled,
+			flushes: counters.flushes,
+			renderBatches: counters.renderBatches,
+			confirmed: counters.confirmed,
+			deferred: counters.deferred,
+			retries: counters.retries,
+			exhausted: counters.exhausted,
+			// Resource liveness for leak audits: every armed timer and retained map entry
+			// must read zero after stop-cleanup.
+			resources: {
+				coalesceTimerArmed: !!timer,
+				queuedChannels: queues.size,
+				queuedMessages: countQueuedMessages(queues),
+				activeChannels: activeRequests.size,
+				activeMessages: countQueuedMessages(activeRequests),
+				fullRepaintTimerArmed: !!fullRepaintTimer,
+				settingsRetryTimerArmed: !!settingsRetryTimer,
+				textAreaRetryTimerArmed: !!textAreaRetryTimer,
+				deferredFullRepaintPending
+			}
+		}),
+		hasDeferredFullRepaint: () => deferredFullRepaintPending,
+		flushDeferredFullRepaint() {
+			if (!deferredFullRepaintPending) return;
+			deferredFullRepaintPending = false;
+			scheduleFullRepaint({batched: true});
+		},
+		cancelFullRepaintTimers() {
+			for (const timer of [fullRepaintTimer, settingsRetryTimer, textAreaRetryTimer]) if (timer) cancelTimer(timer);
+			fullRepaintTimer = null;
+			settingsRetryTimer = null;
+			textAreaRetryTimer = null;
+			deferredFullRepaintPending = false;
+		},
+		schedule,
+		flush,
+		clear() {
+			if (timer) cancelTimer(timer);
+			timer = null;
+			queues.clear();
+			activeRequests.clear();
+		}
+	});
+}
+
+module.exports = {
+	SETTINGS_RETRY_DELAY_MS,
+	MAX_TARGETED_REPAINT_ATTEMPTS,
+	LIVE_REPAINT_DELAY_MS,
+	CALM_REPAINT_DELAY_MS,
+	BUSY_RETRY_DELAY_MS,
+	createDisplayRepaintScheduler
+};

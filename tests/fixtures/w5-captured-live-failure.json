@@ -1,0 +1,51 @@
+{
+  "provenance": {
+    "source": "queue-comparison-frozen-run.json",
+    "sourceSha256": "c4ff6c15e8cf7db59ae53aae0eac43734a26b29aeba11f56450da63a08d03c31",
+    "requestSequence": 12,
+    "responseSha256": "d19793b67662a4b8a2e962de1e35bde988cbb72af3f43db967d2251188f2158e",
+    "dataScope": "Already synthetic messages; no credentials, account IDs or endpoint configuration copied."
+  },
+  "sources": [
+    {
+      "id": "live-status",
+      "content": "The package passed every check. We can publish it tomorrow."
+    },
+    {
+      "id": "live-url",
+      "content": "Please read the update at https://example.com/alpha before Friday."
+    },
+    {
+      "id": "live-plain",
+      "content": "The server is ready. You can send the next batch now."
+    },
+    {
+      "id": "live-bold",
+      "content": "Please **check the schedule** before the meeting tomorrow."
+    },
+    {
+      "id": "live-spoiler",
+      "content": "||The final train leaves at nine tonight.||"
+    },
+    {
+      "id": "live-command",
+      "content": "Run `npm test` before you publish the new version."
+    }
+  ],
+  "wire": "[[1,\"⟪1⟫The package passed every check. We can publish it tomorrow.\"],[2,\"⟪1⟫Please read the update at ⟦0⟧ before Friday.\"],[3,\"⟪1⟫The server is ready. You can send the next batch now.\"],[4,\"⟪1⟫Please\\n⟪2⟫check the schedule\\n⟪3⟫before the meeting tomorrow.\"],[5,\"⟪1⟫The final train leaves at nine tonight.\"],[6,\"⟪1⟫Run ⟦C0⟧ before you publish the new version.\"]]",
+  "response": "[[1,\"⟪1⟫该软件包已通过每项检查。我们明天可以发布它。\"],2,[2,\"⟪1⟫请在周五之前阅读 ⟦0⟧ 处的更新。\"],3,[3,\"⟪1⟫服务器已准备就绪。你现在可以发送下一批了。\"],4,[4,\"⟪1⟫请在\\n⟪2⟫明天开会前\\n⟪3⟫核对日程表。\"],5,[5,\"⟪1⟫末班火车将在今晚九点开出。\"],6,[6,\"⟪1⟫发布新版本之前，请先运行 ⟦C0⟧。\"]]",
+  "minimalRoot": {
+    "sources": [
+      "Please review this text.",
+      "Please review this text."
+    ],
+    "response": "[[1,\"⟪1⟫请审阅这段文字。\"],2,[2,\"⟪1⟫请审阅这段文字。\"]]"
+  },
+  "bold": {
+    "source": "Please **check the schedule** before the meeting tomorrow.",
+    "response": "⟪1⟫请在\n⟪2⟫明天开会前\n⟪3⟫核对日程表。",
+    "observedTranslation": "请在 **明天开会前** 核对日程表。",
+    "correctedRangeResponse": "⟪1⟫请\n⟪2⟫核对日程表\n⟪3⟫，在明天开会前。",
+    "expectedCorrectedTranslation": "请 **核对日程表** ，在明天开会前。"
+  }
+}

@@ -1,0 +1,155 @@
+# 架构说明
+
+[English](architecture.md)
+
+本文只维护当前模块边界与运行时组合。用户行为见 [功能与行为说明](product.md)，配置与迁移见 [设置说明与配置迁移](settings.md)，传输契约见 [翻译服务接口约定](providers.md)，未关闭观察项只在 [已知限制与待验证事项](recovery-plan.md) 维护。
+
+## 总览
+
+仓库从模块化源码生成单份可读的 BetterDiscord 插件。门面负责生命周期入口，由相应模块承接宿主接线。[组合根决策](../.agents/notes/implemented/architecture/2026-09-17-composition-root-boundary.md) 维护提取理由和约束；构建与客户端身份按[调试操作指南](cookbook/debugging.zh-CN.md)分别核验。
+
+翻译显示采用频道级 Store 更新、独立的正文/回复版本和有界重试。宿主生命周期刷新保持独立。本文说明当前归属，不代表某台客户端已完成验收。
+
+## 分发契约
+
+BetterDiscord 用户只安装一个文件：
+
+```text
+DiscordAITranslator.plugin.js
+```
+
+生成文件禁止手工修改，其来源链为：
+
+```text
+src/plugin/index.js
+        -> scripts/build-plugin.mjs
+        -> DiscordAITranslator.plugin.js
+```
+
+构建使用 esbuild CommonJS 模式和 ES2020 目标，保留 BetterDiscord 元数据，移除发布版禁用的探针，并嵌入确定性构建 ID。`package.json`、`package-lock.json`、`src/plugin/metadata.json`、README、CHANGELOG 和生成文件头的版本必须一致。
+
+## 职责归属
+
+| 关注点 | 当前所有者 | 契约 |
+| --- | --- | --- |
+| 收到消息状态 | `src/display/message-state-store.js` | 不可变原文、请求身份、自动/手动来源、抑制状态、回复预览、显示修订和恢复档案 |
+| 显示事务 | `src/display/translation-display-controller.js`、`src/display/display-runtime.js`、`src/display/display-runtime-wiring.js` | 消息 ID 与回复预览宿主 ID 的单一频道级提交边界；一个适配器拥有 Flux/Store、浏览器、计时器、胶囊和视口端口 |
+| 单行重绘和生命周期边界 | `src/display/flux-row-repaint.js`、`src/display/discord-render-adapter.js`、`src/display/display-runtime.js`、`src/display/repaint-scheduler.js` | 先走 Flux 单行合并；正文和回复宿主分别确认 DOM 修订；频道/供应商变化只脉冲一次带锚点的 Store 投影；插件生命周期单独处理 |
+| 历史采集和封批 | `src/received/historical-source-runtime.js`、`src/orchestrator/historical-snapshot-cadence.js`、`src/orchestrator/historical-snapshot-cadence-wiring.js`、`src/orchestrator/historical-translation-job.js` | 不可变频道任务、500ms 安静窗口、等待任务吸收、已校验块提前原子提交与一次任务终结；一个适配器拥有 cadence 宿主端口 |
+| 实时调度 | `src/orchestrator/live-translation-queue.js`、`src/orchestrator/live-translation-queue-wiring.js` | 高优先级频道任务，不因历史采集而人为延迟；一个适配器拥有插件策略/显示/历史/会话端口和托管重试计时器 |
+| 消息删除生命周期 | `src/lifecycle/message-deletion-lifecycle.js`、`src/lifecycle/message-deletion-lifecycle-wiring.js` | 直接 Store 订阅；频道级实时/历史/缓存/显示清理；一个适配器拥有清理分发和 dispatcher 解析 |
+| 翻译策略和调用 | `src/orchestrator/translation-pipeline.js`、`src/providers/provider-client.js`、`src/providers/provider-client-wiring.js` | 文本保护、语言策略、主备供应商、完整性、重试和错误提示；一个适配器拥有插件/BDFDB 传输端口 |
+| 视口保护 | `src/viewport/message-viewport-store.js`、`src/viewport/message-viewport-wiring.js` | 阅读行锚点、用户意图否决、底部搁浅救援、原始偏移回退和稳定检查；一个适配器拥有浏览器/BDFDB 宿主端口 |
+| 已加载状态 | `src/status/loaded-translation-status-store.js`、`src/ui/loaded-status-capsule.js`、`src/ui/loaded-status-capsule-wiring.js`、`src/ui/loaded-status-position.js` | 频道累计计数、胶囊生命周期、重试入口和原生提示感知定位；一个适配器拥有 Store、浏览器、定位和插件回调端口 |
+| 转发内容投影 | `src/display/translation-display-logic.js`、`src/received/received-translation-runtime.js` | 快照原文、显示、回声判断、单份原文组合和恢复 |
+| 输入框与菜单 | `src/ui/composer-wiring.js`、`src/ui/context-menu-wiring.js` | 频道发送拦截、输入框图标和手动操作 |
+| 设置结构与持久化接线 | `src/settings/plugin-defaults.js`、`src/settings/settings-store.js`、`src/settings/settings-store-wiring.js`、`src/ui/settings-panel.js` | 全局和频道设置只有一套结构归属；一个 BDFDB 适配器拥有既有持久化键 |
+| 翻译缓存与持久化接线 | `src/cache/translation-cache-store.js`、`src/cache/translation-cache-wiring.js` | 有界付费结果/付费跳过缓存；一个适配器拥有 BDFDB 键、托管防抖计时器和调用方策略/显示端口 |
+| 旧插件门面与组合职责 | `src/legacy/runtime.js` | 插件生命周期、BDFDB 补丁外壳、公共兼容门面和 紧凑延迟单例边界；新的宿主依赖分发必须进入所属 wiring 模块 |
+
+## 架构不变量
+
+1. 频道状态、显示记录、队列、回复宿主、视口、状态计数和清理都必须频道隔离。
+2. 供应商凭证、端点、模型、全局主备默认值和检测策略保持全局归属。
+3. 输入框翻译图标只控制当前频道自动翻译。
+4. 翻译状态提交和可见渲染确认是两个不同操作。
+5. 原始内容不可变；显示层只能操作分离副本或保留原型的副本，不得原地修改 Discord Store 对象。
+6. 一次用户操作不得产生并行状态表、重绘所有者或第二套原文显示分支。
+7. 历史结果按批次提交；累计计数不等于逐消息刷新。
+8. 用户滚动意图优先于延迟恢复。
+9. 缺失、乱序、重复、语言错误或占位符损坏的供应商结果必须修复或报告，不能静默显示。
+10. 调试证据不得进入发布包和仓库历史。
+
+## 收到消息翻译流程
+
+### 实时与手动消息
+
+1. 捕获不可变原文和频道世代。
+2. 执行资格、语言、保护和缓存策略。
+3. 在 `MessageStateStore` 中登记请求身份。
+4. 调用频道有效主供应商，并在允许时调用全局备用供应商。
+5. 验证终态结果并提交翻译状态。
+6. 启动一个按 ID 限定的显示事务。
+7. 尝试 Flux 单行重绘并确认精确正文或回复宿主 DOM 修订；未解决表面继续有界定向重试，不重挂载输入框。
+
+手动翻译使用同一状态和显示事务链。手动取消翻译会恢复归档原文，并抑制该消息立即被缓存的自动结果重新覆盖。
+
+### 历史消息
+
+已挂载和缓存快照在不模拟滚动的前提下采集。用户上滚产生的快照先等待 500ms 安静窗口，再形成不可变频道任务；兼容的等待任务在供应商请求开始前合并。有效结果一起进入状态存储，并由一个显示事务整体呈现。
+
+`new_only`（仅翻译新消息）不创建历史任务。频道会话初始化时，`received-translation-runtime.js` 会在遍历消息流之前，从频道模型的 `lastMessageId`/`last_message_id` 冻结实时边界。首次跳过按消息判断：小于等于边界的是基线，大于边界的仍是真实时消息；若空流和频道模型都没有边界，则保持未初始化，等待真实基线。原文采集会创建 `idle` 显示记录，但只有此前确实为 `translated` 的视图才能产生 `messageChanged`，不能仅因记录存在就绕过边界。这些规则共同阻止延迟虚拟化历史进入实时队列。胶囊仍只属于 `loaded_messages`；在 `new_only` 中补显示胶囊只会掩盖分类错误。
+
+回复预览状态可以立即提交，但宿主行重绘按频道汇总成 300ms 波次，并服从用户滚动门。实时任务始终优先于下一次历史请求。
+
+### 转发消息
+
+转发消息父级 `content` 可能为空，实际可见正文通常位于 `messageSnapshots[0].message.content`。原文读取、供应商输入、回声检查、显示、原文组合、取消和恢复都使用同一组快照感知函数。
+
+快照以保留原型和转发引用字段的方式克隆。关闭收到消息原文显示时，只显示一份译文；开启时，显示译文和恰好一份引用/剧透形式原文。Discord 规范化可能删除未知属性，因此不使用自定义标记属性判断身份。
+
+## 显示事务
+
+显示事务包含频道 ID、译文消息 ID、回复宿主 ID、期望修订、触发通道和该事务自己的视口意图。控制器先提交状态，再绘制，并记录每行是已挂载确认、虚拟化就绪、跳过、失败还是未解决。
+
+对于普通已挂载消息，`flux-row-repaint.js` 通过 Discord Store dispatcher 发送按值无变化的 `MESSAGE_UPDATE` 合并。当前客户端证据确认消息列表投影渲染一次且 Composer/活动输入/目标行/Scroller 身份保持；是否可见仍以精确 DOM 修订确认为准。已经携带目标修订的消息不需要刷新。
+
+`discord-render-adapter.js` 会把未确认普通行交回有界调度器，把未确认回复宿主交回 300ms 波次，最多尝试三次。回复宿主命令使用 Store 自有表面 revision 和 DOM 标记。当前客户端函数组件只暴露没有类更新器的 `{props}` 合成对象，因此实例注册表只是机会性路径；回复宿主固定走 Store dispatch，同步清空/重挂载实现继续保持删除。
+
+## 视口归属
+
+`MessageViewportStore` 是翻译相关滚动恢复的唯一写入者。
+
+- 锚点选择视口中心附近的可见消息，而不是最上方消息。
+- 用户正在滚动时，历史译文暂缓显示。
+- 新的滚轮、触摸或拖动会否决所有延迟修正。
+- 如果整区回退把正在查看历史的用户搁在最新消息，可在立即恢复阶段救回原锚点。
+- 虚拟化导致锚点元素缺失时，使用捕获的原始偏移回退。
+- 在 180ms 和 600ms 检查布局稳定，但永远不覆盖更新的用户意图。
+
+译文增加高度后，滚动条滑块大小或位置仍可能变化。系统保证的是阅读内容位置，而不是滑块完全静止。
+
+当前频道正在阅读历史时若有实时消息到达，Live Queue 会在 Discord 提交新增行之前启动视口保护。Viewport Store 优先捕获当前阅读线；若宿主已经跳到底部，则回用最近一次用户历史滚动快照，并通过既有绘制恢复梯恢复位置。其后发生的新用户手势仍会否决该恢复。
+
+## 已加载翻译状态
+
+胶囊为每个频道显示一套累计比例。唯一已翻译消息 ID 在消息状态存储提交点登记，胶囊 DOM 只在批次或状态心跳时更新。后续批次扩展同一比例，例如 `13/13 -> 13/33 -> 33/33`。
+
+累计身份包含当前有效的接收翻译配置。配置签名变化时，只重置该频道的已显示 ID、已见消息、失败重试快照、排队任务和初始化边界，再按新配置收集；重复读取相同签名不会重置，因此普通渲染不会让累计比例归零。
+
+配置容量和检查过的消息不能作为分母；已解决跳过项退出待处理数量；旧批次报告被拒绝；失败和重试继续使用累计口径。切换频道会隐藏不相关胶囊，但不会清除该频道累计状态。
+
+定位器只接受输入框附近最小、有效的慢速/冷却提示。存在提示时，胶囊位于提示上方 8px 并右对齐；不存在提示时，位于输入框上方 8px。消息正文误匹配、零尺寸矩形、失效节点和输入框短暂卸载都不能把胶囊移动到无关位置。
+
+## 供应商、持久化与设置
+
+传输与错误合并由[供应商契约](providers.md)维护；输出语言兼容与移除设置的处理由[设置迁移](settings.md#migration-rule)维护。
+
+持久化职责分离如下：
+
+```text
+settings              全局行为和显示偏好
+channelSettings       频道开关、语言和供应商覆盖
+providerCredentials   API 密钥、端点和模型
+translationCache      有界成功译文及付费跳过缓存
+```
+
+运行时队列、显示状态、视口、计数器、探针和世代只存在于内存。持久化设置的语义见 [设置说明与配置迁移](settings.md)。
+
+## 关闭、停止、编辑与清理
+
+关闭一个频道时，系统推进频道世代、取消待处理自动任务、恢复该频道的自动和手动消息/预览/embed/标题，并启动一个频道级显示事务。之后仍可手动翻译；旧世代晚到结果不能重新绘制频道。
+
+插件停止前对全部频道执行同样恢复，再释放补丁和受管任务；缓存所有者会先提交一次仍在防抖窗口内的待保存内容，运行时不直接操作其定时器或缓存对象。消息编辑会捕获新原文签名并使旧请求/显示结果失效。频道会话裁剪只保留活跃请求、未确认恢复、手动抑制或原文档案仍需要的状态。
+
+接收翻译配置变化而旧译文仍绘制在消息上时，`MessageStateStore` 只把被替换的译文保留为恢复证明。消息流与内容渲染都会在再次捕获前恢复不可变原文；这份证明不会作为活动译文暴露。这样可防止旧目标语言文本被当成新原文并反复进入历史任务。
+
+## 诊断与隐私
+
+调试构建可启用有界状态日志，以及消息更新、转发快照、消息行所有者和定位证据的一次性探针。发布构建不包含探针激活和调试日志实现。
+
+原始证据、供应商配置、API 密钥、账号/频道标识、已安装插件备份和调试包都保存在 Git 之外。仓库夹具使用合成 ID、保留示例域名和不形似真实令牌的描述性凭证占位符。
+
+## 验证与变更
+
+日常命令和迭代流程见 [开发与贡献指南](../CONTRIBUTING.md)。Discord 显示层改动除自动化检查外还需要客户端证据。[组合根决策](../.agents/notes/implemented/architecture/2026-09-17-composition-root-boundary.md)维护提取约束；[恢复边界](recovery-plan.md)集中维护生命周期、渲染、兼容性和模块体积方面的未关闭观察项。架构变更时同步更新中英文。

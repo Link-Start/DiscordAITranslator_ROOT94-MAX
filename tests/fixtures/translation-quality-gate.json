@@ -1,0 +1,343 @@
+{
+  "schemaVersion": "translation-quality-fixtures-v1",
+  "provenance": "AI-authored fixed synthetic source/response/reference pairs, independent of runtime output; no independent human review is claimed. Deliberate fault injections are not a sample of production traffic.",
+  "targetLanguageId": "zh-CN",
+  "engineAdapter": "oaicompat",
+  "fixtures": [
+    {
+      "id": "short-correct",
+      "source": "I am hungry",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "I am hungry"
+      ],
+      "references": [
+        "我饿了"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "accepted",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "I am hungry": "我饿了"
+        }
+      }
+    },
+    {
+      "id": "short-echo",
+      "source": "I am hungry",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "I am hungry"
+      ],
+      "references": [
+        "我饿了"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "hard-failure",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "I am hungry": "I am hungry"
+        }
+      },
+      "injection": "unchanged ordinary sentence is not a proper name"
+    },
+    {
+      "id": "short-wrong-meaning",
+      "source": "I am hungry",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "I am hungry"
+      ],
+      "references": [
+        "我饿了"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "accepted",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "I am hungry": "香蕉"
+        }
+      },
+      "injection": "target-script answer has an unrelated meaning"
+    },
+    {
+      "id": "mixed-complete",
+      "source": "请帮忙 I am hungry",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "I am hungry"
+      ],
+      "references": [
+        "请帮忙 我饿了"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "accepted",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "I am hungry": "我饿了"
+        }
+      }
+    },
+    {
+      "id": "mixed-residual",
+      "source": "请帮忙 I am hungry",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "I am hungry"
+      ],
+      "references": [
+        "请帮忙 我饿了"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "hard-failure",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "I am hungry": "I am hungry"
+        }
+      },
+      "residualSourceFragments": [
+        "I am hungry"
+      ],
+      "injection": "target-language prefix does not excuse untranslated English clause"
+    },
+    {
+      "id": "explicit-proper-name",
+      "source": "Atomic Gains",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "Atomic Gains"
+      ],
+      "references": [],
+      "allowedKeeps": [
+        "Atomic Gains"
+      ],
+      "expectedDisposition": "accepted",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "Atomic Gains": "Atomic Gains"
+        }
+      },
+      "keepRationale": "This fixture explicitly defines Atomic Gains as an unchanged product name; word count grants no permission."
+    },
+    {
+      "id": "reply-correct",
+      "source": "Please bring the blue notebook.",
+      "fieldPath": "reply.content",
+      "expectedWireTexts": [
+        "Please bring the blue notebook."
+      ],
+      "references": [
+        "请带上蓝色笔记本。"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "accepted",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "Please bring the blue notebook.": "请带上蓝色笔记本。"
+        }
+      }
+    },
+    {
+      "id": "embed-complete",
+      "source": "Meeting Update\n__________________ __________________ __________________\nWeekly Report\nPlease review all the changes before tomorrow.\nSee you tomorrow",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "Meeting Update",
+        "Weekly Report",
+        "Please review all the changes before tomorrow.",
+        "See you tomorrow"
+      ],
+      "references": [
+        "会议更新\n__________________ __________________ __________________\n每周报告\n请在明天之前查看所有改动。\n明天见"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "accepted",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "Meeting Update": "会议更新",
+          "Weekly Report": "每周报告",
+          "Please review all the changes before tomorrow.": "请在明天之前查看所有改动。",
+          "See you tomorrow": "明天见"
+        }
+      },
+      "fieldCoverage": [
+        "body",
+        "embed.title",
+        "embed.description",
+        "embed.footer"
+      ]
+    },
+    {
+      "id": "embed-footer-residual",
+      "source": "Meeting Update\n__________________ __________________ __________________\nWeekly Report\nPlease review all the changes before tomorrow.\nSee you tomorrow",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "Meeting Update",
+        "Weekly Report",
+        "Please review all the changes before tomorrow.",
+        "See you tomorrow"
+      ],
+      "references": [
+        "会议更新\n__________________ __________________ __________________\n每周报告\n请在明天之前查看所有改动。\n明天见"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "hard-failure",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "Meeting Update": "会议更新",
+          "Weekly Report": "每周报告",
+          "Please review all the changes before tomorrow.": "请在明天之前查看所有改动。",
+          "See you tomorrow": "See you tomorrow"
+        }
+      },
+      "residualSourceFragments": [
+        "See you tomorrow"
+      ],
+      "fieldCoverage": [
+        "body",
+        "embed.title",
+        "embed.description",
+        "embed.footer"
+      ],
+      "injection": "ordinary footer phrase remains untranslated"
+    },
+    {
+      "id": "code-url-preserved",
+      "source": "```js\nconst ready = true;\n```\nhttps://example.invalid/manual",
+      "fieldPath": "body",
+      "expectedWireTexts": [],
+      "references": [],
+      "allowedKeeps": [
+        "```js\nconst ready = true;\n```\nhttps://example.invalid/manual"
+      ],
+      "expectedDisposition": "accepted",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {}
+      },
+      "keepRationale": "Executable code and URL bytes are explicitly required to remain identical."
+    },
+    {
+      "id": "inline-protection-correct",
+      "source": "Please check `ready` before starting.",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "Please check ⟦C0⟧ before starting."
+      ],
+      "references": [
+        "请在开始之前检查 `ready`。"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "accepted",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "Please check ⟦C0⟧ before starting.": "请在开始之前检查 ⟦C0⟧。"
+        }
+      }
+    },
+    {
+      "id": "hard-missing",
+      "source": "Please bring the blue notebook.",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "Please bring the blue notebook."
+      ],
+      "references": [
+        "请带上蓝色笔记本。"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "hard-failure",
+      "answer": {
+        "kind": "missing"
+      },
+      "injection": "empty response segment list"
+    },
+    {
+      "id": "hard-duplicate",
+      "source": "Please bring the blue notebook.",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "Please bring the blue notebook."
+      ],
+      "references": [
+        "请带上蓝色笔记本。"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "hard-failure",
+      "answer": {
+        "kind": "duplicate",
+        "translationsBySource": {
+          "Please bring the blue notebook.": "请带上蓝色笔记本。"
+        }
+      },
+      "injection": "duplicate exact segment ID"
+    },
+    {
+      "id": "hard-placeholder",
+      "source": "Please check `ready` before starting.",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "Please check ⟦C0⟧ before starting."
+      ],
+      "references": [
+        "请在开始之前检查 `ready`。"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "hard-failure",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "Please check ⟦C0⟧ before starting.": "请在开始之前检查。"
+        }
+      },
+      "injection": "protected inline token is absent"
+    },
+    {
+      "id": "hard-malformed",
+      "source": "Please bring the blue notebook.",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "Please bring the blue notebook."
+      ],
+      "references": [
+        "请带上蓝色笔记本。"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "hard-failure",
+      "answer": {
+        "kind": "malformed"
+      },
+      "injection": "response is not parseable segment JSON"
+    },
+    {
+      "id": "long-prose-echo-after-repair",
+      "source": "please bring the blue notebook to the meeting tomorrow",
+      "fieldPath": "body",
+      "expectedWireTexts": [
+        "please bring the blue notebook to the meeting tomorrow"
+      ],
+      "references": [
+        "请明天带上蓝色笔记本参加会议"
+      ],
+      "allowedKeeps": [],
+      "expectedDisposition": "hard-failure",
+      "answer": {
+        "kind": "translations",
+        "translationsBySource": {
+          "please bring the blue notebook to the meeting tomorrow": "please bring the blue notebook to the meeting tomorrow"
+        }
+      },
+      "injection": "ordinary long sentence remains unchanged after repair"
+    }
+  ]
+}

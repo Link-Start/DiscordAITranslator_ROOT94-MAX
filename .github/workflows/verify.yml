@@ -1,0 +1,42 @@
+name: verify
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+      - name: Select pre-change Agent Notes baseline
+        shell: bash
+        env:
+          EVENT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$EVENT_BASE"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$(git rev-list --max-parents=0 HEAD)"
+          fi
+          [[ "$base" =~ ^[0-9a-f]{40}$ ]]
+          git rev-parse --verify "$base^{commit}" >/dev/null
+          printf 'AGENT_NOTE_ARCHIVE_BASE_REF=%s\n' "$base" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: npm ci
+      - name: Publication, Agent Notes, deterministic build, syntax, and tests
+        run: npm run verify
+      - name: Artifact identity
+        run: |
+          grep -m1 -oE "@version [0-9.]+" DiscordAITranslator.plugin.js
+          grep -m1 -oE "@buildId [0-9a-f]+" DiscordAITranslator.plugin.js
+          sha256sum DiscordAITranslator.plugin.js
